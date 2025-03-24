@@ -1,6 +1,6 @@
 streamlit>=1.10.0
-pandas
-numpy
+pandas~=2.2.3
+numpy~=2.2.3
 mcp-agent>=0.0.8
 requests
 aiohttp
@@ -23,7 +23,7 @@ reportlab>=4.0.0  # 직접 PDF 생성 (대체 방식)
 mdpdf>=0.0.9  # 간편한 마크다운 변환 (대체 방식)
 
 # 주식 데이터 관련
-pykrx
+pykrx~=1.0.48
 
 # JSON 처리
 ujson>=5.8.0
@@ -31,8 +31,12 @@ ujson>=5.8.0
 # 이미지 처리 (PDF 변환시 필요)
 Pillow>=10.0.0
 
-holidays
+holidays~=0.68
 
 python-telegram-bot[job-queue]>=20.0
 
 kospi_kosdaq_stock_server>=0.1.22
+DateTime~=5.5
+matplotlib~=3.10.1
+seaborn~=0.13.2
+mplfinance~=0.12.10b0
