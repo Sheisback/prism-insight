@@ -278,6 +278,43 @@ formatCurrency(100, "US")    // "$100.00"
 | sector 컬럼 누락 | stock_holdings, trading_history에 sector 추가 |
 | AsyncUSTradingContext 임포트 | 경로 수정 |
 | trading 모듈 충돌 | sys.path 순서 조정으로 해결 |
+| **prism-us 모듈 충돌** | **importlib 직접 로딩 패턴으로 해결** |
+
+#### 6.2.1 prism-us sys.path 모듈 충돌 해결 (NEW)
+
+`prism-us/cores/` 디렉토리가 메인 프로젝트의 `cores/` 모듈을 shadowing하여 `telegram_translator_agent`, `trading_journal_agent` 등을 import할 수 없는 문제를 해결했습니다.
+
+**문제 원인:**
+```python
+# sys.path 순서 문제
+sys.path[0] = '/prism-us'      # 먼저 검색 (prism-us/cores/ 찾음)
+sys.path[1] = '/prism-insight'  # 나중 검색 (main/cores/ 찾음)
+```
+
+**해결 방법: importlib 직접 로딩**
+```python
+# prism-us/us_stock_analysis_orchestrator.py
+def _import_from_main_cores(module_name: str, relative_path: str):
+    """Main project cores/에서 모듈 직접 로드 (namespace collision 방지)"""
+    import importlib.util
+    file_path = PROJECT_ROOT / relative_path
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+# Pre-load at module level
+_translator_module = _import_from_main_cores(
+    "telegram_translator_agent",
+    "cores/agents/telegram_translator_agent.py"
+)
+translate_telegram_message = _translator_module.translate_telegram_message
+```
+
+**수정된 파일:**
+- `prism-us/us_stock_analysis_orchestrator.py` (3개 import 수정)
+- `prism-us/us_stock_tracking_agent.py` (2개 import 수정)
+- `prism-us/tracking/journal.py` (1개 import 수정)
 
 #### 6.3 MCP 서버 관련
 

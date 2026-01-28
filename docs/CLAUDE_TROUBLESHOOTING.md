@@ -175,7 +175,60 @@ cleaned_text = clean_markdown(raw_output)
 
 ---
 
-### Issue 8: Out of Memory During Analysis
+### Issue 8: prism-us Module Import Collision
+
+**Symptoms**:
+```
+ModuleNotFoundError: No module named 'cores.agents.telegram_translator_agent'
+```
+or
+```
+ImportError: cannot import name 'translate_telegram_message' from 'cores.agents.telegram_translator_agent'
+```
+
+**Cause**: `prism-us/cores/` directory shadows the main project's `cores/` directory in `sys.path`. When Python searches for `cores.agents.telegram_translator_agent`, it finds `prism-us/cores/agents/` first (which doesn't have the file) instead of the main project's `cores/agents/`.
+
+**Solution**: Use `importlib` direct loading pattern (already implemented in v2.1.0):
+
+```python
+# Helper function to import from main project
+def _import_from_main_cores(module_name: str, relative_path: str):
+    import importlib.util
+    file_path = PROJECT_ROOT / relative_path
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+# Usage
+_translator_module = _import_from_main_cores(
+    "telegram_translator_agent",
+    "cores/agents/telegram_translator_agent.py"
+)
+translate_telegram_message = _translator_module.translate_telegram_message
+```
+
+**Affected Files** (fixed in v2.1.0):
+- `prism-us/us_stock_analysis_orchestrator.py`
+- `prism-us/us_stock_tracking_agent.py`
+- `prism-us/tracking/journal.py`
+
+**Verification**:
+```bash
+python -c "
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path('.').resolve()))
+sys.path.insert(0, str(Path('./prism-us').resolve()))
+
+from us_stock_analysis_orchestrator import translate_telegram_message
+print('Import successful:', translate_telegram_message is not None)
+"
+```
+
+---
+
+### Issue 9: Out of Memory During Analysis
 
 **Symptoms**: Process killed during large batch analysis
 
