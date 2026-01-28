@@ -269,7 +269,8 @@ class UserMemoryManager:
         self,
         user_id: int,
         ticker: Optional[str] = None,
-        max_tokens: int = 2000
+        max_tokens: int = 4000,
+        user_message: Optional[str] = None
     ) -> str:
         """
         LLM에 전달할 기억 컨텍스트 빌드
@@ -277,31 +278,34 @@ class UserMemoryManager:
         Args:
             user_id: 사용자 ID
             ticker: 종목 코드/티커 (특정 종목에 대한 기억 우선)
-            max_tokens: 최대 토큰 수
+            max_tokens: 최대 토큰 수 (기본 4000)
+            user_message: 현재 사용자 메시지 (티커 추출용)
 
         Returns:
             str: 포맷팅된 기억 컨텍스트
         """
         parts = []
         tokens = 0
+        loaded_tickers = set()  # 이미 로드한 티커 추적
 
         # 토큰 추정 함수 (한글 기준 대략적 추정)
         def estimate_tokens(text: str) -> int:
             return len(text) // 2  # 한글은 대략 2글자당 1토큰
 
-        # 우선순위 1: 해당 종목 저널 (최대 800 토큰)
+        # 우선순위 1: 해당 종목 저널 (최대 1200 토큰)
         if ticker:
-            journals = self.get_journals(user_id, ticker=ticker, limit=5)
+            journals = self.get_journals(user_id, ticker=ticker, limit=10)
             if journals:
                 journal_text = self._format_journals(journals)
                 journal_tokens = estimate_tokens(journal_text)
-                if journal_tokens < 800:
+                if journal_tokens < 1200:
                     parts.append(f"📝 {ticker} 관련 기록:\n{journal_text}")
                     tokens += journal_tokens
+                    loaded_tickers.add(ticker)
 
-        # 우선순위 2: 해당 종목 과거 평가 (최대 500 토큰)
-        if ticker and tokens < max_tokens - 500:
-            evals = self.get_memories(user_id, self.MEMORY_EVALUATION, ticker=ticker, limit=3)
+        # 우선순위 2: 해당 종목 과거 평가 (최대 800 토큰)
+        if ticker and tokens < max_tokens - 800:
+            evals = self.get_memories(user_id, self.MEMORY_EVALUATION, ticker=ticker, limit=5)
             if evals:
                 eval_text = self._format_evaluations(evals)
                 eval_tokens = estimate_tokens(eval_text)
@@ -309,18 +313,111 @@ class UserMemoryManager:
                     parts.append(f"📊 과거 평가:\n{eval_text}")
                     tokens += eval_tokens
 
-        # 우선순위 3: 최근 일반 저널 (남은 토큰)
-        if tokens < max_tokens - 300:
-            recent = self.get_journals(user_id, limit=3)
+        # 우선순위 3: 현재 메시지에서 언급된 종목 기억 로드
+        if user_message and tokens < max_tokens - 1000:
+            mentioned_tickers = self._extract_tickers_from_text(user_message, user_id)
+            for mentioned_ticker in mentioned_tickers[:3]:  # 최대 3개 종목
+                if mentioned_ticker in loaded_tickers:
+                    continue
+                if tokens >= max_tokens - 500:
+                    break
+
+                ticker_journals = self.get_journals(user_id, ticker=mentioned_ticker, limit=5)
+                if ticker_journals:
+                    ticker_text = self._format_journals(ticker_journals)
+                    ticker_tokens = estimate_tokens(ticker_text)
+                    if tokens + ticker_tokens < max_tokens:
+                        parts.append(f"📝 {mentioned_ticker} 관련 기록:\n{ticker_text}")
+                        tokens += ticker_tokens
+                        loaded_tickers.add(mentioned_ticker)
+
+        # 우선순위 4: 최근 저널에서 자주 언급된 종목 기억 로드
+        if not ticker and tokens < max_tokens - 1000:
+            # 최근 저널에서 언급된 종목들 찾기
+            recent_journals = self.get_journals(user_id, limit=20)
+            ticker_counts = {}
+            for j in recent_journals:
+                t = j.get('ticker')
+                if t and t not in loaded_tickers:
+                    ticker_counts[t] = ticker_counts.get(t, 0) + 1
+
+            # 가장 많이 언급된 종목 순으로 로드
+            sorted_tickers = sorted(ticker_counts.items(), key=lambda x: x[1], reverse=True)
+            for mentioned_ticker, count in sorted_tickers[:3]:
+                if tokens >= max_tokens - 500:
+                    break
+
+                ticker_journals = self.get_journals(user_id, ticker=mentioned_ticker, limit=5)
+                if ticker_journals:
+                    ticker_text = self._format_journals(ticker_journals)
+                    ticker_tokens = estimate_tokens(ticker_text)
+                    if tokens + ticker_tokens < max_tokens:
+                        parts.append(f"📝 {mentioned_ticker} 관련 기록 ({count}회 언급):\n{ticker_text}")
+                        tokens += ticker_tokens
+                        loaded_tickers.add(mentioned_ticker)
+
+        # 우선순위 5: 최근 일반 저널 (남은 토큰)
+        if tokens < max_tokens - 500:
+            recent = self.get_journals(user_id, limit=10)
             # 이미 포함된 ticker 제외
-            recent = [j for j in recent if j.get('ticker') != ticker]
+            recent = [j for j in recent if j.get('ticker') not in loaded_tickers]
             if recent:
-                recent_text = self._format_journals(recent)
+                recent_text = self._format_journals(recent[:10])
                 recent_tokens = estimate_tokens(recent_text)
                 if tokens + recent_tokens < max_tokens:
                     parts.append(f"💭 최근 생각:\n{recent_text}")
 
         return "\n\n".join(parts) if parts else ""
+
+    def _extract_tickers_from_text(self, text: str, user_id: int) -> List[str]:
+        """
+        텍스트에서 티커/종목코드 추출 (간단한 패턴 매칭)
+
+        Args:
+            text: 입력 텍스트
+            user_id: 사용자 ID (과거 기록에서 종목명 매칭용)
+
+        Returns:
+            List[str]: 추출된 티커 목록
+        """
+        import re
+        tickers = []
+
+        # 1. 한국 종목 코드 (6자리 숫자)
+        kr_pattern = r'\b(\d{6})\b'
+        kr_matches = re.findall(kr_pattern, text)
+        tickers.extend(kr_matches)
+
+        # 2. US 티커 (1-5자리 대문자)
+        us_pattern = r'\b([A-Z]{1,5})\b'
+        excluded_words = {
+            'I', 'A', 'AN', 'THE', 'IN', 'ON', 'AT', 'TO', 'FOR', 'OF',
+            'AND', 'OR', 'IS', 'IT', 'AI', 'AM', 'PM', 'VS', 'OK', 'NO',
+            'PER', 'PBR', 'ROE', 'ROA', 'EPS', 'BPS', 'PSR', 'PCR',
+            'HBM', 'DRAM', 'NAND', 'SSD', 'GPU', 'CPU', 'AP', 'PC',
+        }
+        us_matches = re.findall(us_pattern, text)
+        for t in us_matches:
+            if t not in excluded_words and t not in tickers:
+                tickers.append(t)
+
+        # 3. 사용자의 과거 기록에서 종목명 매칭
+        try:
+            past_journals = self.get_journals(user_id, limit=50)
+            known_names = {}
+            for j in past_journals:
+                ticker = j.get('ticker')
+                ticker_name = j.get('ticker_name')
+                if ticker and ticker_name:
+                    known_names[ticker_name] = ticker
+
+            for name, ticker in known_names.items():
+                if name and name in text and ticker not in tickers:
+                    tickers.append(ticker)
+        except Exception:
+            pass
+
+        return tickers
 
     # =========================================================================
     # 저널 전용 메서드

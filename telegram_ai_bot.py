@@ -1156,7 +1156,8 @@ class TelegramAIBot:
             if self.memory_manager:
                 memory_context = self.memory_manager.build_llm_context(
                     user_id=user_id,
-                    ticker=ticker
+                    ticker=ticker,
+                    max_tokens=4000
                 )
                 if memory_context:
                     logger.info(f"사용자 기억 컨텍스트 로드됨: {len(memory_context)} chars")
@@ -1582,7 +1583,8 @@ class TelegramAIBot:
             if self.memory_manager:
                 memory_context = self.memory_manager.build_llm_context(
                     user_id=user_id,
-                    ticker=ticker
+                    ticker=ticker,
+                    max_tokens=4000
                 )
                 if memory_context:
                     logger.info(f"US 사용자 기억 컨텍스트 로드됨: {len(memory_context)} chars")
@@ -1878,11 +1880,12 @@ class TelegramAIBot:
         )
 
         try:
-            # 사용자 기억 컨텍스트 빌드
+            # 사용자 기억 컨텍스트 빌드 (현재 메시지에서 언급된 종목도 로드)
             memory_context = self.memory_manager.build_llm_context(
                 user_id=user_id,
                 ticker=ticker,
-                max_tokens=2000
+                max_tokens=4000,
+                user_message=text  # 현재 메시지에서 티커 추출용
             )
 
             # 대화 히스토리에 사용자 메시지 추가
