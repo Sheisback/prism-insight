@@ -46,6 +46,39 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+# =============================================================================
+# Helper function to import modules from main project cores/ (avoid namespace collision)
+# =============================================================================
+def _import_from_main_cores(module_name: str, relative_path: str):
+    """
+    Import module directly from main project cores/ directory.
+
+    This function avoids namespace collision where prism-us/cores/ shadows
+    the main project's cores/ directory in sys.path.
+
+    Args:
+        module_name: Module name for sys.modules registration
+        relative_path: Path relative to PROJECT_ROOT (e.g., "cores/agents/telegram_translator_agent.py")
+
+    Returns:
+        Loaded module object
+    """
+    import importlib.util
+    file_path = PROJECT_ROOT / relative_path
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# Pre-load telegram_translator_agent from main project (used in multiple methods)
+_translator_module = _import_from_main_cores(
+    "telegram_translator_agent",
+    "cores/agents/telegram_translator_agent.py"
+)
+translate_telegram_message = _translator_module.translate_telegram_message
+
 # Directory configuration
 US_REPORTS_DIR = PRISM_US_DIR / "reports"
 US_TELEGRAM_MSGS_DIR = PRISM_US_DIR / "telegram_messages"
@@ -414,7 +447,8 @@ class USStockAnalysisOrchestrator:
             message_paths: List of original message file paths
         """
         try:
-            from cores.agents.telegram_translator_agent import translate_telegram_message
+            # Note: translate_telegram_message is pre-loaded at module level
+            # from main project's cores/agents/telegram_translator_agent.py
 
             for lang in self.telegram_config.broadcast_languages:
                 try:
@@ -470,7 +504,8 @@ class USStockAnalysisOrchestrator:
             report_paths: List of original markdown report file paths
         """
         try:
-            from cores.agents.telegram_translator_agent import translate_telegram_message
+            # Note: translate_telegram_message is pre-loaded at module level
+            # from main project's cores/agents/telegram_translator_agent.py
 
             for lang in self.telegram_config.broadcast_languages:
                 try:
@@ -619,7 +654,8 @@ class USStockAnalysisOrchestrator:
             mode: 'morning' or 'afternoon'
         """
         try:
-            from cores.agents.telegram_translator_agent import translate_telegram_message
+            # Note: translate_telegram_message is pre-loaded at module level
+            # from main project's cores/agents/telegram_translator_agent.py
 
             for lang in self.telegram_config.broadcast_languages:
                 try:

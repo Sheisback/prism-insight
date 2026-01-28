@@ -10,9 +10,37 @@ import logging
 import re
 import traceback
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Helper function to import modules from main project cores/ (avoid namespace collision)
+# =============================================================================
+def _import_from_main_cores(module_name: str, relative_path: str):
+    """
+    Import module directly from main project cores/ directory.
+
+    This function avoids namespace collision where prism-us/cores/ shadows
+    the main project's cores/ directory in sys.path.
+
+    Args:
+        module_name: Module name for sys.modules registration
+        relative_path: Path relative to PROJECT_ROOT (e.g., "cores/agents/trading_journal_agent.py")
+
+    Returns:
+        Loaded module object
+    """
+    import importlib.util
+    # PROJECT_ROOT is parent of parent (prism-us/tracking -> prism-us -> prism-insight)
+    project_root = Path(__file__).resolve().parent.parent.parent
+    file_path = project_root / relative_path
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class USJournalManager:
@@ -61,7 +89,12 @@ class USJournalManager:
             return False
 
         try:
-            from cores.agents.trading_journal_agent import create_trading_journal_agent
+            # Import trading_journal_agent from main project (avoid namespace collision)
+            _journal_module = _import_from_main_cores(
+                "trading_journal_agent",
+                "cores/agents/trading_journal_agent.py"
+            )
+            create_trading_journal_agent = _journal_module.create_trading_journal_agent
             from mcp_agent.workflows.llm.augmented_llm import RequestParams
             from mcp_agent.workflows.llm.augmented_llm_openai import OpenAIAugmentedLLM
 
