@@ -263,7 +263,7 @@ formatCurrency(100, "US")    // "$100.00"
 
 ### 6. 버그 수정
 
-#### 5.1 Docker 관련
+#### 6.1 Docker 관련
 
 | 이슈 | 수정 내용 |
 |------|----------|
@@ -271,7 +271,7 @@ formatCurrency(100, "US")    // "$100.00"
 | 모듈 경로 문제 | sys.path 순서 조정 |
 | cron 실행 경로 | 프로젝트 루트에서 실행하도록 수정 |
 
-#### 5.2 트레이딩 관련
+#### 6.2 트레이딩 관련
 
 | 이슈 | 수정 내용 |
 |------|----------|
@@ -279,7 +279,7 @@ formatCurrency(100, "US")    // "$100.00"
 | AsyncUSTradingContext 임포트 | 경로 수정 |
 | trading 모듈 충돌 | sys.path 순서 조정으로 해결 |
 
-#### 5.3 MCP 서버 관련
+#### 6.3 MCP 서버 관련
 
 | 이슈 | 수정 내용 |
 |------|----------|
@@ -297,7 +297,7 @@ yahoo_finance:
   args: ["--from", "yahoo-finance-mcp", "yahoo-finance-mcp"]
 ```
 
-#### 5.4 기타
+#### 6.4 기타
 
 | 이슈 | 수정 내용 |
 |------|----------|
@@ -305,6 +305,14 @@ yahoo_finance:
 | None cap_df 오류 | value-to-cap ratio 트리거에서 None 체크 추가 |
 | 티커 추출 우선순위 | 한국 주식 티커 우선 추출 |
 | lxml 누락 | pandas read_html 의존성 추가 |
+
+#### 6.5 대시보드 관련
+
+| 이슈 | 수정 내용 |
+|------|----------|
+| US 시작일 오류 | `US_SEASON1_START_DATE`를 2026-01-29로 수정 |
+
+US 대시보드의 지수 차트와 누적 수익률 차트가 올바른 시작일(2026-01-29)부터 표시됩니다.
 
 ---
 
@@ -323,6 +331,7 @@ yahoo_finance:
 |------|----------|
 | `prism-us/us_stock_tracking_agent.py` | **_save_watchlist_item() 추가**, Redis/GCP 시그널 발행 |
 | `prism-us/tracking/db_schema.py` | **us_watchlist_history 컬럼 확장**, 마이그레이션 함수 추가 |
+| `examples/generate_us_dashboard_json.py` | **US 시작일 수정** (2026-01-29) |
 | `examples/messaging/gcp_pubsub_subscriber_example.py` | US 시장 지원, SELL 스케줄링 |
 | `telegram_ai_bot.py` | /memories 명령어, 저널 답장 AI 대화 |
 | `prism-us/us_trigger_batch.py` | midday 모드 지원 |
