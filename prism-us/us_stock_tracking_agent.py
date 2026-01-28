@@ -61,6 +61,39 @@ from mcp_agent.workflows.llm.augmented_llm_openai import OpenAIAugmentedLLM
 _prism_us_dir = Path(__file__).parent
 sys.path.insert(0, str(_prism_us_dir))
 
+
+# =============================================================================
+# Helper function to import modules from main project cores/ (avoid namespace collision)
+# =============================================================================
+def _import_from_main_cores(module_name: str, relative_path: str):
+    """
+    Import module directly from main project cores/ directory.
+
+    This function avoids namespace collision where prism-us/cores/ shadows
+    the main project's cores/ directory in sys.path.
+
+    Args:
+        module_name: Module name for sys.modules registration
+        relative_path: Path relative to PROJECT_ROOT (e.g., "cores/agents/telegram_translator_agent.py")
+
+    Returns:
+        Loaded module object
+    """
+    import importlib.util
+    file_path = PROJECT_ROOT / relative_path
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# Pre-load telegram_translator_agent from main project (used in multiple methods)
+_translator_module = _import_from_main_cores(
+    "telegram_translator_agent",
+    "cores/agents/telegram_translator_agent.py"
+)
+translate_telegram_message = _translator_module.translate_telegram_message
+
 try:
     # First try direct import from prism-us directory
     from cores.agents.trading_agents import create_us_trading_scenario_agent
@@ -1555,7 +1588,8 @@ class USStockTrackingAgent:
             if language == "en":
                 logger.info(f"Translating {len(self.message_queue)} US messages to English")
                 try:
-                    from cores.agents.telegram_translator_agent import translate_telegram_message
+                    # Note: translate_telegram_message is pre-loaded at module level
+                    # from main project's cores/agents/telegram_translator_agent.py
                     translated_queue = []
                     for idx, message in enumerate(self.message_queue, 1):
                         logger.info(f"Translating US message {idx}/{len(self.message_queue)}")
@@ -1637,7 +1671,8 @@ class USStockTrackingAgent:
             messages: List of original Korean messages
         """
         try:
-            from cores.agents.telegram_translator_agent import translate_telegram_message
+            # Note: translate_telegram_message is pre-loaded at module level
+            # from main project's cores/agents/telegram_translator_agent.py
 
             for lang in self.telegram_config.broadcast_languages:
                 try:
