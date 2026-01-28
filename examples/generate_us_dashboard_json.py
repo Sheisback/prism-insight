@@ -69,9 +69,9 @@ except FileNotFoundError:
 class USDashboardDataGenerator:
     """US Stock Market Dashboard Data Generator"""
 
-    # US market start date (Season 2)
-    US_SEASON2_START_DATE = "2026-01-20"
-    US_SEASON2_START_AMOUNT = 10000  # $10,000 USD
+    # US market start date (Season 1)
+    US_SEASON1_START_DATE = "2026-01-29"
+    US_SEASON1_START_AMOUNT = 10000  # $10,000 USD
 
     def __init__(
         self,
@@ -249,18 +249,18 @@ class USDashboardDataGenerator:
 
         try:
             # Use US Season1 start date
-            start_date = self.US_SEASON2_START_DATE.replace("-", "")
+            start_date = self.US_SEASON1_START_DATE.replace("-", "")
             today = datetime.now().strftime("%Y%m%d")
 
             logger.info(f"Fetching US market index data... ({start_date} ~ {today})")
 
             # S&P 500 index data (ticker: ^GSPC)
             sp500 = yf.Ticker("^GSPC")
-            sp500_df = sp500.history(start=self.US_SEASON2_START_DATE, end=datetime.now().strftime("%Y-%m-%d"))
+            sp500_df = sp500.history(start=self.US_SEASON1_START_DATE, end=datetime.now().strftime("%Y-%m-%d"))
 
             # NASDAQ index data (ticker: ^IXIC)
             nasdaq = yf.Ticker("^IXIC")
-            nasdaq_df = nasdaq.history(start=self.US_SEASON2_START_DATE, end=datetime.now().strftime("%Y-%m-%d"))
+            nasdaq_df = nasdaq.history(start=self.US_SEASON1_START_DATE, end=datetime.now().strftime("%Y-%m-%d"))
 
             if sp500_df.empty or nasdaq_df.empty:
                 logger.warning("Failed to fetch US index data from yfinance.")
@@ -848,7 +848,7 @@ class USDashboardDataGenerator:
         for market_item in market_data:
             date = market_item.get('date', '')
 
-            if date < self.US_SEASON2_START_DATE:
+            if date < self.US_SEASON1_START_DATE:
                 continue
 
             # Find cumulative realized profit up to this date
