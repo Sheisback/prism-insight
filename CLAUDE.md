@@ -1177,6 +1177,7 @@ conn = sqlite3.connect("database.db")  # Blocks event loop!
 | KIS auth fails | Verify `trading/config/kis_devlp.yaml` |
 | JSON parsing error | Use `json_repair` library |
 | GPT-5 formatting | Use `cores/utils.clean_markdown()` |
+| prism-us module collision | Use `_import_from_main_cores()` helper (see Issue 8 in troubleshooting) |
 
 ### Debug Mode
 
