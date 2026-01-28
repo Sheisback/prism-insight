@@ -1002,7 +1002,10 @@ class USStockTrackingAgent:
                         # Execute actual trading
                         trade_result = {'success': False, 'message': 'Trading not executed'}
                         try:
-                            from prism_us.trading.us_stock_trading import AsyncUSTradingContext
+                            try:
+                                from trading.us_stock_trading import AsyncUSTradingContext
+                            except ImportError:
+                                from prism_us.trading.us_stock_trading import AsyncUSTradingContext
                             async with AsyncUSTradingContext() as trading:
                                 trade_result = await trading.async_sell_stock(ticker=ticker)
 
@@ -1282,7 +1285,10 @@ class USStockTrackingAgent:
                         # Execute actual trading
                         trade_result = {'success': False, 'message': 'Trading not executed'}
                         try:
-                            from prism_us.trading.us_stock_trading import AsyncUSTradingContext
+                            try:
+                                from trading.us_stock_trading import AsyncUSTradingContext
+                            except ImportError:
+                                from prism_us.trading.us_stock_trading import AsyncUSTradingContext
                             async with AsyncUSTradingContext() as trading:
                                 trade_result = await trading.async_buy_stock(ticker=ticker)
 
