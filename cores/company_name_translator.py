@@ -110,7 +110,7 @@ Return ONLY the English company name, nothing else. No quotes, no explanation.
         english_name = await llm.generate_str(
             message=f"Translate this Korean company name to English: {korean_name}",
             request_params=RequestParams(
-                model="gpt-5-nano",
+                model="gpt-5-mini",
                 maxTokens=100,
                 temperature=0.1,  # Low temperature for consistency
                 max_iterations=1
@@ -120,6 +120,11 @@ Return ONLY the English company name, nothing else. No quotes, no explanation.
         # Clean and sanitize the result
         english_name = english_name.strip().strip('"\'')
         sanitized_name = _sanitize_for_filename(english_name)
+
+        # Fallback to Korean name if translation is empty
+        if not sanitized_name:
+            logger.warning(f"Translation returned empty for '{korean_name}', using Korean name as fallback")
+            sanitized_name = _sanitize_for_filename(korean_name)
 
         # Cache the result
         _translation_cache[korean_name] = sanitized_name
