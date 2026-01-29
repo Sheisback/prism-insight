@@ -466,8 +466,8 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                         # Call actual account trading function (async)
                         from trading.domestic_stock_trading import AsyncTradingContext
                         async with AsyncTradingContext() as trading:
-                            # Execute async buy
-                            trade_result = await trading.async_buy_stock(stock_code=ticker)
+                            # Execute async buy with limit price for reserved orders
+                            trade_result = await trading.async_buy_stock(stock_code=ticker, limit_price=current_price)
 
                         if trade_result['success']:
                             logger.info(f"Actual purchase successful: {trade_result['message']}")
