@@ -140,8 +140,8 @@ class USTelegramSummaryGenerator:
 
         # Check all modes (morning, afternoon)
         for mode in ["morning", "afternoon"]:
-            # US trigger results file path
-            results_file = _prism_us_dir / f"trigger_results_{mode}_{report_date}.json"
+            # US trigger results file path (matches orchestrator naming: trigger_results_us_{mode}_{date}.json)
+            results_file = _prism_us_dir / f"trigger_results_us_{mode}_{report_date}.json"
 
             logger.info(f"Checking trigger results file: {results_file}")
 
@@ -186,12 +186,20 @@ class USTelegramSummaryGenerator:
         Get display name for trigger type.
 
         Args:
-            trigger_type: Internal trigger type name
+            trigger_type: Trigger type name from JSON file
 
         Returns:
             Human-readable trigger display name
         """
+        # Actual trigger types from us_trigger_batch.py JSON output
         trigger_names = {
+            # Morning triggers
+            "Volume Surge Top": "Volume Surge",
+            "Gap Up Momentum Top": "Gap Up Momentum",
+            # Afternoon triggers
+            "Intraday Rise Top": "Intraday Rise",
+            "Volume Surge Sideways": "Volume Surge (Sideways)",
+            # Fallback/legacy names
             "intraday_surge": "Intraday Surge",
             "volume_surge": "Volume Surge",
             "gap_up": "Gap Up",
