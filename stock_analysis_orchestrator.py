@@ -133,8 +133,18 @@ class StockAnalysisOrchestrator:
             return original_path.parent / f"{original_path.stem}_{target_lang}.md"
 
         # Translate company name (only for English)
+        if not parsed['company_name']:
+            logger.warning(f"Empty company name in filename: {original_path.stem}")
+            # Try to get company name from pykrx
+            try:
+                from pykrx import stock as stock_api
+                parsed['company_name'] = stock_api.get_market_ticker_name(parsed['ticker']) or ""
+                logger.info(f"Retrieved company name from pykrx: {parsed['company_name']}")
+            except Exception:
+                pass
+
         if target_lang == "en":
-            translated_name = await translate_company_name(parsed['company_name'])
+            translated_name = await translate_company_name(parsed['company_name']) if parsed['company_name'] else ""
         else:
             # For other languages, keep original (sanitized)
             translated_name = parsed['company_name']
@@ -294,10 +304,17 @@ class StockAnalysisOrchestrator:
                     for ticker in stocks_df.index:
                         if ticker not in ticker_codes:
                             ticker_codes.add(ticker)
-                            # Get stock name
+                            # Get stock name (with fallback to pykrx API)
                             name = ""
                             if "종목명" in stocks_df.columns:
                                 name = stocks_df.loc[ticker, "종목명"]
+                            # Fallback: use pykrx API if name is empty
+                            if not name:
+                                try:
+                                    from pykrx import stock as stock_api
+                                    name = stock_api.get_market_ticker_name(ticker) or ""
+                                except Exception:
+                                    pass
 
                             # Get risk_reward_ratio if available
                             rr_ratio = 0
@@ -940,7 +957,8 @@ class StockAnalysisOrchestrator:
             # If ticker_info is a dict
             if isinstance(ticker_info, dict):
                 ticker = ticker_info.get('code')
-                company_name = ticker_info.get('name', f"Stock_{ticker}")
+                # Use 'or' to handle both None and empty string cases
+                company_name = ticker_info.get('name') or f"Stock_{ticker}"
             else:
                 ticker = ticker_info
                 company_name = f"Stock_{ticker}"
