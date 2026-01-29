@@ -962,6 +962,18 @@ class USStockTrackingAgent:
 
             self.conn.commit()
 
+            # 미진입 메시지 생성 (한국 enhanced 버전과 동일 형식)
+            skip_message = f"⚠️ 매수 보류: {company_name}({ticker})\n" \
+                           f"현재가: ${current_price:,.2f}\n" \
+                           f"매수 Score: {buy_score}/{min_score}\n" \
+                           f"결정: {decision}\n" \
+                           f"시장 상태: {market_condition}\n" \
+                           f"산업군: {sector}\n" \
+                           f"보류 Reason: {skip_reason}\n" \
+                           f"분석 의견: {rationale if rationale else '정보 없음'}"
+
+            self.message_queue.append(skip_message)
+
             logger.info(
                 f"{ticker}({company_name}) Watchlist save complete - "
                 f"Score: {buy_score}/{min_score}, Reason: {skip_reason}, Trigger: {trigger_type}"
