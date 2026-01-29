@@ -1,7 +1,7 @@
 # CLAUDE.md - AI Assistant Guide for PRISM-INSIGHT
 
-> **Last Updated**: 2026-01-28
-> **Version**: 1.8
+> **Last Updated**: 2026-01-29
+> **Version**: 2.0
 > **Purpose**: Comprehensive guide for AI assistants working on the PRISM-INSIGHT codebase
 
 ---
@@ -1248,14 +1248,15 @@ logging.basicConfig(level=logging.DEBUG)
 
 ---
 
-**Document Version**: 1.9
-**Last Updated**: 2026-01-28
+**Document Version**: 2.0
+**Last Updated**: 2026-01-29
 **Maintained By**: PRISM-INSIGHT Development Team
 
 ### Version History
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.0 | 2026-01-29 | **US Telegram 메시지 통일** - us_stock_tracking_agent.py 미진입 메시지를 한국 버전(stock_tracking_enhanced_agent.py)과 동일한 형식으로 통일 (⚠️ 매수 보류 형식, truncate 제거) |
 | 1.9 | 2026-01-28 | **US 시총 필터 강화 & 대시보드 마켓 선택** - 시총 필터 $5B→$20B (S&P 500 편입 수준), 대시보드 KR/US 마켓 선택기 추가, portfolio_telegram_reporter.py US 지원, Docker cron 3회/일 스케줄, telegram summary agent gpt-5.2 업그레이드 |
 | 1.8 | 2026-01-28 | **US Performance Tracker** - us_performance_tracker_batch.py 생성 (7/14/30일 성과 추적), db_schema.py에 tracking_status/was_traded/risk_reward_ratio 컬럼 추가, generate_us_dashboard_json.py 성과 분석 로직 완성 |
 | 1.7 | 2026-01-27 | **PDF Prism Light 테마** - 독창적인 스펙트럼 컬러 테마 적용, 차트 렌더링 수정, 마크다운 제목 계층 구조 통일 (KR/US), 회사명/날짜 추출 로직 개선 |
