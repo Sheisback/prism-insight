@@ -1198,7 +1198,8 @@ class USStockTrackingAgent:
                             except ImportError:
                                 from prism_us.trading.us_stock_trading import AsyncUSTradingContext
                             async with AsyncUSTradingContext() as trading:
-                                trade_result = await trading.async_sell_stock(ticker=ticker)
+                                # Pass limit_price for reserved orders (required for US market)
+                                trade_result = await trading.async_sell_stock(ticker=ticker, limit_price=current_price)
 
                             if trade_result['success']:
                                 logger.info(f"Actual sell successful: {trade_result['message']}")
@@ -1481,7 +1482,8 @@ class USStockTrackingAgent:
                             except ImportError:
                                 from prism_us.trading.us_stock_trading import AsyncUSTradingContext
                             async with AsyncUSTradingContext() as trading:
-                                trade_result = await trading.async_buy_stock(ticker=ticker)
+                                # Pass limit_price for reserved orders (required for US market)
+                                trade_result = await trading.async_buy_stock(ticker=ticker, limit_price=current_price)
 
                             if trade_result['success']:
                                 logger.info(f"Actual purchase successful: {trade_result['message']}")
