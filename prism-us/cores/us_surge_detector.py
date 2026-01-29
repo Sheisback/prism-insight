@@ -12,7 +12,13 @@ import logging
 import pandas as pd
 import numpy as np
 import yfinance as yf
+import sys
+from pathlib import Path
 from typing import Tuple, Optional, List
+
+# Import check_market_day functions for US holiday handling
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from check_market_day import get_last_trading_day, get_next_trading_day, is_us_market_day
 
 # Logger setup
 logger = logging.getLogger(__name__)
@@ -214,24 +220,26 @@ def get_previous_snapshot(trade_date: str, tickers: List[str] = None) -> Tuple[p
     if tickers is None:
         tickers = get_sp500_tickers()
 
-    # Calculate previous day
-    date_obj = datetime.datetime.strptime(trade_date, '%Y%m%d')
-    prev_date_obj = date_obj - datetime.timedelta(days=1)
-
-    # Skip weekends
-    while prev_date_obj.weekday() >= 5:  # Saturday=5, Sunday=6
-        prev_date_obj -= datetime.timedelta(days=1)
+    # Calculate previous trading day using US market calendar
+    # This handles both weekends AND US market holidays (MLK Day, etc.)
+    date_obj = datetime.datetime.strptime(trade_date, '%Y%m%d').date()
+    # get_last_trading_day returns the trading day ON OR BEFORE the given date
+    # So we pass (trade_date - 1) to get the PREVIOUS trading day
+    prev_date_obj = get_last_trading_day(date_obj - datetime.timedelta(days=1))
 
     prev_date = prev_date_obj.strftime('%Y%m%d')
+    logger.info(f"Previous snapshot: trade_date={trade_date}, prev_trading_day={prev_date}")
 
-    # Get data for previous 5 days to ensure we get a trading day
+    # Get data for previous 7 days to ensure we get a trading day
     start_date = prev_date_obj - datetime.timedelta(days=7)
 
     try:
+        # IMPORTANT: yfinance end parameter is EXCLUSIVE
+        # So we need to add 1 day to include prev_date_obj in the results
         data = yf.download(
             tickers,
             start=start_date.strftime('%Y-%m-%d'),
-            end=prev_date_obj.strftime('%Y-%m-%d'),
+            end=(prev_date_obj + datetime.timedelta(days=1)).strftime('%Y-%m-%d'),
             progress=False,
             threads=True
         )
@@ -379,28 +387,29 @@ def get_ticker_name(ticker: str) -> str:
 
 def get_nearest_business_day(date_str: str, prev: bool = True) -> str:
     """
-    Get the nearest business day.
+    Get the nearest business day (handles weekends AND US market holidays).
+
+    Uses pandas-market-calendars NYSE calendar to properly handle:
+    - Weekends (Saturday, Sunday)
+    - US Market Holidays (MLK Day, Presidents Day, Good Friday, etc.)
 
     Args:
         date_str: Date in YYYYMMDD format
-        prev: If True, look for previous business day; if False, look for next
+        prev: If True, look for previous/current trading day; if False, look for next
 
     Returns:
         Date string in YYYYMMDD format
     """
-    date_obj = datetime.datetime.strptime(date_str, '%Y%m%d')
+    date_obj = datetime.datetime.strptime(date_str, '%Y%m%d').date()
 
-    # Skip weekends
-    while date_obj.weekday() >= 5:  # Saturday=5, Sunday=6
-        if prev:
-            date_obj -= datetime.timedelta(days=1)
-        else:
-            date_obj += datetime.timedelta(days=1)
+    if prev:
+        # Get most recent trading day ON OR BEFORE the given date
+        result = get_last_trading_day(date_obj)
+    else:
+        # Get next trading day AFTER the given date
+        result = get_next_trading_day(date_obj)
 
-    # TODO: Add US market holiday check using pandas-market-calendars
-    # For now, just skip weekends
-
-    return date_obj.strftime('%Y%m%d')
+    return result.strftime('%Y%m%d')
 
 
 def filter_low_liquidity(df: pd.DataFrame, threshold: float = 0.2) -> pd.DataFrame:
