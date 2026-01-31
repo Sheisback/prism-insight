@@ -53,7 +53,34 @@ Watch an AI-generated Apple Inc. analysis report:
 
 ---
 
-## 🚀 Quick Start
+## ⚡ Try in 60 Seconds (US Stocks)
+
+The fastest way to try PRISM-INSIGHT. Only requires an **OpenAI API key**.
+
+```bash
+# Clone and run the quickstart script
+git clone https://github.com/dragon1086/prism-insight.git
+cd prism-insight
+./quickstart.sh YOUR_OPENAI_API_KEY
+```
+
+Or manually:
+```bash
+git clone https://github.com/dragon1086/prism-insight.git && cd prism-insight && \
+cp mcp_agent.secrets.yaml.example mcp_agent.secrets.yaml && \
+sed -i '' 's/example key/YOUR_OPENAI_API_KEY/' mcp_agent.secrets.yaml && \
+pip install -r requirements.txt && \
+python3 -m playwright install chromium && \
+python3 prism-us/us_stock_analysis_orchestrator.py --mode morning --no-telegram
+```
+
+> 💡 **Get your OpenAI API key** from [OpenAI Platform](https://platform.openai.com/api-keys)
+
+Your AI-generated stock analysis reports will be saved in `prism-us/pdf_reports/`.
+
+---
+
+## 🚀 Full Installation
 
 ### Prerequisites
 - Python 3.10+ or Docker
