@@ -39,6 +39,97 @@
 | 오픈소스 라이센스 | 🟡 중간 | [x] 완료 (AGPL-3.0) |
 | 문서 사이트 | 🟢 낮음 | [ ] |
 
+---
+
+### 🚀 랜딩 페이지 구현 가이드 (Vercel 배포)
+
+#### 배포 플랫폼: Vercel (무료)
+- ✅ Next.js 최적화 (Vercel이 제작사)
+- ✅ 무료 티어: 100GB 대역폭/월
+- ✅ GitHub 연동 자동 배포
+- ✅ 글로벌 CDN + 무료 SSL
+
+#### 구현 위치
+`examples/dashboard/` 기존 Next.js 프로젝트에 `/landing` 라우트 추가
+
+#### 실행 명령어
+
+```bash
+# 1. 랜딩 페이지 생성 (Claude Code에서)
+/frontend-design
+```
+
+#### 프롬프트 (복사용)
+
+```
+Create a Product Hunt landing page for PRISM-INSIGHT, optimized for Vercel deployment.
+
+Project context:
+- AI-powered stock analysis system with 13 specialized agents
+- Supports Korean (KOSPI/KOSDAQ) and US (NYSE/NASDAQ) markets
+- Open source (AGPL-3.0), free to use
+- Live demo: analysis.stocksimulation.kr
+- GitHub: dragon1086/prism-insight
+
+Required sections:
+1. Hero: "AI-powered Korean & US stock analysis with automated trading"
+2. Features: 13 AI agents, dual market, Telegram alerts, auto trading
+3. Demo video embed (YouTube: LVOAdVCh1QE)
+4. Screenshots gallery
+5. QuickStart code block with copy button
+6. GitHub Star CTA (use GitHub API for live count)
+7. Sponsor/Support section
+
+Technical requirements:
+- Use existing examples/dashboard/ Next.js 14 App Router structure
+- Create as app/landing/page.tsx (or app/(landing)/page.tsx for root)
+- Use Static Site Generation (SSG) for best Vercel performance
+- All images optimized with next/image
+- Tailwind CSS + shadcn/ui components
+- Dark/light mode support
+- Mobile-first responsive design
+- Metadata for SEO and social sharing (Open Graph)
+
+Vercel-specific:
+- No server-side API calls (static or client-side only)
+- Environment variables via NEXT_PUBLIC_ prefix if needed
+- Output as static export compatible
+```
+
+#### 배포 단계
+
+```bash
+# 2. 로컬 테스트
+cd examples/dashboard
+npm install
+npm run dev
+
+# 3. 빌드 테스트
+npm run build
+
+# 4. Vercel 배포
+npm i -g vercel
+vercel          # 프리뷰 배포
+vercel --prod   # 프로덕션 배포
+```
+
+#### 체크리스트
+
+- [ ] `/frontend-design` 실행 → 랜딩 페이지 생성
+- [ ] `npm run dev` 로컬 테스트
+- [ ] 반응형 테스트 (모바일/태블릿/데스크톱)
+- [ ] 다크모드 테스트
+- [ ] `npm run build` 빌드 성공 확인
+- [ ] Vercel 계정 연동 (GitHub OAuth)
+- [ ] `vercel --prod` 프로덕션 배포
+- [ ] 커스텀 도메인 연결 (선택)
+
+#### 예상 결과물
+- URL: `prism-insight.vercel.app` (또는 커스텀 도메인)
+- Product Hunt 제출용 랜딩 페이지 완성
+
+---
+
 ### Phase 2: 커뮤니티 빌딩 (런칭 2-4주 전)
 
 #### Product Hunt 활동 (필수!)
