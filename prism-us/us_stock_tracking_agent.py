@@ -810,24 +810,103 @@ class USStockTrackingAgent:
             )
             self.conn.commit()
 
-            # Build buy message
+            # Build buy message (KR 템플릿과 동일한 형식)
             target_price = scenario.get('target_price', 0)
             stop_loss = scenario.get('stop_loss', 0)
 
-            message = f"NEW BUY: {company_name} ({ticker})\n" \
-                      f"Buy Price: ${current_price:.2f}\n" \
-                      f"Target: ${target_price:.2f}\n" \
-                      f"Stop Loss: ${stop_loss:.2f}\n" \
-                      f"Investment Period: {scenario.get('investment_period', 'short')}\n" \
-                      f"Sector: {scenario.get('sector', 'Unknown')}\n"
+            message = f"📈 신규 매수: {company_name}({ticker})\n" \
+                      f"매수가: ${current_price:,.2f}\n" \
+                      f"목표가: ${target_price:,.2f}\n" \
+                      f"손절가: ${stop_loss:,.2f}\n" \
+                      f"투자기간: {scenario.get('investment_period', 'short')}\n" \
+                      f"산업군: {scenario.get('sector', 'Unknown')}\n"
 
+            # 밸류에이션 분석 추가
             if scenario.get('valuation_analysis'):
-                message += f"Valuation: {scenario.get('valuation_analysis')}\n"
+                message += f"밸류에이션: {scenario.get('valuation_analysis')}\n"
 
+            # 업종 전망 추가 (KR 버전과 동일)
+            if scenario.get('sector_outlook'):
+                message += f"업종 전망: {scenario.get('sector_outlook')}\n"
+
+            # 거래대금 분석 추가
             if rank_change_msg:
-                message += f"Trading Value: {rank_change_msg}\n"
+                message += f"거래대금 분석: {rank_change_msg}\n"
 
-            message += f"Rationale: {scenario.get('rationale', 'N/A')}\n"
+            message += f"투자근거: {scenario.get('rationale', '정보 없음')}\n"
+
+            # 매매 시나리오 상세 정보 (KR 버전과 동일한 형식)
+            trading_scenarios = scenario.get('trading_scenarios', {})
+            if trading_scenarios and isinstance(trading_scenarios, dict):
+                message += "\n" + "="*40 + "\n"
+                message += "📋 매매 시나리오\n"
+                message += "="*40 + "\n\n"
+
+                # 1. 핵심 가격대 (Key Levels)
+                key_levels = trading_scenarios.get('key_levels', {})
+                if key_levels:
+                    message += "💰 핵심 가격대:\n"
+
+                    # 저항선
+                    primary_resistance = parse_price_value(key_levels.get('primary_resistance', 0))
+                    secondary_resistance = parse_price_value(key_levels.get('secondary_resistance', 0))
+                    if primary_resistance or secondary_resistance:
+                        message += f"  📈 저항선:\n"
+                        if secondary_resistance:
+                            message += f"    • 2차: ${secondary_resistance:,.2f}\n"
+                        if primary_resistance:
+                            message += f"    • 1차: ${primary_resistance:,.2f}\n"
+
+                    # 현재가 표시
+                    message += f"  ━━ 현재가: ${current_price:,.2f} ━━\n"
+
+                    # 지지선
+                    primary_support = parse_price_value(key_levels.get('primary_support', 0))
+                    secondary_support = parse_price_value(key_levels.get('secondary_support', 0))
+                    if primary_support or secondary_support:
+                        message += f"  📉 지지선:\n"
+                        if primary_support:
+                            message += f"    • 1차: ${primary_support:,.2f}\n"
+                        if secondary_support:
+                            message += f"    • 2차: ${secondary_support:,.2f}\n"
+
+                    # 거래량 기준
+                    volume_baseline = key_levels.get('volume_baseline', '')
+                    if volume_baseline:
+                        message += f"  📊 거래량 기준: {volume_baseline}\n"
+
+                    message += "\n"
+
+                # 2. 매도 시그널
+                sell_triggers = trading_scenarios.get('sell_triggers', [])
+                if sell_triggers:
+                    message += "🔔 매도 시그널:\n"
+                    for i, trigger in enumerate(sell_triggers, 1):
+                        # 조건별로 이모지 선택
+                        if any(kw in trigger.lower() for kw in ["익절", "목표", "저항", "profit", "target", "resistance"]):
+                            emoji = "✅"
+                        elif any(kw in trigger.lower() for kw in ["손절", "지지", "하락", "stop", "support", "down"]):
+                            emoji = "⛔"
+                        elif any(kw in trigger.lower() for kw in ["시간", "횡보", "time", "sideways"]):
+                            emoji = "⏰"
+                        else:
+                            emoji = "•"
+
+                        message += f"  {emoji} {trigger}\n"
+                    message += "\n"
+
+                # 3. 보유 조건
+                hold_conditions = trading_scenarios.get('hold_conditions', [])
+                if hold_conditions:
+                    message += "✋ 보유 지속 조건:\n"
+                    for condition in hold_conditions:
+                        message += f"  • {condition}\n"
+                    message += "\n"
+
+                # 4. 포트폴리오 맥락
+                portfolio_context = trading_scenarios.get('portfolio_context', '')
+                if portfolio_context:
+                    message += f"💼 포트폴리오 관점:\n  {portfolio_context}\n"
 
             self.message_queue.append(message)
             logger.info(f"{ticker} ({company_name}) purchase complete")
@@ -1021,42 +1100,50 @@ class USStockTrackingAgent:
             except:
                 pass
 
-            # Check stop-loss condition
+            # Check stop-loss condition (KR 템플릿과 동일한 형식)
             if stop_loss > 0 and current_price <= stop_loss:
-                return True, f"Stop loss triggered (stop: ${stop_loss:.2f})"
+                return True, f"손절매 조건 도달 (손절가: ${stop_loss:,.2f})"
 
             # Check target price reached
             if target_price > 0 and current_price >= target_price:
-                return True, f"Target reached (target: ${target_price:.2f})"
+                return True, f"목표가 달성 (목표가: ${target_price:,.2f})"
 
             # Sell conditions by investment period
             if investment_period == "short":
+                # Short-term investment: quicker sell (15+ days holding + 5%+ profit)
                 if days_passed >= 15 and profit_rate >= 5:
-                    return True, f"Short-term target achieved (days: {days_passed}, return: {profit_rate:.2f}%)"
+                    return True, f"단기 투자 목표 달성 (보유일: {days_passed}일, 수익률: {profit_rate:.2f}%)"
+                # Short-term investment loss protection (10+ days + 3%+ loss)
                 if days_passed >= 10 and profit_rate <= -3:
-                    return True, f"Short-term loss protection (days: {days_passed}, return: {profit_rate:.2f}%)"
+                    return True, f"단기 투자 손실 방어 (보유일: {days_passed}일, 수익률: {profit_rate:.2f}%)"
 
             # General sell conditions
+            # Sell if profit >= 10%
             if profit_rate >= 10:
-                return True, f"Profit >= 10% (current: {profit_rate:.2f}%)"
+                return True, f"수익률 10% 이상 달성 (현재 수익률: {profit_rate:.2f}%)"
 
+            # Sell if loss >= 5%
             if profit_rate <= -5:
-                return True, f"Loss >= 5% (current: {profit_rate:.2f}%)"
+                return True, f"손실 -5% 이상 발생 (현재 수익률: {profit_rate:.2f}%)"
 
+            # Sell if holding 30+ days with loss
             if days_passed >= 30 and profit_rate < 0:
-                return True, f"30+ days holding with loss (days: {days_passed}, return: {profit_rate:.2f}%)"
+                return True, f"30일 이상 보유 중이며 손실 상태 (보유일: {days_passed}일, 수익률: {profit_rate:.2f}%)"
 
+            # Sell if holding 60+ days with 3%+ profit
             if days_passed >= 60 and profit_rate >= 3:
-                return True, f"60+ days holding with 3%+ profit (days: {days_passed}, return: {profit_rate:.2f}%)"
+                return True, f"60일 이상 보유 중이며 3% 이상 수익 (보유일: {days_passed}일, 수익률: {profit_rate:.2f}%)"
 
+            # Long-term investment case (90+ days holding + loss)
             if investment_period == "long" and days_passed >= 90 and profit_rate < 0:
-                return True, f"Long-term loss cleanup (days: {days_passed}, return: {profit_rate:.2f}%)"
+                return True, f"장기 투자 손실 정리 (보유일: {days_passed}일, 수익률: {profit_rate:.2f}%)"
 
-            return False, "Continue holding"
+            # Continue holding by default
+            return False, "계속 보유"
 
         except Exception as e:
             logger.error(f"Error analyzing sell decision: {str(e)}")
-            return False, "Analysis error"
+            return False, "분석 오류"
 
     async def sell_stock(self, stock_data: Dict[str, Any], sell_reason: str) -> bool:
         """
@@ -1110,14 +1197,14 @@ class USStockTrackingAgent:
             )
             self.conn.commit()
 
-            # Build sell message
-            arrow = "▲" if profit_rate > 0 else "▼" if profit_rate < 0 else "─"
-            message = f"SELL: {company_name} ({ticker})\n" \
-                      f"Buy: ${buy_price:.2f}\n" \
-                      f"Sell: ${current_price:.2f}\n" \
-                      f"Return: {arrow} {abs(profit_rate):.2f}%\n" \
-                      f"Holding: {holding_days} days\n" \
-                      f"Reason: {sell_reason}"
+            # Build sell message (KR 템플릿과 동일한 형식)
+            arrow = "⬆️" if profit_rate > 0 else "⬇️" if profit_rate < 0 else "➖"
+            message = f"📉 매도: {company_name}({ticker})\n" \
+                      f"매수가: ${buy_price:,.2f}\n" \
+                      f"매도가: ${current_price:,.2f}\n" \
+                      f"수익률: {arrow} {abs(profit_rate):.2f}%\n" \
+                      f"보유기간: {holding_days}일\n" \
+                      f"매도이유: {sell_reason}"
 
             self.message_queue.append(message)
             logger.info(f"{ticker} ({company_name}) sell complete (return: {profit_rate:.2f}%)")
