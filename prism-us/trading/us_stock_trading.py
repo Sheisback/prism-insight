@@ -47,6 +47,50 @@ with open(CONFIG_FILE, encoding="UTF-8") as f:
 # US timezone
 US_EASTERN = pytz.timezone('US/Eastern')
 
+
+# =============================================================================
+# Safe Type Conversion Helpers (handle empty strings from KIS API)
+# =============================================================================
+def _safe_float(value, default: float = 0.0) -> float:
+    """
+    Safely convert value to float, handling empty strings and None.
+
+    KIS API sometimes returns empty string '' instead of 0 for price fields,
+    which causes 'could not convert string to float' errors.
+
+    Args:
+        value: Value to convert (can be str, int, float, None, or '')
+        default: Default value if conversion fails
+
+    Returns:
+        float: Converted value or default
+    """
+    if value is None or value == '':
+        return default
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return default
+
+
+def _safe_int(value, default: int = 0) -> int:
+    """
+    Safely convert value to int, handling empty strings and None.
+
+    Args:
+        value: Value to convert (can be str, int, float, None, or '')
+        default: Default value if conversion fails
+
+    Returns:
+        int: Converted value or default
+    """
+    if value is None or value == '':
+        return default
+    try:
+        return int(float(value))  # Handle "123.0" string case
+    except (ValueError, TypeError):
+        return default
+
 # Exchange code mapping
 EXCHANGE_CODES = {
     "NASDAQ": "NASD",
@@ -168,12 +212,20 @@ class USStockTrading:
             if res.isOK():
                 data = res.getBody().output
 
+                # Use safe conversion helpers to handle empty strings from API
+                current_price = _safe_float(data.get('last'))
+
+                # Validate price - 0 or negative price is invalid
+                if current_price <= 0:
+                    logger.warning(f"[{ticker}] Invalid price received: '{data.get('last')}' -> {current_price}")
+                    return None
+
                 result = {
                     'ticker': ticker.upper(),
                     'stock_name': data.get('name', ''),
-                    'current_price': float(data.get('last', 0)),
-                    'change_rate': float(data.get('rate', 0)),
-                    'volume': int(data.get('tvol', 0)),
+                    'current_price': current_price,
+                    'change_rate': _safe_float(data.get('rate')),
+                    'volume': _safe_int(data.get('tvol')),
                     'exchange': exchange
                 }
 
@@ -208,6 +260,11 @@ class USStockTrading:
             return 0
 
         current_price = price_info['current_price']
+
+        # Safety check for division by zero
+        if current_price <= 0:
+            logger.error(f"[{ticker}] Invalid current price: ${current_price}")
+            return 0
 
         # Calculate quantity (floor)
         quantity = math.floor(amount / current_price)
@@ -1022,8 +1079,14 @@ class USStockTrading:
 
                         # Execute buy
                         await asyncio.sleep(0.5)
+
+                        # Use current_price as limit_price if not provided or invalid
+                        # This is important for reserved orders when market is closed
+                        effective_limit_price = limit_price if (limit_price and limit_price > 0) else current_price
+                        logger.info(f"[Async Buy] {ticker} limit_price: ${effective_limit_price:.2f} (provided: {limit_price})")
+
                         buy_result = await asyncio.to_thread(
-                            self.smart_buy, ticker, amount, exchange, limit_price
+                            self.smart_buy, ticker, amount, exchange, effective_limit_price
                         )
 
                         if buy_result['success']:
@@ -1120,12 +1183,26 @@ class USStockTrading:
                             self.get_current_price, ticker, exchange
                         )
 
+                        current_price = 0.0
                         if price_info:
-                            result['current_price'] = price_info['current_price']
+                            current_price = price_info['current_price']
+                            result['current_price'] = current_price
+
+                        # Use current_price as limit_price if not provided or invalid
+                        # This is important for reserved orders when market is closed
+                        effective_limit_price = limit_price if (limit_price and limit_price > 0) else current_price
+
+                        # If no valid price at all, use MOO (Market On Open) for reserved orders
+                        effective_use_moo = use_moo
+                        if effective_limit_price <= 0 and not use_moo:
+                            logger.warning(f"[Async Sell] {ticker} no valid limit_price, using MOO")
+                            effective_use_moo = True
+
+                        logger.info(f"[Async Sell] {ticker} limit_price: ${effective_limit_price:.2f}, use_moo: {effective_use_moo}")
 
                         # Execute sell
                         sell_result = await asyncio.to_thread(
-                            self.smart_sell_all, ticker, exchange, limit_price, use_moo
+                            self.smart_sell_all, ticker, exchange, effective_limit_price if effective_limit_price > 0 else None, effective_use_moo
                         )
 
                         if sell_result['success']:
@@ -1204,17 +1281,18 @@ class USStockTrading:
                         output1 = [output1] if output1 else []
 
                     for item in output1:
-                        quantity = int(item.get('ovrs_cblc_qty', 0) or 0)
+                        # Use safe conversion to handle empty strings
+                        quantity = _safe_int(item.get('ovrs_cblc_qty'))
                         if quantity > 0:
                             stock_info = {
                                 'ticker': item.get('ovrs_pdno', ''),
                                 'stock_name': item.get('ovrs_item_name', ''),
                                 'quantity': quantity,
-                                'avg_price': float(item.get('pchs_avg_pric', 0) or 0),
-                                'current_price': float(item.get('now_pric2', 0) or 0),
-                                'eval_amount': float(item.get('ovrs_stck_evlu_amt', 0) or 0),
-                                'profit_amount': float(item.get('frcr_evlu_pfls_amt', 0) or 0),
-                                'profit_rate': float(item.get('evlu_pfls_rt', 0) or 0),
+                                'avg_price': _safe_float(item.get('pchs_avg_pric')),
+                                'current_price': _safe_float(item.get('now_pric2')),
+                                'eval_amount': _safe_float(item.get('ovrs_stck_evlu_amt')),
+                                'profit_amount': _safe_float(item.get('frcr_evlu_pfls_amt')),
+                                'profit_rate': _safe_float(item.get('evlu_pfls_rt')),
                                 'exchange': exchange
                             }
                             portfolio.append(stock_info)
@@ -1279,8 +1357,8 @@ class USStockTrading:
                 if output2 and isinstance(output2, list):
                     for item in output2:
                         if item.get('crcy_cd') == 'USD':
-                            usd_cash = float(item.get('frcr_dncl_amt_2', 0) or 0)
-                            exchange_rate = float(item.get('frst_bltn_exrt', 0) or 0)
+                            usd_cash = _safe_float(item.get('frcr_dncl_amt_2'))
+                            exchange_rate = _safe_float(item.get('frst_bltn_exrt'))
                             break
 
                 # Calculate from portfolio for stock totals

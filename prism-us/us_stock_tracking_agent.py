@@ -1192,21 +1192,27 @@ class USStockTrackingAgent:
                     if sell_success:
                         # Execute actual trading
                         trade_result = {'success': False, 'message': 'Trading not executed'}
-                        try:
-                            try:
-                                from trading.us_stock_trading import AsyncUSTradingContext
-                            except ImportError:
-                                from prism_us.trading.us_stock_trading import AsyncUSTradingContext
-                            async with AsyncUSTradingContext() as trading:
-                                # Pass limit_price for reserved orders (required for US market)
-                                trade_result = await trading.async_sell_stock(ticker=ticker, limit_price=current_price)
 
-                            if trade_result['success']:
-                                logger.info(f"Actual sell successful: {trade_result['message']}")
-                            else:
-                                logger.error(f"Actual sell failed: {trade_result['message']}")
-                        except Exception as trade_err:
-                            logger.warning(f"Trading execution skipped: {trade_err}")
+                        # Only execute trading if we have a valid price
+                        if current_price > 0:
+                            try:
+                                try:
+                                    from trading.us_stock_trading import AsyncUSTradingContext
+                                except ImportError:
+                                    from prism_us.trading.us_stock_trading import AsyncUSTradingContext
+                                async with AsyncUSTradingContext() as trading:
+                                    # Pass limit_price for reserved orders (required for US market)
+                                    # If limit_price is 0, trading module will use MOO (Market On Open)
+                                    trade_result = await trading.async_sell_stock(ticker=ticker, limit_price=current_price)
+
+                                if trade_result['success']:
+                                    logger.info(f"Actual sell successful: {trade_result['message']}")
+                                else:
+                                    logger.error(f"Actual sell failed: {trade_result['message']}")
+                            except Exception as trade_err:
+                                logger.warning(f"Trading execution skipped: {trade_err}")
+                        else:
+                            logger.warning(f"Skipping actual sell for {ticker}: invalid current_price ({current_price})")
 
                         # [Optional] Publish sell signal via Redis Streams
                         # Auto-skipped if Redis not configured (requires UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN)
@@ -1476,21 +1482,27 @@ class USStockTrackingAgent:
                     if buy_success:
                         # Execute actual trading
                         trade_result = {'success': False, 'message': 'Trading not executed'}
-                        try:
-                            try:
-                                from trading.us_stock_trading import AsyncUSTradingContext
-                            except ImportError:
-                                from prism_us.trading.us_stock_trading import AsyncUSTradingContext
-                            async with AsyncUSTradingContext() as trading:
-                                # Pass limit_price for reserved orders (required for US market)
-                                trade_result = await trading.async_buy_stock(ticker=ticker, limit_price=current_price)
 
-                            if trade_result['success']:
-                                logger.info(f"Actual purchase successful: {trade_result['message']}")
-                            else:
-                                logger.error(f"Actual purchase failed: {trade_result['message']}")
-                        except Exception as trade_err:
-                            logger.warning(f"Trading execution skipped: {trade_err}")
+                        # Only execute trading if we have a valid price
+                        if current_price > 0:
+                            try:
+                                try:
+                                    from trading.us_stock_trading import AsyncUSTradingContext
+                                except ImportError:
+                                    from prism_us.trading.us_stock_trading import AsyncUSTradingContext
+                                async with AsyncUSTradingContext() as trading:
+                                    # Pass limit_price for reserved orders (required for US market)
+                                    # Trading module will use current_price as limit_price for reserved orders
+                                    trade_result = await trading.async_buy_stock(ticker=ticker, limit_price=current_price)
+
+                                if trade_result['success']:
+                                    logger.info(f"Actual purchase successful: {trade_result['message']}")
+                                else:
+                                    logger.error(f"Actual purchase failed: {trade_result['message']}")
+                            except Exception as trade_err:
+                                logger.warning(f"Trading execution skipped: {trade_err}")
+                        else:
+                            logger.warning(f"Skipping actual purchase for {ticker}: invalid current_price ({current_price})")
 
                         # [Optional] Publish buy signal via Redis Streams
                         # Auto-skipped if Redis not configured (requires UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN)
