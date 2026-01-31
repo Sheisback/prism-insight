@@ -76,7 +76,8 @@ async def analyze_us_stock(
     ticker: str = "AAPL",
     company_name: str = "Apple Inc.",
     reference_date: str = None,
-    language: str = "en"
+    language: str = "en",
+    include_news: bool = True
 ) -> str:
     """
     Generate comprehensive stock analysis report for US stock.
@@ -86,6 +87,7 @@ async def analyze_us_stock(
         company_name: Company name (e.g., "Apple Inc.")
         reference_date: Analysis reference date (YYYYMMDD format)
         language: Language code (default: "en" for US market)
+        include_news: Whether to include news analysis (requires Perplexity API)
 
     Returns:
         str: Generated final report markdown text
@@ -114,10 +116,18 @@ async def analyze_us_stock(
             "market_index_analysis"            # yfinance indices
         ]
         # Non-yfinance sections: can run in parallel
-        parallel_sections = [
-            "news_analysis",                   # perplexity/firecrawl (no yfinance)
-        ]
-        base_sections = yfinance_sections + parallel_sections
+        parallel_sections = []
+        if include_news:
+            parallel_sections.append("news_analysis")  # perplexity (requires API key)
+        else:
+            # Add placeholder for skipped news section
+            if language == "ko":
+                section_reports["news_analysis"] = "_뉴스 분석은 Perplexity API 키가 필요합니다. 기술적/재무 분석은 정상적으로 제공됩니다._"
+            else:
+                section_reports["news_analysis"] = "_News analysis requires Perplexity API key. Technical and fundamental analysis are provided normally._"
+            logger.info("Skipping news_analysis (Perplexity API not configured)")
+        # Always include news_analysis in base_sections for report structure
+        base_sections = yfinance_sections + ["news_analysis"]
 
         # 4. Get US-specific agents
         agents = get_us_agent_directory(company_name, ticker, reference_date, base_sections, language)

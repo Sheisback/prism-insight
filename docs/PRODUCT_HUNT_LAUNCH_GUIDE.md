@@ -32,7 +32,7 @@
 | 작업 | 우선순위 | 상태 |
 |------|---------|------|
 | README 영문화 | 🔴 높음 | [x] 완료 (이미 영문) |
-| 설치 간소화 (Docker) | 🔴 높음 | [x] 완료 (quickstart.sh, docker-compose.quickstart.yml) |
+| 설치 간소화 | 🔴 높음 | [x] 완료 (quickstart.sh, demo.py, docker-compose.quickstart.yml) |
 | 데모 영상 제작 | 🔴 높음 | [ ] |
 | 랜딩 페이지 | 🔴 높음 | [ ] |
 | 라이브 데모 | 🟡 중간 | [x] 완료 (analysis.stocksimulation.kr) |

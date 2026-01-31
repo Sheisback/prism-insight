@@ -53,7 +53,33 @@ AI가 생성한 Apple Inc. 분석 리포트를 확인하세요:
 
 ---
 
-## 🚀 빠른 시작
+## ⚡ 60초 안에 체험하기 (미국 주식)
+
+PRISM-INSIGHT를 가장 빠르게 체험하는 방법입니다. **OpenAI API 키**만 있으면 됩니다.
+
+```bash
+# 클론 후 퀵스타트 스크립트 실행
+git clone https://github.com/dragon1086/prism-insight.git
+cd prism-insight
+./quickstart.sh YOUR_OPENAI_API_KEY
+```
+
+Apple(AAPL)의 AI 분석 리포트가 생성됩니다. 다른 종목도 분석해보세요:
+```bash
+python3 demo.py MSFT              # Microsoft
+python3 demo.py NVDA              # NVIDIA
+python3 demo.py TSLA --language ko  # Tesla (한국어 리포트)
+```
+
+> 💡 **OpenAI API 키 발급**: [OpenAI Platform](https://platform.openai.com/api-keys)
+>
+> 📰 **선택사항**: 뉴스 분석을 위해 [Perplexity API 키](https://www.perplexity.ai/)를 `mcp_agent.config.yaml`에 추가하세요
+
+AI가 생성한 PDF 리포트는 `prism-us/pdf_reports/`에 저장됩니다.
+
+---
+
+## 🚀 전체 설치
 
 ### 사전 요구사항
 - Python 3.10+ 또는 Docker

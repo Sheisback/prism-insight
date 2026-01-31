@@ -64,19 +64,18 @@ cd prism-insight
 ./quickstart.sh YOUR_OPENAI_API_KEY
 ```
 
-Or manually:
+This generates an AI analysis report for Apple (AAPL). Try other stocks:
 ```bash
-git clone https://github.com/dragon1086/prism-insight.git && cd prism-insight && \
-cp mcp_agent.secrets.yaml.example mcp_agent.secrets.yaml && \
-sed -i '' 's/example key/YOUR_OPENAI_API_KEY/' mcp_agent.secrets.yaml && \
-pip install -r requirements.txt && \
-python3 -m playwright install chromium && \
-python3 prism-us/us_stock_analysis_orchestrator.py --mode morning --no-telegram
+python3 demo.py MSFT              # Microsoft
+python3 demo.py NVDA              # NVIDIA
+python3 demo.py TSLA --language ko  # Tesla (Korean report)
 ```
 
 > 💡 **Get your OpenAI API key** from [OpenAI Platform](https://platform.openai.com/api-keys)
+>
+> 📰 **Optional**: Add a [Perplexity API key](https://www.perplexity.ai/) to `mcp_agent.config.yaml` for news analysis
 
-Your AI-generated stock analysis reports will be saved in `prism-us/pdf_reports/`.
+Your AI-generated PDF reports will be saved in `prism-us/pdf_reports/`.
 
 ---
 

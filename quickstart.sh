@@ -71,25 +71,19 @@ else
 fi
 echo -e "       API key configured ✓"
 
-# Run analysis
-echo -e "${BLUE}[5/5]${NC} Running US stock analysis..."
+# Run demo analysis (single stock report, not full pipeline)
+echo -e "${BLUE}[5/5]${NC} Generating AI analysis report for Apple (AAPL)..."
 echo ""
-echo -e "${YELLOW}This may take 5-10 minutes. AI agents are analyzing stocks...${NC}"
+echo -e "${YELLOW}This may take 3-5 minutes. AI agents are analyzing...${NC}"
 echo ""
 
-python3 prism-us/us_stock_analysis_orchestrator.py --mode morning --no-telegram
+python3 demo.py AAPL
 
-echo ""
-echo -e "${GREEN}╔════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║          Analysis Complete!            ║${NC}"
-echo -e "${GREEN}╚════════════════════════════════════════╝${NC}"
-echo ""
-echo -e "📁 Reports saved to: ${BLUE}prism-us/pdf_reports/${NC}"
 echo ""
 echo "Next steps:"
-echo "  • View your PDF reports in the pdf_reports directory"
+echo "  • Try analyzing other stocks: python3 demo.py MSFT"
+echo "  • Run full pipeline: python3 prism-us/us_stock_analysis_orchestrator.py --mode morning --no-telegram"
 echo "  • Set up Telegram for real-time alerts (see docs/SETUP.md)"
-echo "  • Try Korean market analysis with KRX credentials"
 echo ""
 echo -e "⭐ ${YELLOW}If this helped you, please star us on GitHub!${NC}"
 echo "   https://github.com/dragon1086/prism-insight"
