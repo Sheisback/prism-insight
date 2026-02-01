@@ -584,14 +584,14 @@ class DashboardDataGenerator:
     
     def get_operating_costs(self) -> Dict:
         """프로젝트 운영 비용 데이터 반환"""
-        # 2025년 11월 기준 운영 비용
+        # 2026년 1월 기준 운영 비용
         return {
             'server_hosting': 31.68,
-            'openai_api': 113.40,
-            'anthropic_api': 16.52,
+            'openai_api': 234.15,
+            'anthropic_api': 11.4,
             'firecrawl_api': 19.0,
-            'perplexity_api': 9.9,
-            'month': '2025-11'
+            'perplexity_api': 16.5,
+            'month': '2026-01'
         }
     
     def get_trading_insights(self, conn) -> Dict:

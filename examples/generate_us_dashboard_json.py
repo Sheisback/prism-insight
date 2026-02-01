@@ -1047,14 +1047,13 @@ class USDashboardDataGenerator:
             )
 
             # Operating costs (shared across markets)
-            current_month = datetime.now().strftime("%Y-%m")
             operating_costs = {
-                'month': current_month,
+                'month': '2026-01',
                 'server_hosting': 31.68,
-                'openai_api': 95.82,
-                'anthropic_api': 18.2,
+                'openai_api': 234.15,
+                'anthropic_api': 11.4,
                 'firecrawl_api': 19,
-                'perplexity_api': 9.9
+                'perplexity_api': 16.5
             }
 
             # Compose all data

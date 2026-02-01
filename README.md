@@ -303,10 +303,10 @@ Analysis information is for reference only, not investment advice. All investmen
 
 ### Support the Project
 
-Monthly operating costs (~$200/month):
-- OpenAI API: ~$120/month
-- Anthropic API: ~$20/month
-- Firecrawl + Perplexity: ~$30/month
+Monthly operating costs (~$310/month):
+- OpenAI API: ~$235/month
+- Anthropic API: ~$11/month
+- Firecrawl + Perplexity: ~$35/month
 - Server infrastructure: ~$30/month
 
 Currently serving 450+ users for free.

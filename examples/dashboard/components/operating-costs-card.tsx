@@ -29,14 +29,14 @@ interface OperatingCostsCardProps {
 export function OperatingCostsCard({ costs }: OperatingCostsCardProps) {
   const { language, t } = useLanguage()
 
-  // 기본값 설정 (2025년 10월)
+  // 기본값 설정 (2026년 1월)
   const defaultCosts = {
     server_hosting: 31.68,
-    openai_api: 95.82,
-    anthropic_api: 18.2,
+    openai_api: 234.15,
+    anthropic_api: 11.4,
     firecrawl_api: 19,
-    perplexity_api: 9.9,
-    month: "2025-10"
+    perplexity_api: 16.5,
+    month: "2026-01"
   }
 
   const actualCosts = costs || defaultCosts
