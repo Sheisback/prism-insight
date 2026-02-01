@@ -43,7 +43,7 @@ class JeoninguTradingDB:
                     video_url TEXT NOT NULL,
                     analyzed_date TEXT NOT NULL,
 
-                    -- AI Analysis results (every row has this)
+                    -- AI analysis results (every row has this)
                     jeon_sentiment TEXT NOT NULL,
                     jeon_reasoning TEXT,
                     contrarian_action TEXT NOT NULL,
@@ -314,22 +314,22 @@ async def test_database():
     # Scenario 1: First video → BUY
     buy_trade = {
         "video_id": "test001",
-        "video_title": "전인구: 시장 상승할 것 같다",
+        "video_title": "Jeon Ingu: Market will rise",
         "video_date": "2025-11-23",
         "video_url": "https://youtube.com/watch?v=test001",
         "analyzed_date": datetime.now().isoformat(),
-        "jeon_sentiment": "상승",
-        "jeon_reasoning": "긍정적 지표 언급",
-        "contrarian_action": "인버스2X매수",
+        "jeon_sentiment": "Bullish",
+        "jeon_reasoning": "Mentioned positive indicators",
+        "contrarian_action": "Buy Inverse 2X",
         "trade_type": "BUY",
         "stock_code": "252670",
-        "stock_name": "KODEX 200선물인버스2X",
+        "stock_name": "KODEX 200 Futures Inverse 2X",
         "quantity": 2000,
         "price": 5000,
         "amount": 10000000,
         "balance_before": 10000000,
-        "balance_after": 10000000,  # 현금→주식 전환이므로 balance 변동 없음
-        "notes": "첫 매수 (전액 투자)"
+        "balance_after": 10000000,  # Cash→stock conversion, no balance change
+        "notes": "First buy (all-in investment)"
     }
     buy_id = await db.insert_trade(buy_trade)
     print(f"✅ BUY trade inserted: ID {buy_id}")
@@ -337,16 +337,16 @@ async def test_database():
     # Scenario 2: Second video → SELL (neutral sentiment)
     sell_trade = {
         "video_id": "test002",
-        "video_title": "전인구: 잘 모르겠다",
+        "video_title": "Jeon Ingu: Not sure",
         "video_date": "2025-11-24",
         "video_url": "https://youtube.com/watch?v=test002",
         "analyzed_date": datetime.now().isoformat(),
-        "jeon_sentiment": "중립",
-        "jeon_reasoning": "명확한 방향성 없음",
-        "contrarian_action": "전량매도",
+        "jeon_sentiment": "Neutral",
+        "jeon_reasoning": "No clear direction",
+        "contrarian_action": "Sell all",
         "trade_type": "SELL",
         "stock_code": "252670",
-        "stock_name": "KODEX 200선물인버스2X",
+        "stock_name": "KODEX 200 Futures Inverse 2X",
         "quantity": 2000,
         "price": 5250,
         "amount": 10500000,
@@ -356,7 +356,7 @@ async def test_database():
         "balance_before": 10000000,
         "balance_after": 10500000,
         "cumulative_return_pct": 5.0,  # (10500000 - 10000000) / 10000000 * 100
-        "notes": "중립 기조로 전량 매도"
+        "notes": "Sell all on neutral sentiment"
     }
     sell_id = await db.insert_trade(sell_trade)
     print(f"✅ SELL trade inserted: ID {sell_id}, linked to BUY ID {buy_id}")
@@ -364,18 +364,18 @@ async def test_database():
     # Scenario 3: Third video → HOLD (same sentiment, no action)
     hold_trade = {
         "video_id": "test003",
-        "video_title": "전인구: 여전히 중립",
+        "video_title": "Jeon Ingu: Still neutral",
         "video_date": "2025-11-25",
         "video_url": "https://youtube.com/watch?v=test003",
         "analyzed_date": datetime.now().isoformat(),
-        "jeon_sentiment": "중립",
-        "jeon_reasoning": "계속 애매함",
-        "contrarian_action": "관망",
+        "jeon_sentiment": "Neutral",
+        "jeon_reasoning": "Still ambiguous",
+        "contrarian_action": "Hold",
         "trade_type": "HOLD",  # No actual trade
         "balance_before": 10500000,
         "balance_after": 10500000,
         "cumulative_return_pct": 5.0,
-        "notes": "보유 종목 없음, 현금 보유"
+        "notes": "No holdings, cash position"
     }
     hold_id = await db.insert_trade(hold_trade)
     print(f"✅ HOLD record inserted: ID {hold_id}")

@@ -218,7 +218,7 @@ def check_sector_diversity(cursor, sector: str, max_same_sector: int, concentrat
         bool: Investment availability (True: available, False: over-concentrated)
     """
     try:
-        if not sector or sector == "알 수 없음":
+        if not sector or sector == "Unknown":
             return True
 
         cursor.execute("SELECT scenario FROM stock_holdings")
@@ -296,11 +296,11 @@ def default_scenario() -> Dict[str, Any]:
     return {
         "portfolio_analysis": "Analysis failed",
         "buy_score": 0,
-        "decision": "미진입",
+        "decision": "No Entry",
         "target_price": 0,
         "stop_loss": 0,
-        "investment_period": "단기",
+        "investment_period": "Short-term",
         "rationale": "Analysis failed",
-        "sector": "알 수 없음",
+        "sector": "Unknown",
         "considerations": "Analysis failed"
     }

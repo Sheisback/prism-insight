@@ -93,12 +93,12 @@ US_PDF_REPORTS_DIR.mkdir(exist_ok=True)
 
 # Trigger type translation map (English -> Korean)
 TRIGGER_TYPE_KO = {
-    "Volume Surge Top": "거래량 급증 상위주",
-    "Gap Up Momentum Top": "갭 상승 모멘텀 상위주",
-    "Value-to-Cap Ratio Top": "시총 대비 집중 자금 유입 상위주",
-    "Intraday Rise Top": "일중 상승률 상위주",
-    "Closing Strength Top": "장 마감 강세 상위주",
-    "Volume Surge Sideways": "거래량 급증 횡보주",
+    "Volume Surge Top": "거래량 급증 상위주",  # Volume surge top stocks
+    "Gap Up Momentum Top": "갭 상승 모멘텀 상위주",  # Gap up momentum top stocks
+    "Value-to-Cap Ratio Top": "시총 대비 집중 자금 유입 상위주",  # Concentrated capital inflow vs market cap top stocks
+    "Intraday Rise Top": "일중 상승률 상위주",  # Intraday rise top stocks
+    "Closing Strength Top": "장 마감 강세 상위주",  # Closing strength top stocks
+    "Volume Surge Sideways": "거래량 급증 횡보주",  # Volume surge sideways stocks
 }
 
 
@@ -712,10 +712,10 @@ class USStockAnalysisOrchestrator:
             else:
                 title = "🔔 미국주식 오후 프리즘 시그널 얼럿"
                 time_desc = "장 마감 후"
-            header = f"{title}\n📅 {formatted_date} {time_desc} 포착된 관심종목\n\n"
-            volume_label = "거래량 증가"
-            gap_label = "갭상승"
-            footer = "📋 10~30분 후 상세 분석 리포트가 제공됩니다\n※ 본 정보는 투자 참고용이며, 투자 결정은 본인 책임입니다."
+            header = f"{title}\n📅 {formatted_date} {time_desc} 포착된 관심종목\n\n"  # Detected stocks of interest
+            volume_label = "거래량 증가"  # Volume increase
+            gap_label = "갭상승"  # Gap up
+            footer = "📋 10~30분 후 상세 분석 리포트가 제공됩니다\n※ 본 정보는 투자 참고용이며, 투자 결정은 본인 책임입니다."  # Detailed analysis report will be available in 10-30 minutes / This is for investment reference only
         else:  # English
             if mode == "morning":
                 title = "🔔 US Stock Morning Prism Signal Alert"
@@ -752,10 +752,10 @@ class USStockAnalysisOrchestrator:
                 message += f"  ${current_price:.2f} {arrow} {abs(change_rate):.2f}%\n"
 
                 # Additional information based on trigger type
-                if "volume_increase" in stock and ("Volume" in trigger_type or "거래량" in trigger_type):
+                if "volume_increase" in stock and ("Volume" in trigger_type or "거래량" in trigger_type):  # Check both English and Korean trigger names
                     volume_increase = stock.get("volume_increase", 0)
                     message += f"  {volume_label}: {volume_increase:.2f}%\n"
-                elif "gap_rate" in stock and ("Gap" in trigger_type or "갭" in trigger_type):
+                elif "gap_rate" in stock and ("Gap" in trigger_type or "갭" in trigger_type):  # Check both English and Korean trigger names
                     gap_rate = stock.get("gap_rate", 0)
                     message += f"  {gap_label}: {gap_rate:.2f}%\n"
 
@@ -768,17 +768,17 @@ class USStockAnalysisOrchestrator:
     def _get_trigger_emoji(self, trigger_type: str) -> str:
         """Return emoji matching trigger type"""
         # Support both Korean and English trigger type names
-        if "Volume" in trigger_type or "거래량" in trigger_type:
+        if "Volume" in trigger_type or "거래량" in trigger_type:  # Volume
             return "📊"
-        elif "Gap" in trigger_type or "갭" in trigger_type:
+        elif "Gap" in trigger_type or "갭" in trigger_type:  # Gap
             return "📈"
-        elif "Value" in trigger_type or "Cap" in trigger_type or "시총" in trigger_type:
+        elif "Value" in trigger_type or "Cap" in trigger_type or "시총" in trigger_type:  # Market cap
             return "💰"
-        elif "Rise" in trigger_type or "Intraday" in trigger_type or "상승" in trigger_type:
+        elif "Rise" in trigger_type or "Intraday" in trigger_type or "상승" in trigger_type:  # Rise
             return "🚀"
-        elif "Closing" in trigger_type or "Strength" in trigger_type or "마감" in trigger_type:
+        elif "Closing" in trigger_type or "Strength" in trigger_type or "마감" in trigger_type:  # Closing
             return "🔨"
-        elif "Sideways" in trigger_type or "횡보" in trigger_type:
+        elif "Sideways" in trigger_type or "횡보" in trigger_type:  # Sideways
             return "↔️"
         else:
             return "🔎"

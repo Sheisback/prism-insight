@@ -13,14 +13,14 @@ import pandas as pd
 sys.path.extend(['../..', '.'])
 import kis_auth as ka
 
-# 로깅 설정
+# Logging configuration
 logging.basicConfig(level=logging.INFO)
 
 ##############################################################################################
-# [국내주식] 주문/계좌 > 주식예약주문[v1_국내주식-017]
+# [Domestic Stock] Order/Account > Stock Reserved Order[v1_Domestic Stock-017]
 ##############################################################################################
 
-# 상수 정의
+# Constants
 API_URL = "/uapi/domestic-stock/v1/trading/order-resv"
 
 def order_resv(
@@ -37,84 +37,84 @@ def order_resv(
     ldng_dt: Optional[str] = ""
 ) -> pd.DataFrame:
     """
-    국내주식 예약주문 매수/매도 API 입니다.
+    Domestic stock reserved order buy/sell API.
 
-    ※ POST API의 경우 BODY값의 key값들을 대문자로 작성하셔야 합니다.
+    ※ For POST API, BODY key values must be written in uppercase.
     (EX. "CANO" : "12345678", "ACNT_PRDT_CD": "01",...)
 
-    ※ 유의사항
-    1. 예약주문 가능시간 : 15시 40분 ~ 다음 영업일 7시 30분 
-        (단, 서버 초기화 작업 시 예약주문 불가 : 23시 40분 ~ 00시 10분)
-        ※ 예약주문 처리내역은 통보되지 않으므로 주문처리일 장 시작전에 반드시 주문처리 결과를 확인하시기 바랍니다.
+    ※ Important Notes
+    1. Reserved order available time: 15:40 ~ next business day 7:30
+        (Except server initialization: 23:40 ~ 00:10)
+        ※ Reserved order processing results are not notified, so please check order processing results before market open.
 
-    2. 예약주문 안내
-    - 예약종료일 미입력 시 일반예약주문으로 최초 도래하는 영업일에 주문 전송됩니다.
-    - 예약종료일 입력 시 기간예약주문으로 최초 예약주문수량 중 미체결 된 수량에 대해 예약종료일까지 매 영업일 주문이
-        실행됩니다. (예약종료일은 익영업일부터 달력일 기준으로 공휴일 포함하여 최대 30일이 되는 일자까지 입력가능)
-    - 예약주문 접수 처리순서는 일반/기간예약주문 중 신청일자가 빠른 주문이 우선합니다.
-        단, 기간예약주문 자동배치시간(약 15시35분 ~ 15시55분)사이 접수되는 주문의 경우 당일에 한해 순서와 상관없이
-        처리될 수 있습니다.
-    - 기간예약주문 자동배치시간(약 15시35분 ~ 15시55분)에는 예약주문 조회가 제한 될 수 있습니다.
-    - 기간예약주문은 계좌 당 주문건수 최대 1,000건으로 제한됩니다.
+    2. Reserved order guide
+    - If end date not entered: Regular reserved order, order sent on first arriving business day.
+    - If end date entered: Period reserved order, unfilled quantity from initial order executed every business day until end date.
+        (End date can be entered up to 30 calendar days including holidays from next business day)
+    - Order processing priority: Earlier application date takes precedence between regular/period reserved orders.
+        However, orders received during period reserved order auto-batch time (approx. 15:35 ~ 15:55) may be processed
+        regardless of order on that day only.
+    - Period reserved order inquiry may be restricted during auto-batch time (approx. 15:35 ~ 15:55).
+    - Period reserved orders are limited to maximum 1,000 orders per account.
 
-    3. 예약주문 접수내역 중 아래의 사유 등으로 인해 주문이 거부될 수 있사오니, 주문처리일 장 시작전에 반드시
-        주문처리 결과를 확인하시기 바랍니다.
-        * 주문처리일 기준 : 매수가능금액 부족, 매도가능수량 부족, 주문수량/호가단위 오류, 대주 호가제한, 
-                                신용/대주가능종목 변경, 상/하한폭 변경, 시가형성 종목(신규상장 등)의 시장가, 거래서비스 미신청 등
+    3. Reserved orders may be rejected for reasons below, so please check order processing results before market open.
+        * As of order processing date: Insufficient buy available amount, insufficient sell available quantity, order quantity/tick unit error,
+        securities lending quote limit, credit/lending eligible stock change, upper/lower limit change, market price for price formation stocks
+        (newly listed), trading service not subscribed, etc.
 
-    4. 익일 예상 상/하한가는 조회시점의 현재가로 계산되며 익일의 유/무상증자, 배당, 감자, 합병, 액면변경 등에 의해
-        변동될 수 있으며 이로 인해 상/하한가를 벗어나 주문이 거부되는 경우가 발생할 수 있사오니, 주문처리일 장 시작전에
-        반드시 주문처리결과를 확인하시기 바랍니다.
+    4. Next day expected upper/lower limit is calculated from current price at inquiry time and may change due to next day's
+        paid-in/bonus capital increase, dividend, capital reduction, merger, par value change, etc. This may cause order rejection
+        due to exceeding upper/lower limit, so please check order processing results before market open.
 
-    5. 정리매매종목, ELW, 신주인수권증권, 신주인수권증서 등은 가격제한폭(상/하한가) 적용 제외됩니다.
+    5. Cleanup trading stocks, ELW, stock warrants, stock warrant certificates are exempt from price limit (upper/lower limit).
 
-    6. 영업일 장 시작 후 [기간예약주문] 내역 취소는 해당시점 이후의 예약주문이 취소되는 것으로, 
-        일반주문으로 이미 전환된 주문에는 영향을 미치지 않습니다. 반드시 장 시작전 주문처리결과를 확인하시기 바랍니다. 
-    
+    6. Canceling [Period Reserved Order] after business day market open only cancels reserved orders after that point,
+        and does not affect orders already converted to regular orders. Please check order processing results before market open.
+
     Args:
-        cano (str): [필수] 종합계좌번호 (계좌번호 체계(8-2)의 앞 8자리)
-        acnt_prdt_cd (str): [필수] 계좌상품코드 (계좌번호 체계(8-2)의 뒤 2자리)
-        pdno (str): [필수] 종목코드(6자리)
-        ord_qty (str): [필수] 주문수량 (주0문주식수)
-        ord_unpr (str): [필수] 주문단가 (1주당 가격, 시장가/장전 시간외는 0 입력)
-        sll_buy_dvsn_cd (str): [필수] 매도매수구분코드 (01 : 매도, 02 : 매수)
-        ord_dvsn_cd (str): [필수] 주문구분코드 (00 : 지정가, 01 : 시장가, 02 : 조건부지정가, 05 : 장전 시간외)
-        ord_objt_cblc_dvsn_cd (str): [필수] 주문대상잔고구분코드 (10: 현금, 12~28: 각종 대출/상환코드)
-        loan_dt (Optional[str]): 대출일자
-        rsvn_ord_end_dt (Optional[str]): 예약주문종료일자 (YYYYMMDD, 익영업일부터 최대 30일 이내)
-        ldng_dt (Optional[str]): 대여일자
+        cano (str): [Required] Account number (First 8 digits of account number format 8-2)
+        acnt_prdt_cd (str): [Required] Account product code (Last 2 digits of account number format 8-2)
+        pdno (str): [Required] Stock code (6 digits)
+        ord_qty (str): [Required] Order quantity (Number of shares)
+        ord_unpr (str): [Required] Order unit price (Price per share, 0 for market price/pre-market after-hours)
+        sll_buy_dvsn_cd (str): [Required] Sell/Buy division code (01: Sell, 02: Buy)
+        ord_dvsn_cd (str): [Required] Order division code (00: Limit, 01: Market, 02: Conditional limit, 05: Pre-market after-hours)
+        ord_objt_cblc_dvsn_cd (str): [Required] Order target balance division code (10: Cash, 12~28: Various loan/repayment codes)
+        loan_dt (Optional[str]): Loan date
+        rsvn_ord_end_dt (Optional[str]): Reserved order end date (YYYYMMDD, up to 30 days from next business day)
+        ldng_dt (Optional[str]): Lending date
 
     Returns:
-        pd.DataFrame: 예약주문 결과 데이터
-        
+        pd.DataFrame: Reserved order result data
+
     Example:
         >>> df = order_resv(cano=trenv.my_acct, acnt_prdt_cd=trenv.my_prod, pdno="005930", ord_qty="1", ord_unpr="55000", sll_buy_dvsn_cd="02", ord_dvsn_cd="00", ord_objt_cblc_dvsn_cd="10")
         >>> print(df)
     """
 
     if cano == "" or cano is None:
-        raise ValueError("cano is required (e.g. '계좌번호 체계(8-2)의 앞 8자리')")
-    
+        raise ValueError("cano is required (e.g. 'First 8 digits of account number format 8-2')")
+
     if acnt_prdt_cd == "" or acnt_prdt_cd is None:
-        raise ValueError("acnt_prdt_cd is required (e.g. '계좌번호 체계(8-2)의 뒤 2자리')")
-    
+        raise ValueError("acnt_prdt_cd is required (e.g. 'Last 2 digits of account number format 8-2')")
+
     if pdno == "" or pdno is None:
-        raise ValueError("pdno is required (e.g. '종목코드(6자리)')")
-    
+        raise ValueError("pdno is required (e.g. 'Stock code (6 digits)')")
+
     if ord_qty == "" or ord_qty is None:
-        raise ValueError("ord_qty is required (e.g. '주0문주식수')")
-    
+        raise ValueError("ord_qty is required (e.g. 'Number of shares')")
+
     if ord_unpr == "" or ord_unpr is None:
-        raise ValueError("ord_unpr is required (e.g. '1주당 가격, 시장가/장전 시간외는 0 입력')")
-    
+        raise ValueError("ord_unpr is required (e.g. 'Price per share, 0 for market price/pre-market after-hours')")
+
     if sll_buy_dvsn_cd == "" or sll_buy_dvsn_cd is None:
-        raise ValueError("sll_buy_dvsn_cd is required (e.g. '01 : 매도, 02 : 매수')")
-    
+        raise ValueError("sll_buy_dvsn_cd is required (e.g. '01: Sell, 02: Buy')")
+
     if ord_dvsn_cd == "" or ord_dvsn_cd is None:
-        raise ValueError("ord_dvsn_cd is required (e.g. '00 : 지정가, 01 : 시장가, 02 : 조건부지정가, 05 : 장전 시간외')")
-    
+        raise ValueError("ord_dvsn_cd is required (e.g. '00: Limit, 01: Market, 02: Conditional limit, 05: Pre-market after-hours')")
+
     if ord_objt_cblc_dvsn_cd == "" or ord_objt_cblc_dvsn_cd is None:
-        raise ValueError("ord_objt_cblc_dvsn_cd is required (e.g. '10: 현금, 12~28: 각종 대출/상환코드')")
+        raise ValueError("ord_objt_cblc_dvsn_cd is required (e.g. '10: Cash, 12~28: Various loan/repayment codes')")
 
     tr_id = "CTSC0008U"
 

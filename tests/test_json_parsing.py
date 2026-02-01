@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-JSON 파싱 오류 수정 테스트 코드
+JSON parsing error fix test code
 
-stock_tracking_agent.py의 JSON 파싱 로직을 테스트합니다.
+Tests JSON parsing logic in stock_tracking_agent.py.
 """
 
 import json
@@ -12,19 +12,19 @@ import sqlite3
 from pathlib import Path
 from typing import Dict, Any
 
-# 프로젝트 루트를 Python 경로에 추가
+# Add project root to Python path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 
 class TestJSONParser:
-    """JSON 파싱 테스트 클래스"""
+    """JSON parsing test class"""
     
     def test_broken_json_from_error_log(self):
-        """실제 에러 로그에서 발생한 JSON 파싱 테스트"""
-        print("\n=== 테스트 1: 실제 오류 발생 JSON ===")
-        
-        # 실제 오류가 발생했던 JSON (sell_triggers, hold_conditions 대괄호가 아닌 중괄호로 닫힘)
+        """Test JSON parsing from actual error log"""
+        print("\n=== Test 1: Actual Error JSON ===")
+
+        # JSON that actually caused an error (sell_triggers, hold_conditions closed with braces instead of brackets)
         broken_json = """{
   "portfolio_analysis": "보유 2/10슬롯(여유 8). 산업 분포는 화학/포장재, 반도체/전기전자로 분산되어 있으며 자동차 유통 섹터 편입 시 과도한 중복 없음. 투자기간은 중기 중심(2/2)으로 단기 포지션 여지 존재. 포트폴리오 평균수익률 미제시.",
   "valuation_analysis": "보고서 기준 PER은 적자 지속으로 N/A, PBR 2.92배(’24/12), EV/EBITDA 20.23배, PCR 10.28배. 업종 평균 PER 4.91배 대비 ‘저평가’ 근거는 부족하며(이익 부재·고 PBR), 우선주 유통물량 희소로 가격 변동성 왜곡 리스크 큼. 외부 소스(Perplexity)로 동종 업계/경쟁사 최신 비교는 불충분하여 보수적 해석 필요.",
@@ -62,65 +62,65 @@ class TestJSONParser:
     "portfolio_context": "현 포트폴리오에 소비경기/모빌리티 노출 추가로 분산효과는 있으나, 해당 종목은 유동성 리스크·변동성이 극단적. 분할매매 불가 시스템 특성상 트리거 충족 시에만 1슬롯(10%)로 단기 트레이드, 미충족 시 보유 회피가 합리적."
   }
 }"""
-        
-        # 원래는 파싱 오류가 발생해야 함
-        print("1) 오류 발생 JSON 파싱 시도...")
+
+        # Should cause parsing error originally
+        print("1) Attempting to parse error JSON...")
         try:
             json.loads(broken_json)
-            print("   ❌ 예상과 달리 파싱 성공 (이상함)")
+            print("   ❌ Unexpectedly parsed successfully (strange)")
         except json.JSONDecodeError as e:
-            print(f"   ✅ 예상대로 파싱 실패: {e}")
-        
-        # json_repair 적용 후 파싱
-        print("2) json_repair 적용 후 파싱...")
+            print(f"   ✅ Failed to parse as expected: {e}")
+
+        # Parse after applying json_repair
+        print("2) Parsing after applying json_repair...")
         try:
             import json_repair
             fixed_json = json_repair.repair_json(broken_json)
             parsed = json.loads(fixed_json)
-            print(f"   ✅ 파싱 성공!")
+            print(f"   ✅ Parsing successful!")
             print(f"   - portfolio_analysis: {parsed['portfolio_analysis'][:50]}...")
             print(f"   - buy_score: {parsed['buy_score']}")
             print(f"   - decision: {parsed['decision']}")
-            print(f"   - sell_triggers 개수: {len(parsed['trading_scenarios']['sell_triggers'])}")
-            print(f"   - hold_conditions 개수: {len(parsed['trading_scenarios']['hold_conditions'])}")
+            print(f"   - sell_triggers count: {len(parsed['trading_scenarios']['sell_triggers'])}")
+            print(f"   - hold_conditions count: {len(parsed['trading_scenarios']['hold_conditions'])}")
         except Exception as e:
-            print(f"   ❌ 파싱 실패: {e}")
+            print(f"   ❌ Parsing failed: {e}")
             return False
-        
+
         return True
-    
+
     def test_various_broken_json_patterns(self):
-        """다양한 JSON 문법 오류 패턴 테스트"""
-        print("\n=== 테스트 3: 다양한 문법 오류 패턴 ===")
-        
+        """Test various JSON syntax error patterns"""
+        print("\n=== Test 3: Various Syntax Error Patterns ===")
+
         test_cases = [
-            # 케이스 1: 배열 뒤 쉼표 누락
+            # Case 1: Missing comma after array
             {
-                "name": "배열 뒤 속성",
+                "name": "Array followed by property",
                 "broken": '{"array": [1, 2, 3]\n"next": "value"}',
                 "expected_keys": ["array", "next"]
             },
-            # 케이스 2: 객체 뒤 쉼표 누락
+            # Case 2: Missing comma after object
             {
-                "name": "객체 뒤 속성",
+                "name": "Object followed by property",
                 "broken": '{"obj": {"a": 1}\n"next": "value"}',
                 "expected_keys": ["obj", "next"]
             },
-            # 케이스 3: 마지막 쉼표
+            # Case 3: Trailing comma
             {
-                "name": "마지막 쉼표",
+                "name": "Trailing comma",
                 "broken": '{"a": 1, "b": 2,}',
                 "expected_keys": ["a", "b"]
             },
-            # 케이스 4: 중복 쉼표
+            # Case 4: Double comma
             {
-                "name": "중복 쉼표",
+                "name": "Double comma",
                 "broken": '{"a": 1,, "b": 2}',
                 "expected_keys": ["a", "b"]
             },
-            # 케이스 5: 복합 오류 (실제 시나리오)
+            # Case 5: Compound error (real scenario)
             {
-                "name": "복합 오류",
+                "name": "Compound error",
                 "broken": """{
                     "list": ["a", "b", "c"]
                     "obj": {"x": 1, "y": 2,},
@@ -130,49 +130,50 @@ class TestJSONParser:
                 "expected_keys": ["list", "obj", "value", "last"]
             }
         ]
-        
+
+
         all_passed = True
-        
+
         for i, test_case in enumerate(test_cases, 1):
-            print(f"\n   테스트 {i}: {test_case['name']}")
-            
-            # 원본은 파싱 오류 발생해야 함
+            print(f"\n   Test {i}: {test_case['name']}")
+
+            # Original should fail to parse
             try:
                 json.loads(test_case['broken'])
-                print(f"      ⚠️ 예상과 달리 원본 파싱 성공")
+                print(f"      ⚠️ Original unexpectedly parsed successfully")
             except:
-                print(f"      ✅ 원본 파싱 실패 (예상대로)")
-            
-            # 수정 후 파싱
+                print(f"      ✅ Original parsing failed (as expected)")
+
+            # Parse after fixing
             try:
                 import json_repair
                 fixed = json_repair.repair_json(test_case['broken'])
                 parsed = json.loads(fixed)
-                
-                # 예상 키 확인
+
+                # Check expected keys
                 for key in test_case['expected_keys']:
                     if key not in parsed:
-                        print(f"      ❌ 키 '{key}' 누락")
+                        print(f"      ❌ Key '{key}' missing")
                         all_passed = False
                         break
                 else:
-                    print(f"      ✅ 수정 후 파싱 성공 (모든 키 존재)")
-                    
+                    print(f"      ✅ Parsing successful after fix (all keys present)")
+
             except Exception as e:
-                print(f"      ❌ 수정 후에도 파싱 실패: {e}")
+                print(f"      ❌ Parsing still failed after fix: {e}")
                 all_passed = False
-        
+
         return all_passed
-    
+
     def test_json_repair_fallback(self):
-        """json-repair 라이브러리 폴백 테스트"""
-        print("\n=== 테스트 4: json-repair 라이브러리 폴백 ===")
-        
+        """Test json-repair library fallback"""
+        print("\n=== Test 4: json-repair Library Fallback ===")
+
         try:
             import json_repair
-            print("   ✅ json-repair 라이브러리 설치됨")
-            
-            # 매우 복잡하게 깨진 JSON
+            print("   ✅ json-repair library installed")
+
+            # Very broken JSON
             very_broken_json = """
             {
                 "a": "value with "quotes" inside",
@@ -187,53 +188,53 @@ class TestJSONParser:
                 "h": undefined,
             }
             """
-            
-            # json_repair로 복구
+
+            # Repair with json_repair
             try:
                 repaired = json_repair.repair_json(very_broken_json)
                 parsed = json.loads(repaired)
-                print(f"   ✅ 매우 깨진 JSON도 복구 성공!")
-                print(f"      복구된 키들: {list(parsed.keys())}")
+                print(f"   ✅ Even very broken JSON was repaired successfully!")
+                print(f"      Repaired keys: {list(parsed.keys())}")
             except Exception as e:
-                print(f"   ❌ json_repair 복구 실패: {e}")
-                
+                print(f"   ❌ json_repair repair failed: {e}")
+
         except ImportError:
-            print("   ⚠️ json-repair 라이브러리 미설치 (선택사항)")
-        
+            print("   ⚠️ json-repair library not installed (optional)")
+
         return True
 
 
 def main():
-    """메인 테스트 실행"""
+    """Run main test"""
     print("=" * 60)
-    print("JSON 파싱 오류 수정 테스트")
+    print("JSON Parsing Error Fix Test")
     print("=" * 60)
-    
+
     tester = TestJSONParser()
-    
-    # 각 테스트 실행
+
+    # Run each test
     results = {
-        "실제 오류 JSON": tester.test_broken_json_from_error_log(),
-        "다양한 오류 패턴": tester.test_various_broken_json_patterns(),
-        "json-repair 폴백": tester.test_json_repair_fallback(),
+        "Actual Error JSON": tester.test_broken_json_from_error_log(),
+        "Various Error Patterns": tester.test_various_broken_json_patterns(),
+        "json-repair Fallback": tester.test_json_repair_fallback(),
     }
-    
-    # 결과 요약
+
+    # Summary
     print("\n" + "=" * 60)
-    print("테스트 결과 요약")
+    print("Test Results Summary")
     print("=" * 60)
-    
+
     for test_name, passed in results.items():
         status = "✅ PASS" if passed else "❌ FAIL"
         print(f"{test_name:20} : {status}")
-    
-    # 전체 결과
+
+    # Overall result
     all_passed = all(results.values())
     print("\n" + "=" * 60)
     if all_passed:
-        print("✅ 모든 테스트 통과!")
+        print("✅ All tests passed!")
     else:
-        print("❌ 일부 테스트 실패")
+        print("❌ Some tests failed")
     print("=" * 60)
     
     return 0 if all_passed else 1

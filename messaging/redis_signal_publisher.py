@@ -52,8 +52,8 @@ class SignalPublisher:
         Initialize SignalPublisher
 
         Args:
-            redis_url: Upstash Redis REST URL (reads from environment variables if not provided)
-            redis_token: Upstash Redis REST Token (reads from environment variables if not provided)
+            redis_url: Upstash Redis REST URL (reads from environment if not provided)
+            redis_token: Upstash Redis REST Token (reads from environment if not provided)
         """
         self.redis_url = redis_url or os.environ.get("UPSTASH_REDIS_REST_URL")
         self.redis_token = redis_token or os.environ.get("UPSTASH_REDIS_REST_TOKEN")

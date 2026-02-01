@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-포트폴리오 텔레그램 리포터 테스트 스크립트
+Portfolio Telegram reporter test script
 """
 
 import asyncio
@@ -9,14 +9,14 @@ import sys
 import yaml
 from pathlib import Path
 
-# 현재 스크립트의 디렉토리를 기준으로 경로 설정
-SCRIPT_DIR = Path(__file__).parent          # tests 디렉토리
-PROJECT_ROOT = SCRIPT_DIR.parent             # 프로젝트 루트 (한 단계 위로)
+# Set paths based on current script directory
+SCRIPT_DIR = Path(__file__).parent          # tests directory
+PROJECT_ROOT = SCRIPT_DIR.parent             # project root (one level up)
 TRADING_DIR = PROJECT_ROOT / "trading"
 
-sys.path.insert(0, str(PROJECT_ROOT))       # 프로젝트 루트를 경로에 추가
+sys.path.insert(0, str(PROJECT_ROOT))       # Add project root to path
 
-# 설정파일 로딩
+# Load config file
 CONFIG_FILE = TRADING_DIR / "config" / "kis_devlp.yaml"
 with open(CONFIG_FILE, encoding="UTF-8") as f:
     _cfg = yaml.load(f, Loader=yaml.FullLoader)
@@ -25,175 +25,176 @@ from trading.portfolio_telegram_reporter import PortfolioTelegramReporter
 
 
 async def test_portfolio_reporter():
-    """포트폴리오 리포터 테스트"""
-    
-    print("=== 포트폴리오 텔레그램 리포터 테스트 ===")
+    """Portfolio reporter test"""
+
+    print("=== Portfolio Telegram Reporter Test ===")
     print()
-    
-    # 환경변수 확인
+
+    # Check environment variables
     telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHANNEL_ID")
-    
-    print("환경변수 확인:")
-    print(f"TELEGRAM_BOT_TOKEN: {'✅ 설정됨' if telegram_token else '❌ 설정 안됨'}")
-    print(f"TELEGRAM_CHANNEL_ID: {'✅ 설정됨' if chat_id else '❌ 설정 안됨'}")
+
+    print("Environment variable check:")
+    print(f"TELEGRAM_BOT_TOKEN: {'✅ Set' if telegram_token else '❌ Not set'}")
+    print(f"TELEGRAM_CHANNEL_ID: {'✅ Set' if chat_id else '❌ Not set'}")
     print()
-    
-    print("YAML 설정 확인:")
-    print(f"기본 트레이딩 모드: {_cfg['default_mode']}")
-    print(f"자동 트레이딩: {_cfg['auto_trading']}")
-    print(f"설정 파일 경로: {CONFIG_FILE}")
+
+    print("YAML configuration check:")
+    print(f"Default trading mode: {_cfg['default_mode']}")
+    print(f"Auto trading: {_cfg['auto_trading']}")
+    print(f"Config file path: {CONFIG_FILE}")
     print()
-    
+
     if not telegram_token or not chat_id:
-        print("❌ 필수 환경변수가 설정되지 않았습니다.")
-        print("다음과 같이 환경변수를 설정해주세요:")
+        print("❌ Required environment variables are not set.")
+        print("Please set environment variables as follows:")
         print("export TELEGRAM_BOT_TOKEN='your_bot_token'")
         print("export TELEGRAM_CHANNEL_ID='your_chat_id'")
         return False
-    
+
+
     try:
-        # 리포터 초기화 (yaml의 default_mode 사용)
-        print("1️⃣ 리포터 초기화 중...")
-        reporter = PortfolioTelegramReporter()  # trading_mode 파라미터 제거하면 yaml 설정 사용
-        print(f"✅ 리포터 초기화 완료 (모드: {reporter.trading_mode})")
+        # Initialize reporter (uses yaml's default_mode)
+        print("1️⃣ Initializing reporter...")
+        reporter = PortfolioTelegramReporter()  # Remove trading_mode parameter to use yaml settings
+        print(f"✅ Reporter initialization complete (mode: {reporter.trading_mode})")
         print()
-        
-        # 트레이딩 데이터 조회 테스트
-        print("2️⃣ 트레이딩 데이터 조회 테스트...")
+
+        # Trading data retrieval test
+        print("2️⃣ Trading data retrieval test...")
         portfolio, account_summary = await reporter.get_trading_data()
-        
-        print(f"   포트폴리오 종목 수: {len(portfolio)}개")
-        print(f"   계좌 요약 데이터: {'✅ 조회됨' if account_summary else '❌ 조회 실패'}")
-        
+
+        print(f"   Portfolio stocks count: {len(portfolio)}")
+        print(f"   Account summary data: {'✅ Retrieved' if account_summary else '❌ Retrieval failed'}")
+
         if account_summary:
             total_eval = account_summary.get('total_eval_amount', 0)
             total_profit = account_summary.get('total_profit_amount', 0)
-            print(f"   총 평가금액: {total_eval:,.0f}원")
-            print(f"   총 평가손익: {total_profit:+,.0f}원")
+            print(f"   Total valuation: {total_eval:,.0f} KRW")
+            print(f"   Total P&L: {total_profit:+,.0f} KRW")
         print()
-        
-        # 메시지 생성 테스트
-        print("3️⃣ 메시지 생성 테스트...")
+
+        # Message generation test
+        print("3️⃣ Message generation test...")
         message = reporter.create_portfolio_message(portfolio, account_summary)
-        print("✅ 메시지 생성 완료")
-        print("--- 생성된 메시지 미리보기 ---")
+        print("✅ Message generation complete")
+        print("--- Generated message preview ---")
         print(message[:500] + "..." if len(message) > 500 else message)
-        print("--- 미리보기 끝 ---")
+        print("--- End of preview ---")
         print()
-        
-        # 사용자 확인
-        print("4️⃣ 텔레그램 전송 테스트")
-        response = input("실제로 텔레그램 메시지를 전송하시겠습니까? (y/N): ").strip().lower()
-        
+
+        # User confirmation
+        print("4️⃣ Telegram send test")
+        response = input("Do you want to actually send the Telegram message? (y/N): ").strip().lower()
+
         if response in ['y', 'yes']:
-            print("📤 텔레그램 메시지 전송 중...")
+            print("📤 Sending Telegram message...")
             success = await reporter.send_portfolio_report()
-            
+
             if success:
-                print("✅ 텔레그램 메시지 전송 성공!")
+                print("✅ Telegram message sent successfully!")
             else:
-                print("❌ 텔레그램 메시지 전송 실패!")
+                print("❌ Telegram message send failed!")
                 return False
         else:
-            print("⏭️ 텔레그램 전송을 건너뜁니다.")
-        
+            print("⏭️ Skipping Telegram send.")
+
         print()
-        print("🎉 모든 테스트가 완료되었습니다!")
+        print("🎉 All tests completed!")
         return True
-        
+
     except Exception as e:
-        print(f"❌ 테스트 중 오류 발생: {str(e)}")
+        print(f"❌ Error during test: {str(e)}")
         return False
 
 
 async def test_simple_messages():
-    """간단한 메시지들 테스트"""
-    
-    print("\n=== 간단한 메시지 테스트 ===")
-    
+    """Simple messages test"""
+
+    print("\n=== Simple Message Test ===")
+
     try:
-        reporter = PortfolioTelegramReporter()  # yaml 설정 사용
-        print(f"테스트 모드: {reporter.trading_mode}")
-        
-        # 다양한 메시지 타입 테스트
+        reporter = PortfolioTelegramReporter()  # Use yaml settings
+        print(f"Test mode: {reporter.trading_mode}")
+
+        # Test various message types
         message_types = ["morning", "evening", "market_close", "weekend"]
-        
+
         for msg_type in message_types:
-            response = input(f"{msg_type} 메시지를 전송하시겠습니까? (y/N): ").strip().lower()
-            
+            response = input(f"Do you want to send {msg_type} message? (y/N): ").strip().lower()
+
             if response in ['y', 'yes']:
-                print(f"📤 {msg_type} 메시지 전송 중...")
+                print(f"📤 Sending {msg_type} message...")
                 success = await reporter.send_simple_status(msg_type)
-                
+
                 if success:
-                    print(f"✅ {msg_type} 메시지 전송 성공!")
+                    print(f"✅ {msg_type} message sent successfully!")
                 else:
-                    print(f"❌ {msg_type} 메시지 전송 실패!")
-                
+                    print(f"❌ {msg_type} message send failed!")
+
                 print()
-        
+
     except Exception as e:
-        print(f"❌ 간단한 메시지 테스트 중 오류: {str(e)}")
+        print(f"❌ Error during simple message test: {str(e)}")
 
 
 async def test_both_modes():
-    """두 모드 모두 테스트"""
-    
-    print("\n=== 양쪽 모드 테스트 ===")
-    
+    """Test both modes"""
+
+    print("\n=== Both Modes Test ===")
+
     modes = ["demo", "real"]
-    
+
     for mode in modes:
-        response = input(f"{mode} 모드로 테스트하시겠습니까? (y/N): ").strip().lower()
-        
+        response = input(f"Do you want to test in {mode} mode? (y/N): ").strip().lower()
+
         if response in ['y', 'yes']:
             try:
-                print(f"📊 {mode} 모드 테스트 중...")
-                reporter = PortfolioTelegramReporter(trading_mode=mode)  # 명시적으로 모드 지정
-                
+                print(f"📊 Testing {mode} mode...")
+                reporter = PortfolioTelegramReporter(trading_mode=mode)  # Explicitly specify mode
+
                 portfolio, account_summary = await reporter.get_trading_data()
-                print(f"   {mode} 모드 - 보유종목: {len(portfolio)}개")
-                
+                print(f"   {mode} mode - Holdings: {len(portfolio)}")
+
                 if account_summary:
                     total_eval = account_summary.get('total_eval_amount', 0)
-                    print(f"   {mode} 모드 - 총평가: {total_eval:,.0f}원")
-                
-                # 전송 여부 확인
-                send_response = input(f"{mode} 모드 리포트를 전송하시겠습니까? (y/N): ").strip().lower()
+                    print(f"   {mode} mode - Total valuation: {total_eval:,.0f} KRW")
+
+                # Check if sending
+                send_response = input(f"Do you want to send {mode} mode report? (y/N): ").strip().lower()
                 if send_response in ['y', 'yes']:
                     success = await reporter.send_portfolio_report()
-                    print(f"✅ {mode} 모드 전송 {'성공' if success else '실패'}!")
-                
+                    print(f"✅ {mode} mode send {'success' if success else 'failed'}!")
+
                 print()
-                
+
             except Exception as e:
-                print(f"❌ {mode} 모드 테스트 중 오류: {str(e)}")
+                print(f"❌ Error during {mode} mode test: {str(e)}")
 
 
 async def main():
-    """메인 함수"""
-    
-    print("포트폴리오 텔레그램 리포터 테스트를 시작합니다.")
-    print(f"프로젝트 루트: {PROJECT_ROOT}")
-    print(f"설정 파일: {CONFIG_FILE}")
+    """Main function"""
+
+    print("Starting portfolio Telegram reporter test.")
+    print(f"Project root: {PROJECT_ROOT}")
+    print(f"Config file: {CONFIG_FILE}")
     print()
-    
-    # 기본 테스트 (yaml 설정 사용)
+
+    # Basic test (use yaml settings)
     success = await test_portfolio_reporter()
-    
+
     if success:
-        # 추가 테스트
-        response = input("\n간단한 메시지들도 테스트하시겠습니까? (y/N): ").strip().lower()
+        # Additional tests
+        response = input("\nDo you want to test simple messages too? (y/N): ").strip().lower()
         if response in ['y', 'yes']:
             await test_simple_messages()
-        
-        # 양쪽 모드 테스트
-        response = input("\n양쪽 모드(demo/real) 모두 테스트하시겠습니까? (y/N): ").strip().lower()
+
+        # Both modes test
+        response = input("\nDo you want to test both modes (demo/real)? (y/N): ").strip().lower()
         if response in ['y', 'yes']:
             await test_both_modes()
-    
-    print("\n테스트가 완료되었습니다.")
+
+    print("\nTest completed.")
 
 
 if __name__ == "__main__":

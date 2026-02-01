@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-stock_holdings와 trading_history의 기존 레코드에 trigger_type 백필
+Backfill trigger_type for existing records in stock_holdings and trading_history
 
-기존 데이터의 trigger_type과 trigger_mode 컬럼을 채웁니다:
-1. trigger_results_*.json 파일에서 매핑 로드
-2. (ticker, buy_date) 기준으로 trigger_type 결정
-3. 매칭 안 되면 'AI분석' (기본값)
+Fills trigger_type and trigger_mode columns for existing data:
+1. Load mapping from trigger_results_*.json files
+2. Determine trigger_type based on (ticker, buy_date)
+3. Default to 'AI Analysis' if no match found
 
 Usage:
-    python utils/backfill_trigger_type.py --dry-run  # 미리보기
-    python utils/backfill_trigger_type.py            # 실행
+    python utils/backfill_trigger_type.py --dry-run  # Preview
+    python utils/backfill_trigger_type.py            # Execute
 """
 
 import argparse
@@ -51,22 +51,22 @@ def get_db_path() -> Path:
 
 def simplify_trigger_type(trigger_type: str) -> str:
     """
-    trigger_batch.py의 트리거 이름을 간소화
+    Simplify trigger names from trigger_batch.py
     """
     mapping = {
-        '거래량 급증 상위주': '거래량 급증',
-        '갭 상승 모멘텀 상위주': '갭 상승',
-        '시총 대비 집중 자금 유입 상위주': '자금 유입',
-        '일중 상승률 상위주': '일중 상승',
-        '마감 강도 상위주': '마감 강도',
-        '거래량 증가 상위 횡보주': '횡보 거래량',
+        '거래량 급증 상위주': 'Volume Surge',
+        '갭 상승 모멘텀 상위주': 'Gap Up',
+        '시총 대비 집중 자금 유입 상위주': 'Capital Inflow',
+        '일중 상승률 상위주': 'Intraday Surge',
+        '마감 강도 상위주': 'Closing Strength',
+        '거래량 증가 상위 횡보주': 'Sideways Volume',
     }
     return mapping.get(trigger_type, trigger_type)
 
 
 def load_trigger_results_map(project_root: Path) -> Dict[tuple, dict]:
     """
-    trigger_results JSON 파일에서 (ticker, date) -> {trigger_type, trigger_mode} 매핑 생성
+    Create (ticker, date) -> {trigger_type, trigger_mode} mapping from trigger_results JSON files
     """
     global _TRIGGER_MAP
 
@@ -128,13 +128,13 @@ def determine_trigger_info(
     trigger_map: Dict[tuple, dict]
 ) -> tuple:
     """
-    기존 데이터에서 trigger_type과 trigger_mode 결정
+    Determine trigger_type and trigger_mode from existing data
 
     Args:
-        ticker: 종목 코드
-        buy_date: 매수일 (YYYY-MM-DD HH:MM:SS or YYYY-MM-DD)
-        scenario_json: scenario JSON 문자열
-        trigger_map: trigger_results에서 로드한 매핑
+        ticker: Stock code
+        buy_date: Buy date (YYYY-MM-DD HH:MM:SS or YYYY-MM-DD)
+        scenario_json: Scenario JSON string
+        trigger_map: Mapping loaded from trigger_results
 
     Returns:
         (trigger_type, trigger_mode) tuple
@@ -163,7 +163,7 @@ def determine_trigger_info(
             pass
 
     # 3. Fall back to text analysis from scenario
-    trigger_type = 'AI분석'
+    trigger_type = 'AI Analysis'
     trigger_mode = 'unknown'
 
     if scenario_json:
@@ -174,23 +174,23 @@ def determine_trigger_info(
 
             # Heuristics based on rationale
             if '급등' in combined or 'surge' in combined or ('거래량' in combined and '급증' in combined):
-                trigger_type = '거래량 급증'
+                trigger_type = 'Volume Surge'
             elif '갭' in combined or 'gap' in combined:
-                trigger_type = '갭 상승'
+                trigger_type = 'Gap Up'
             elif '자금' in combined and '유입' in combined:
-                trigger_type = '자금 유입'
+                trigger_type = 'Capital Inflow'
             elif '일중' in combined or ('장중' in combined and '상승' in combined):
-                trigger_type = '일중 상승'
+                trigger_type = 'Intraday Surge'
             elif '마감' in combined or '강도' in combined:
-                trigger_type = '마감 강도'
+                trigger_type = 'Closing Strength'
             elif '횡보' in combined:
-                trigger_type = '횡보 거래량'
+                trigger_type = 'Sideways Volume'
             elif '돌파' in combined or 'breakout' in combined:
-                trigger_type = '기술적 돌파'
+                trigger_type = 'Technical Breakout'
             elif '뉴스' in combined or 'news' in combined:
-                trigger_type = '뉴스 촉발'
+                trigger_type = 'News Catalyst'
             else:
-                trigger_type = '종합 분석'
+                trigger_type = 'Comprehensive Analysis'
         except:
             pass
 
@@ -209,7 +209,7 @@ def determine_trigger_info(
 
 def add_columns_if_not_exist(conn: sqlite3.Connection):
     """
-    stock_holdings와 trading_history에 trigger_type, trigger_mode 컬럼 추가
+    Add trigger_type and trigger_mode columns to stock_holdings and trading_history
     """
     cursor = conn.cursor()
 
@@ -246,7 +246,7 @@ def backfill_stock_holdings(
     dry_run: bool
 ) -> dict:
     """
-    stock_holdings의 기존 레코드에 trigger_type 백필
+    Backfill trigger_type for existing records in stock_holdings
     """
     cursor = conn.cursor()
     stats = {'total': 0, 'updated': 0, 'skipped': 0}
@@ -305,7 +305,7 @@ def backfill_trading_history(
     dry_run: bool
 ) -> dict:
     """
-    trading_history의 기존 레코드에 trigger_type 백필
+    Backfill trigger_type for existing records in trading_history
     """
     cursor = conn.cursor()
     stats = {'total': 0, 'updated': 0, 'skipped': 0}

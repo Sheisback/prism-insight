@@ -4,7 +4,7 @@ Jeon Ingu Trading - Real-time price fetcher using krx_data_client
 Fetches current prices for KODEX Leverage and KODEX Inverse 2X
 """
 from dotenv import load_dotenv
-load_dotenv()  # .env 파일에서 환경변수 로드
+load_dotenv()  # Load environment variables from .env file
 
 from krx_data_client import (
     get_index_ohlcv_by_date,
@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 import logging
 
 
-# pykrx 호환 래퍼
+# pykrx compatible wrapper
 class stock:
     @staticmethod
     def get_index_ohlcv_by_date(fromdate, todate, ticker):
@@ -176,5 +176,5 @@ if __name__ == "__main__":
     # Get current price
     current_leverage = get_current_price(KODEX_LEVERAGE)
     current_inverse_2x = get_current_price(KODEX_INVERSE_2X)
-    print(f"\nCurrent KODEX Leverage: {current_leverage:,}원")
-    print(f"Current KODEX Inverse 2X: {current_inverse_2x:,}원")
+    print(f"\nCurrent KODEX Leverage: {current_leverage:,} KRW")
+    print(f"Current KODEX Inverse 2X: {current_inverse_2x:,} KRW")

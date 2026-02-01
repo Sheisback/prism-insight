@@ -236,7 +236,7 @@ class CompressionManager:
             formatted.append(
                 f"[ID:{entry['id']}] {entry.get('company_name', '')}({entry.get('ticker', '')}) "
                 f"{profit_emoji} {entry.get('profit_rate', 0):.1f}% | "
-                f"요약: {entry.get('one_line_summary', 'N/A')} | 교훈: {lessons_str} | 태그: {tags_str}"
+                f"Summary: {entry.get('one_line_summary', 'N/A')} | Lessons: {lessons_str} | Tags: {tags_str}"
             )
         return "\n".join(formatted)
 
@@ -246,9 +246,9 @@ class CompressionManager:
         for entry in entries:
             try:
                 scenario = json.loads(entry.get('buy_scenario', '{}')) if entry.get('buy_scenario') else {}
-                sector = scenario.get('sector', '알 수 없음')
+                sector = scenario.get('sector', 'Unknown')
             except:
-                sector = '알 수 없음'
+                sector = 'Unknown'
 
             try:
                 tags = json.loads(entry.get('pattern_tags', '[]')) if entry.get('pattern_tags') else []
@@ -258,9 +258,9 @@ class CompressionManager:
 
             profit_emoji = "✅" if entry.get('profit_rate', 0) > 0 else "❌"
             formatted.append(
-                f"[ID:{entry['id']}] {entry.get('company_name', '')} | 섹터: {sector} | "
+                f"[ID:{entry['id']}] {entry.get('company_name', '')} | Sector: {sector} | "
                 f"{profit_emoji} {entry.get('profit_rate', 0):.1f}% | "
-                f"요약: {entry.get('compressed_summary', 'N/A')} | 태그: {tags_str}"
+                f"Summary: {entry.get('compressed_summary', 'N/A')} | Tags: {tags_str}"
             )
         return "\n".join(formatted)
 
@@ -273,7 +273,7 @@ class CompressionManager:
             sector = ''
 
         profit = entry.get('profit_rate', 0)
-        result = "수익" if profit > 0 else "손실"
+        result = "Profit" if profit > 0 else "Loss"
         summary = entry.get('one_line_summary', '')
         if summary:
             return summary[:100]
@@ -283,18 +283,18 @@ class CompressionManager:
         """Build prompt for Layer 2 compression."""
         if self.language == "ko":
             return f"""
-다음 매매일지 항목들을 Layer 2 (요약) 형식으로 압축해주세요.
+Compress these trading journal entries to Layer 2 (summary) format.
 
-## 압축 대상 ({count}건)
+## Entries to Compress ({count} items)
 {entries_text}
 
-## 요청사항
-1. 각 항목을 "{{섹터}} + {{트리거}} → {{행동}} → {{결과}}" 형식으로 요약
-2. 유사 패턴 그룹화
-3. 반복 교훈 식별
-4. 섹터별 통계 계산
+## Requirements
+1. Summarize each item as "{{sector}} + {{trigger}} → {{action}} → {{result}}" format
+2. Group similar patterns
+3. Identify recurring lessons
+4. Calculate sector statistics
 
-JSON으로 응답해주세요.
+Please respond in JSON.
 """
         else:
             return f"""
@@ -316,19 +316,19 @@ Respond in JSON.
         """Build prompt for Layer 3 / intuition extraction."""
         if self.language == "ko":
             return f"""
-다음 압축된 기록에서 직관(Intuition)을 추출해주세요.
+Extract intuitions from these compressed records.
 
-## 압축 기록 ({count}건)
+## Compressed Records ({count} items)
 {entries_text}
 
-## 요청사항
-1. 2회+ 반복 패턴에서 직관 추출
-2. "{{조건}} = {{원칙}}" 형식으로 직관 생성
-3. 신뢰도/적중률 계산
-4. 섹터별/시장별/패턴별 분류
-5. 실패/성공 패턴 모두 포함
+## Requirements
+1. Extract intuitions from patterns appearing 2+ times
+2. Generate intuitions in "{{condition}} = {{principle}}" format
+3. Calculate confidence/success rate
+4. Categorize by sector/market/pattern
+5. Include both failure and success patterns
 
-JSON으로 응답해주세요.
+Please respond in JSON.
 """
         else:
             return f"""

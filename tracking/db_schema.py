@@ -143,19 +143,19 @@ CREATE TABLE IF NOT EXISTS trading_principles (
 )
 """
 
-# Table: user_memories (사용자별 기억 저장)
+# Table: user_memories (per-user memory storage)
 TABLE_USER_MEMORIES = """
 CREATE TABLE IF NOT EXISTS user_memories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
     memory_type TEXT NOT NULL,          -- 'journal', 'evaluation', 'report', 'conversation'
-    content TEXT NOT NULL,              -- JSON: 상세 내용
-    summary TEXT,                       -- 압축된 요약 (장기기억용)
+    content TEXT NOT NULL,              -- JSON: detailed content
+    summary TEXT,                       -- compressed summary (for long-term memory)
     ticker TEXT,
     ticker_name TEXT,
     market_type TEXT DEFAULT 'kr',      -- 'kr' or 'us'
     importance_score REAL DEFAULT 0.5,
-    compression_layer INTEGER DEFAULT 1, -- 1=상세, 2=요약, 3=압축
+    compression_layer INTEGER DEFAULT 1, -- 1=detailed, 2=summary, 3=compressed
     created_at TEXT NOT NULL,
     last_accessed_at TEXT,
     command_source TEXT,
@@ -164,7 +164,7 @@ CREATE TABLE IF NOT EXISTS user_memories (
 )
 """
 
-# Table: user_preferences (사용자 선호 설정)
+# Table: user_preferences (user preference settings)
 TABLE_USER_PREFERENCES = """
 CREATE TABLE IF NOT EXISTS user_preferences (
     user_id INTEGER PRIMARY KEY,

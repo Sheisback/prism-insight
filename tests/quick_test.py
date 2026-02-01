@@ -1,9 +1,9 @@
 """
-빠른 테스트 스크립트 - 핵심 기능만 간단히 테스트
+Quick test script - Simple test of core functions only
 
-사용법:
+Usage:
 python quick_test.py [buy|sell|portfolio] [--mode demo|real]
-python quick_test.py [buy|sell|portfolio] [demo|real]  # 간단한 형태
+python quick_test.py [buy|sell|portfolio] [demo|real]  # Simple form
 """
 
 import asyncio
@@ -12,41 +12,41 @@ import os
 import logging
 import argparse
 
-# 상위 디렉토리의 trading 모듈 import
+# Import trading module from parent directory
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from trading.domestic_stock_trading import AsyncTradingContext
 
-# 간단한 로깅 설정
+# Simple logging setup
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
 
 def parse_arguments():
-    """명령행 인자 파싱"""
+    """Parse command line arguments"""
     parser = argparse.ArgumentParser(
-        description='주식 거래 빠른 테스트',
+        description='Quick stock trading test',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-사용 예시:
-  python quick_test.py portfolio              # 모의투자로 포트폴리오 조회
-  python quick_test.py portfolio --mode demo  # 모의투자로 포트폴리오 조회
-  python quick_test.py buy --mode real        # 실전투자로 매수 (주의!)
-  python quick_test.py sell real              # 실전투자로 매도 (주의!)
+Usage examples:
+  python quick_test.py portfolio              # Check portfolio with demo trading
+  python quick_test.py portfolio --mode demo  # Check portfolio with demo trading
+  python quick_test.py buy --mode real        # Buy with real trading (caution!)
+  python quick_test.py sell real              # Sell with real trading (caution!)
         """
     )
-    
+
     parser.add_argument(
-        'command', 
+        'command',
         choices=['buy', 'sell', 'portfolio'],
-        help='실행할 명령 (buy: 매수, sell: 매도, portfolio: 포트폴리오 조회)'
+        help='Command to execute (buy: buy, sell: sell, portfolio: check portfolio)'
     )
-    
+
     parser.add_argument(
-        '--mode', 
+        '--mode',
         choices=['demo', 'real'],
         default='demo',
-        help='거래 모드 (demo: 모의투자, real: 실전투자, 기본값: demo)'
+        help='Trading mode (demo: demo trading, real: real trading, default: demo)'
     )
     
     # 위치 인자로도 mode 받을 수 있도록 (하위 호환성)
@@ -67,135 +67,135 @@ def parse_arguments():
 
 
 async def quick_portfolio_check(mode="demo"):
-    """포트폴리오 빠른 조회"""
-    print(f"📊 포트폴리오 조회 중... (모드: {mode})")
-    
+    """Quick portfolio check"""
+    print(f"📊 Checking portfolio... (mode: {mode})")
+
     async with AsyncTradingContext(mode=mode) as trader:
         portfolio = await asyncio.to_thread(trader.get_portfolio)
         summary = await asyncio.to_thread(trader.get_account_summary)
-        
-        print(f"\n💼 보유 종목: {len(portfolio)}개")
-        
+
+        print(f"\n💼 Holdings: {len(portfolio)}")
+
         if summary:
-            print(f"💰 총평가: {summary.get('total_eval_amount', 0):,.0f}원")
-            print(f"📈 총손익: {summary.get('total_profit_amount', 0):+,.0f}원")
-            print(f"📊 수익률: {summary.get('total_profit_rate', 0):+.2f}%")
-        
+            print(f"💰 Total value: {summary.get('total_eval_amount', 0):,.0f} KRW")
+            print(f"📈 Total P&L: {summary.get('total_profit_amount', 0):+,.0f} KRW")
+            print(f"📊 P&L rate: {summary.get('total_profit_rate', 0):+.2f}%")
+
         for i, stock in enumerate(portfolio[:3]):
-            print(f"  {i+1}. {stock['stock_name']}: {stock['quantity']}주 ({stock['profit_rate']:+.2f}%)")
-        
+            print(f"  {i+1}. {stock['stock_name']}: {stock['quantity']} shares ({stock['profit_rate']:+.2f}%)")
+
         if len(portfolio) > 3:
-            print(f"  ... 외 {len(portfolio)-3}개 종목")
+            print(f"  ... and {len(portfolio)-3} more stocks")
 
 
 async def quick_buy_test(stock_code="061040", amount=10000, mode="demo"):
-    """빠른 매수 테스트"""
-    print(f"💳 {stock_code} 매수 테스트 중... (금액: {amount:,}원, 모드: {mode})")
-    
+    """Quick buy test"""
+    print(f"💳 Testing buy for {stock_code}... (amount: {amount:,} KRW, mode: {mode})")
+
     if mode == "real":
-        print("⚠️ 실전투자 모드입니다! 실제 매매가 발생합니다!")
-        confirmation = input("정말 실전투자로 매수하시겠습니까? (yes/no): ")
+        print("⚠️ Real trading mode! Actual trading will occur!")
+        confirmation = input("Do you really want to buy in real trading mode? (yes/no): ")
         if confirmation.lower() != "yes":
-            print("매수가 취소되었습니다.")
-            return {'success': False, 'message': '사용자 취소'}
-    
+            print("Buy cancelled.")
+            return {'success': False, 'message': 'User cancelled'}
+
     async with AsyncTradingContext(mode=mode, buy_amount=amount) as trader:
         result = await trader.async_buy_stock(stock_code, timeout=20.0)
-        
+
         if result['success']:
-            print(f"✅ 매수 성공!")
-            print(f"   종목: {result['stock_code']}")
-            print(f"   수량: {result['quantity']}주")
-            print(f"   현재가: {result['current_price']:,}원")
-            print(f"   총액: {result['total_amount']:,}원")
+            print(f"✅ Buy successful!")
+            print(f"   Stock: {result['stock_code']}")
+            print(f"   Quantity: {result['quantity']} shares")
+            print(f"   Current price: {result['current_price']:,} KRW")
+            print(f"   Total amount: {result['total_amount']:,} KRW")
         else:
-            print(f"❌ 매수 실패: {result['message']}")
-        
+            print(f"❌ Buy failed: {result['message']}")
+
         return result
 
 
 async def quick_sell_test(stock_code="061040", mode="demo"):
-    """빠른 매도 테스트"""
-    print(f"💸 {stock_code} 매도 테스트 중... (모드: {mode})")
-    
+    """Quick sell test"""
+    print(f"💸 Testing sell for {stock_code}... (mode: {mode})")
+
     if mode == "real":
-        print("⚠️ 실전투자 모드입니다! 실제 매매가 발생합니다!")
-        confirmation = input("정말 실전투자로 매도하시겠습니까? (yes/no): ")
+        print("⚠️ Real trading mode! Actual trading will occur!")
+        confirmation = input("Do you really want to sell in real trading mode? (yes/no): ")
         if confirmation.lower() != "yes":
-            print("매도가 취소되었습니다.")
-            return {'success': False, 'message': '사용자 취소'}
-    
+            print("Sell cancelled.")
+            return {'success': False, 'message': 'User cancelled'}
+
     async with AsyncTradingContext(mode=mode) as trader:
         result = await trader.async_sell_stock(stock_code, timeout=20.0)
-        
+
         if result['success']:
-            print(f"✅ 매도 성공!")
-            print(f"   종목: {result['stock_code']}")
-            print(f"   수량: {result['quantity']}주")
-            print(f"   예상금액: {result['estimated_amount']:,}원")
+            print(f"✅ Sell successful!")
+            print(f"   Stock: {result['stock_code']}")
+            print(f"   Quantity: {result['quantity']} shares")
+            print(f"   Estimated amount: {result['estimated_amount']:,} KRW")
             if 'profit_rate' in result:
-                print(f"   수익률: {result['profit_rate']:+.2f}%")
+                print(f"   P&L rate: {result['profit_rate']:+.2f}%")
         else:
-            print(f"❌ 매도 실패: {result['message']}")
-        
+            print(f"❌ Sell failed: {result['message']}")
+
         return result
 
 
 async def main():
-    """메인 함수"""
+    """Main function"""
     try:
         args = parse_arguments()
     except SystemExit:
         return
-    
+
     mode = args.mode
     command = args.command
-    
-    # 모드별 표시
+
+    # Mode display
     mode_emoji = "🟢" if mode == "demo" else "🔴"
-    mode_text = "모의투자" if mode == "demo" else "실전투자"
-    
-    print(f"🚀 빠른 테스트 시작 ({mode_emoji} {mode_text})")
+    mode_text = "Demo trading" if mode == "demo" else "Real trading"
+
+    print(f"🚀 Quick test started ({mode_emoji} {mode_text})")
     print("="*40)
-    
+
     if mode == "real":
-        print("⚠️ 경고: 실전투자 모드입니다!")
-        print("⚠️ 실제 매매가 발생할 수 있습니다!")
+        print("⚠️ Warning: Real trading mode!")
+        print("⚠️ Actual trading may occur!")
         print("="*40)
-    
+
     try:
         if command == "portfolio":
             await quick_portfolio_check(mode)
-        
+
         elif command == "buy":
-            await quick_buy_test("061040", 10000, mode)  # 알에프텍 1만원
-        
+            await quick_buy_test("061040", 10000, mode)  # RF Tech 10,000 KRW
+
         elif command == "sell":
-            await quick_sell_test("061040", mode)  # 알에프텍 전량매도
-    
+            await quick_sell_test("061040", mode)  # RF Tech all shares
+
     except Exception as e:
-        logger.error(f"테스트 중 오류: {e}")
-    
-    print(f"\n✅ 테스트 완료 ({mode_text})")
+        logger.error(f"Error during test: {e}")
+
+    print(f"\n✅ Test completed ({mode_text})")
 
 
 def show_usage():
-    """사용법 표시"""
-    print("🚀 빠른 테스트 스크립트")
+    """Show usage"""
+    print("🚀 Quick Test Script")
     print("="*40)
-    print("사용법:")
-    print("  python quick_test.py [명령] [모드]")
+    print("Usage:")
+    print("  python quick_test.py [command] [mode]")
     print()
-    print("명령:")
-    print("  portfolio - 포트폴리오 조회")
-    print("  buy       - 알에프텍 1만원 매수")
-    print("  sell      - 알에프텍 전량 매도")
+    print("Commands:")
+    print("  portfolio - Check portfolio")
+    print("  buy       - Buy RF Tech 10,000 KRW")
+    print("  sell      - Sell all RF Tech shares")
     print()
-    print("모드:")
-    print("  demo - 모의투자 (기본값, 안전)")
-    print("  real - 실전투자 (⚠️ 실제 매매 발생!)")
+    print("Modes:")
+    print("  demo - Demo trading (default, safe)")
+    print("  real - Real trading (⚠️ Actual trading occurs!)")
     print()
-    print("예시:")
+    print("Examples:")
     print("  python quick_test.py portfolio")
     print("  python quick_test.py portfolio demo")
     print("  python quick_test.py buy --mode demo")

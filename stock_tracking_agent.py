@@ -12,7 +12,7 @@ Main Features:
 4. Share results through Telegram channel
 """
 from dotenv import load_dotenv
-load_dotenv()  # .env 파일에서 환경변수 로드
+load_dotenv()  # Load environment variables from .env file
 
 import asyncio
 import json
@@ -85,9 +85,9 @@ class StockTrackingAgent:
     SECTOR_CONCENTRATION_RATIO = 0.3  # Sector concentration limit ratio
 
     # Investment period constants
-    PERIOD_SHORT = "단기"  # Within 1 month
-    PERIOD_MEDIUM = "중기"  # 1-3 months
-    PERIOD_LONG = "장기"  # 3+ months
+    PERIOD_SHORT = "short_term"  # Within 1 month
+    PERIOD_MEDIUM = "medium_term"  # 1-3 months
+    PERIOD_LONG = "long_term"  # 3+ months
 
     # Buy score thresholds
     SCORE_STRONG_BUY = 8  # Strong buy
@@ -212,7 +212,7 @@ class StockTrackingAgent:
             rank_change_msg: Trading value ranking change info
             ticker: Stock ticker code (for journal context lookup)
             sector: Stock sector (for journal context lookup)
-            trigger_type: Trigger type that activated this analysis (e.g., '거래량 급증 상위주')
+            trigger_type: Trigger type that activated this analysis (e.g., 'Volume Surge Top Stocks')
             trigger_mode: Trigger mode ('morning' or 'afternoon')
 
         Returns:
@@ -231,7 +231,7 @@ class StockTrackingAgent:
 
             # Analyze sector distribution
             sector_distribution = {}
-            investment_periods = {"단기": 0, "중기": 0, "장기": 0}
+            investment_periods = {"short_term": 0, "medium_term": 0, "long_term": 0}
 
             for holding in holdings:
                 scenario_str = holding.get('scenario', '{}')
@@ -240,11 +240,11 @@ class StockTrackingAgent:
                         scenario_data = json.loads(scenario_str)
 
                         # Collect sector info
-                        sector_name = scenario_data.get('sector', '알 수 없음')
+                        sector_name = scenario_data.get('sector', 'Unknown')
                         sector_distribution[sector_name] = sector_distribution.get(sector_name, 0) + 1
 
                         # Collect investment period info
-                        period = scenario_data.get('investment_period', '중기')
+                        period = scenario_data.get('investment_period', 'medium_term')
                         investment_periods[period] = investment_periods.get(period, 0) + 1
                 except:
                     pass
@@ -270,10 +270,10 @@ class StockTrackingAgent:
                 if adjustment != 0 or reasons:
                     if self.language == "ko":
                         score_adjustment_info = f"""
-                ### 📊 과거 경험 기반 점수 보정 제안
-                - 권장 점수 조정: {'+' if adjustment > 0 else ''}{adjustment}점
-                - 조정 이유: {', '.join(reasons) if reasons else '해당 없음'}
-                - ⚠️ 이 보정값은 과거 경험에 기반한 참고 사항입니다.
+                ### 📊 Score Adjustment Suggestion (Experience-Based)
+                - Recommended Adjustment: {'+' if adjustment > 0 else ''}{adjustment} points
+                - Reason: {', '.join(reasons) if reasons else 'N/A'}
+                - ⚠️ This adjustment is a reference based on past experience.
                 """
                     else:
                         score_adjustment_info = f"""
@@ -291,9 +291,9 @@ class StockTrackingAgent:
             if trigger_type:
                 if self.language == "ko":
                     trigger_info_section = f"""
-                ### 📡 트리거 정보 (진입 기준 차별화 필수 참고)
-                - **발동 트리거**: {trigger_type}
-                - **트리거 모드**: {trigger_mode or '알 수 없음'}
+                ### 📡 Trigger Info (Apply Trigger-Based Entry Criteria)
+                - **Triggered By**: {trigger_type}
+                - **Trigger Mode**: {trigger_mode or 'unknown'}
                 """
                 else:
                     trigger_info_section = f"""
@@ -305,17 +305,17 @@ class StockTrackingAgent:
             # Prepare prompt based on language
             if self.language == "ko":
                 prompt_message = f"""
-                다음은 주식 종목에 대한 AI 분석 보고서입니다. 이 보고서를 기반으로 매매 시나리오를 생성해주세요.
+                This is an AI analysis report for a stock. Please generate a trading scenario based on this report.
 
-                ### 현재 포트폴리오 상황:
+                ### Current Portfolio Status:
                 {portfolio_info}
                 {trigger_info_section}
-                ### 거래대금 분석:
+                ### Trading Value Analysis:
                 {rank_change_msg}
                 {score_adjustment_info}
                 {journal_context}
 
-                ### 보고서 내용:
+                ### Report Content:
                 {report_content}
                 """
             else:  # English
@@ -470,7 +470,7 @@ class StockTrackingAgent:
                 holding_current_price = await self._get_current_stock_price(ticker)
                 return {
                     "success": True,
-                    "decision": "보유 중",
+                    "decision": "Already holding",
                     "ticker": ticker,
                     "company_name": company_name,
                     "current_price": holding_current_price
@@ -505,7 +505,7 @@ class StockTrackingAgent:
             )
 
             # Check sector diversity
-            sector = scenario.get("sector", "알 수 없음")
+            sector = scenario.get("sector", "Unknown")
             is_sector_diverse = await self._check_sector_diversity(sector)
 
             # Return result
@@ -515,7 +515,7 @@ class StockTrackingAgent:
                 "company_name": company_name,
                 "current_price": current_price,
                 "scenario": scenario,
-                "decision": scenario.get("decision", "미진입"),
+                "decision": scenario.get("decision", "No entry"),
                 "sector": sector,
                 "sector_diverse": is_sector_diverse,
                 "rank_change_percentage": rank_change_percentage,
@@ -574,7 +574,7 @@ class StockTrackingAgent:
 
             # Get trigger info from trigger_info_map (loaded from trigger_results file)
             trigger_info = getattr(self, 'trigger_info_map', {}).get(ticker, {})
-            trigger_type = trigger_info.get('trigger_type', 'AI분석')
+            trigger_type = trigger_info.get('trigger_type', 'AI Analysis')
             trigger_mode = trigger_info.get('trigger_mode', getattr(self, 'trigger_mode', 'unknown'))
 
             # Add to holdings table
@@ -601,99 +601,99 @@ class StockTrackingAgent:
             self.conn.commit()
 
             # Add purchase message
-            message = f"📈 신규 매수: {company_name}({ticker})\n" \
-                      f"매수가: {current_price:,.0f} \n" \
-                      f"목표가: {scenario.get('target_price', 0):,.0f}원\n" \
-                      f"손절가: {scenario.get('stop_loss', 0):,.0f}원\n" \
-                      f"투자기간: {scenario.get('investment_period', '단기')}\n" \
-                      f"산업군: {scenario.get('sector', '알 수 없음')}\n"
+            message = f"📈 New Buy: {company_name}({ticker})\n" \
+                      f"Buy Price: {current_price:,.0f} KRW\n" \
+                      f"Target Price: {scenario.get('target_price', 0):,.0f} KRW\n" \
+                      f"Stop Loss: {scenario.get('stop_loss', 0):,.0f} KRW\n" \
+                      f"Investment Period: {scenario.get('investment_period', 'short_term')}\n" \
+                      f"Sector: {scenario.get('sector', 'Unknown')}\n"
 
             # Add valuation analysis if available
             if scenario.get('valuation_analysis'):
-                message += f"밸류에이션: {scenario.get('valuation_analysis')}\n"
+                message += f"Valuation: {scenario.get('valuation_analysis')}\n"
 
             # Add sector outlook if available
             if scenario.get('sector_outlook'):
-                message += f"업종 전망: {scenario.get('sector_outlook')}\n"
+                message += f"Sector Outlook: {scenario.get('sector_outlook')}\n"
 
             # Add trading value ranking info if available
             if rank_change_msg:
-                message += f"거래대금 분석: {rank_change_msg}\n"
+                message += f"Trading Value Analysis: {rank_change_msg}\n"
 
-            message += f"투자근거: {scenario.get('rationale', '정보 없음')}\n"
+            message += f"Investment Rationale: {scenario.get('rationale', 'No information')}\n"
             
             # Format trading scenario
             trading_scenarios = scenario.get('trading_scenarios', {})
             if trading_scenarios and isinstance(trading_scenarios, dict):
                 message += "\n" + "="*40 + "\n"
-                message += "📋 매매 시나리오\n"
+                message += "📋 Trading Scenario\n"
                 message += "="*40 + "\n\n"
-                
-                # 1. 핵심 가격대 (Key Levels)
+
+                # 1. Key Levels
                 key_levels = trading_scenarios.get('key_levels', {})
                 if key_levels:
-                    message += "💰 핵심 가격대:\n"
-                    
-                    # 저항선
+                    message += "💰 Key Price Levels:\n"
+
+                    # Resistance levels
                     primary_resistance = self._parse_price_value(key_levels.get('primary_resistance', 0))
                     secondary_resistance = self._parse_price_value(key_levels.get('secondary_resistance', 0))
                     if primary_resistance or secondary_resistance:
-                        message += f"  📈 저항선:\n"
+                        message += f"  📈 Resistance:\n"
                         if secondary_resistance:
-                            message += f"    • 2차: {secondary_resistance:,.0f}원\n"
+                            message += f"    • 2nd: {secondary_resistance:,.0f} KRW\n"
                         if primary_resistance:
-                            message += f"    • 1차: {primary_resistance:,.0f}원\n"
-                    
-                    # 현재가 표시
-                    message += f"  ━━ 현재가: {current_price:,.0f} 원 ━━\n"
-                    
-                    # 지지선
+                            message += f"    • 1st: {primary_resistance:,.0f} KRW\n"
+
+                    # Current price
+                    message += f"  ━━ Current Price: {current_price:,.0f} KRW ━━\n"
+
+                    # Support levels
                     primary_support = self._parse_price_value(key_levels.get('primary_support', 0))
                     secondary_support = self._parse_price_value(key_levels.get('secondary_support', 0))
                     if primary_support or secondary_support:
-                        message += f"  📉 지지선:\n"
+                        message += f"  📉 Support:\n"
                         if primary_support:
-                            message += f"    • 1차: {primary_support:,.0f}원\n"
+                            message += f"    • 1st: {primary_support:,.0f} KRW\n"
                         if secondary_support:
-                            message += f"    • 2차: {secondary_support:,.0f}원\n"
-                    
-                    # 거래량 기준
+                            message += f"    • 2nd: {secondary_support:,.0f} KRW\n"
+
+                    # Volume baseline
                     volume_baseline = key_levels.get('volume_baseline', '')
                     if volume_baseline:
-                        message += f"  📊 거래량 기준: {volume_baseline}\n"
-                    
+                        message += f"  📊 Volume Baseline: {volume_baseline}\n"
+
                     message += "\n"
-                
-                # 2. 매도 시그널
+
+                # 2. Sell Signals
                 sell_triggers = trading_scenarios.get('sell_triggers', [])
                 if sell_triggers:
-                    message += "🔔 매도 시그널:\n"
+                    message += "🔔 Sell Signals:\n"
                     for i, trigger in enumerate(sell_triggers, 1):
-                        # 조건별로 이모지 선택
-                        if "익절" in trigger or "목표" in trigger or "저항" in trigger:
+                        # Select emoji based on condition
+                        if "profit" in trigger.lower() or "target" in trigger.lower() or "resistance" in trigger.lower():
                             emoji = "✅"
-                        elif "손절" in trigger or "지지" in trigger or "하락" in trigger:
+                        elif "loss" in trigger.lower() or "support" in trigger.lower() or "decline" in trigger.lower():
                             emoji = "⛔"
-                        elif "시간" in trigger or "횡보" in trigger:
+                        elif "time" in trigger.lower() or "sideways" in trigger.lower():
                             emoji = "⏰"
                         else:
                             emoji = "•"
-                        
+
                         message += f"  {emoji} {trigger}\n"
                     message += "\n"
-                
-                # 3. 보유 조건
+
+                # 3. Hold Conditions
                 hold_conditions = trading_scenarios.get('hold_conditions', [])
                 if hold_conditions:
-                    message += "✋ 보유 지속 조건:\n"
+                    message += "✋ Hold Conditions:\n"
                     for condition in hold_conditions:
                         message += f"  • {condition}\n"
                     message += "\n"
-                
-                # 4. 포트폴리오 맥락
+
+                # 4. Portfolio Context
                 portfolio_context = trading_scenarios.get('portfolio_context', '')
                 if portfolio_context:
-                    message += f"💼 포트폴리오 관점:\n  {portfolio_context}\n"
+                    message += f"💼 Portfolio Perspective:\n  {portfolio_context}\n"
 
             self.message_queue.append(message)
             logger.info(f"{ticker}({company_name}) purchase complete")
@@ -732,60 +732,60 @@ class StockTrackingAgent:
 
             # Extract scenario information
             scenario_str = stock_data.get('scenario', '{}')
-            investment_period = "중기"  # Default value
+            investment_period = "medium_term"  # Default value
 
             try:
                 if isinstance(scenario_str, str):
                     scenario_data = json.loads(scenario_str)
-                    investment_period = scenario_data.get('investment_period', '중기')
+                    investment_period = scenario_data.get('investment_period', 'medium_term')
             except:
                 pass
 
             # Check stop-loss condition
             if stop_loss > 0 and current_price <= stop_loss:
-                return True, f"손절매 조건 도달 (손절가: {stop_loss:,.0f}원)"
+                return True, f"Stop-loss condition reached (Stop-loss: {stop_loss:,.0f} KRW)"
 
             # Check target price reached
             if target_price > 0 and current_price >= target_price:
-                return True, f"목표가 달성 (목표가: {target_price:,.0f}원)"
+                return True, f"Target price achieved (Target: {target_price:,.0f} KRW)"
 
             # Sell conditions by investment period
-            if investment_period == "단기":
+            if investment_period == "short_term":
                 # Short-term investment: quicker sell (15+ days holding + 5%+ profit)
                 if days_passed >= 15 and profit_rate >= 5:
-                    return True, f"단기 투자 목표 달성 (보유일: {days_passed}일, 수익률: {profit_rate:.2f}%)"
+                    return True, f"Short-term investment target achieved (Holding: {days_passed} days, Return: {profit_rate:.2f}%)"
 
                 # Short-term investment loss protection (10+ days + 3%+ loss)
                 if days_passed >= 10 and profit_rate <= -3:
-                    return True, f"단기 투자 손실 방어 (보유일: {days_passed}일, 수익률: {profit_rate:.2f}%)"
+                    return True, f"Short-term investment loss protection (Holding: {days_passed} days, Return: {profit_rate:.2f}%)"
 
             # Existing sell conditions
             # Sell if profit >= 10%
             if profit_rate >= 10:
-                return True, f"수익률 10% 이상 달성 (현재 수익률: {profit_rate:.2f}%)"
+                return True, f"Achieved 10%+ profit (Current return: {profit_rate:.2f}%)"
 
             # Sell if loss >= 5%
             if profit_rate <= -5:
-                return True, f"손실 -5% 이상 발생 (현재 수익률: {profit_rate:.2f}%)"
+                return True, f"Loss exceeds -5% (Current return: {profit_rate:.2f}%)"
 
             # Sell if holding 30+ days with loss
             if days_passed >= 30 and profit_rate < 0:
-                return True, f"30일 이상 보유 중이며 손실 상태 (보유일: {days_passed}일, 수익률: {profit_rate:.2f}%)"
+                return True, f"Holding 30+ days with loss (Holding: {days_passed} days, Return: {profit_rate:.2f}%)"
 
             # Sell if holding 60+ days with 3%+ profit
             if days_passed >= 60 and profit_rate >= 3:
-                return True, f"60일 이상 보유 중이며 3% 이상 수익 (보유일: {days_passed}일, 수익률: {profit_rate:.2f}%)"
+                return True, f"Holding 60+ days with 3%+ profit (Holding: {days_passed} days, Return: {profit_rate:.2f}%)"
 
             # Long-term investment case (90+ days holding + loss)
-            if investment_period == "장기" and days_passed >= 90 and profit_rate < 0:
-                return True, f"장기 투자 손실 정리 (보유일: {days_passed}일, 수익률: {profit_rate:.2f}%)"
+            if investment_period == "long_term" and days_passed >= 90 and profit_rate < 0:
+                return True, f"Long-term investment loss exit (Holding: {days_passed} days, Return: {profit_rate:.2f}%)"
 
             # Continue holding by default
-            return False, "계속 보유"
+            return False, "Continue holding"
 
         except Exception as e:
             logger.error(f"{stock_data.get('ticker', '') if 'ticker' in locals() else 'Unknown stock'} Error analyzing sell: {str(e)}")
-            return False, "분석 오류"
+            return False, "Analysis error"
 
     async def sell_stock(self, stock_data: Dict[str, Any], sell_reason: str) -> bool:
         """
@@ -805,7 +805,7 @@ class StockTrackingAgent:
             buy_date = stock_data.get('buy_date', '')
             current_price = stock_data.get('current_price', 0)
             scenario_json = stock_data.get('scenario', '{}')
-            trigger_type = stock_data.get('trigger_type', 'AI분석')
+            trigger_type = stock_data.get('trigger_type', 'AI Analysis')
             trigger_mode = stock_data.get('trigger_mode', 'unknown')
 
             # Calculate profit rate
@@ -852,12 +852,12 @@ class StockTrackingAgent:
 
             # Add sell message
             arrow = "⬆️" if profit_rate > 0 else "⬇️" if profit_rate < 0 else "➖"
-            message = f"📉 매도: {company_name}({ticker})\n" \
-                      f"매수가: {buy_price:,.0f}원\n" \
-                      f"매도가: {current_price:,.0f} \n" \
-                      f"수익률: {arrow} {abs(profit_rate):.2f}%\n" \
-                      f"보유기간: {holding_days}일\n" \
-                      f"매도이유: {sell_reason}"
+            message = f"📉 Sell: {company_name}({ticker})\n" \
+                      f"Buy Price: {buy_price:,.0f} KRW\n" \
+                      f"Sell Price: {current_price:,.0f} KRW\n" \
+                      f"Return: {arrow} {abs(profit_rate):.2f}%\n" \
+                      f"Holding Period: {holding_days} days\n" \
+                      f"Sell Reason: {sell_reason}"
 
             self.message_queue.append(message)
             logger.info(f"{ticker}({company_name}) sell complete (return: {profit_rate:.2f}%)")
@@ -1140,10 +1140,10 @@ class StockTrackingAgent:
             successful_trades = self.cursor.fetchone()[0] or 0
 
             # Generate message
-            message = f"📊 프리즘 시뮬레이터 | 실시간 포트폴리오 ({datetime.now().strftime('%Y-%m-%d %H:%M')})\n\n"
+            message = f"📊 PRISM Simulator | Real-time Portfolio ({datetime.now().strftime('%Y-%m-%d %H:%M')})\n\n"
 
             # 1. Portfolio summary
-            message += f"🔸 현재 보유 종목: {len(holdings) if holdings else 0}/{self.max_slots}개\n"
+            message += f"🔸 Current Holdings: {len(holdings) if holdings else 0}/{self.max_slots} stocks\n"
 
             # Best profit/loss stock information (if any)
             if holdings and len(holdings) > 0:
@@ -1159,8 +1159,8 @@ class StockTrackingAgent:
                     best = max(profit_rates, key=lambda x: x[2])
                     worst = min(profit_rates, key=lambda x: x[2])
 
-                    message += f"✅ 최고 수익: {best[1]}({best[0]}) {'+' if best[2] > 0 else ''}{best[2]:.2f}%\n"
-                    message += f"⚠️ 최저 수익: {worst[1]}({worst[0]}) {'+' if worst[2] > 0 else ''}{worst[2]:.2f}%\n"
+                    message += f"✅ Best Performer: {best[1]}({best[0]}) {'+' if best[2] > 0 else ''}{best[2]:.2f}%\n"
+                    message += f"⚠️ Worst Performer: {worst[1]}({worst[0]}) {'+' if worst[2] > 0 else ''}{worst[2]:.2f}%\n"
 
             message += "\n"
 
@@ -1168,7 +1168,7 @@ class StockTrackingAgent:
             sector_counts = {}
 
             if holdings and len(holdings) > 0:
-                message += f"🔸 보유 종목 목록:\n"
+                message += f"🔸 Holdings List:\n"
                 for stock in holdings:
                     ticker = stock.get('ticker', '')
                     company_name = stock.get('company_name', '')
@@ -1180,11 +1180,11 @@ class StockTrackingAgent:
                     stop_loss = stock.get('stop_loss', 0)
 
                     # Extract sector information from scenario
-                    sector = "알 수 없음"
+                    sector = "Unknown"
                     try:
                         if isinstance(scenario_str, str):
                             scenario_data = json.loads(scenario_str)
-                            sector = scenario_data.get('sector', '알 수 없음')
+                            sector = scenario_data.get('sector', 'Unknown')
                     except:
                         pass
 
@@ -1198,43 +1198,43 @@ class StockTrackingAgent:
                     days_passed = (datetime.now() - buy_datetime).days
 
                     message += f"- {company_name}({ticker}) [{sector}]\n"
-                    message += f"  매수가: {buy_price:,.0f}원 / 현재가: {current_price:,.0f} 원\n"
-                    message += f"  목표가: {target_price:,.0f}원 / 손절가: {stop_loss:,.0f}원\n"
-                    message += f"  수익률: {arrow} {profit_rate:.2f}% / 보유기간: {days_passed}일\n\n"
+                    message += f"  Buy Price: {buy_price:,.0f} KRW / Current Price: {current_price:,.0f} KRW\n"
+                    message += f"  Target Price: {target_price:,.0f} KRW / Stop Loss: {stop_loss:,.0f} KRW\n"
+                    message += f"  Return: {arrow} {profit_rate:.2f}% / Holding Period: {days_passed} days\n\n"
 
-                # 산업군 분포 추가
-                message += f"🔸 산업군 분포:\n"
+                # Add sector distribution
+                message += f"🔸 Sector Distribution:\n"
                 for sector, count in sector_counts.items():
                     percentage = (count / len(holdings)) * 100
-                    message += f"- {sector}: {count}개 ({percentage:.1f}%)\n"
+                    message += f"- {sector}: {count} stocks ({percentage:.1f}%)\n"
                 message += "\n"
             else:
-                message += "보유 중인 종목이 없습니다.\n\n"
+                message += "No holdings currently.\n\n"
 
             # 3. Trading history statistics
-            message += f"🔸 매매 이력 통계\n"
-            message += f"- 총 거래 건수: {total_trades}건\n"
-            message += f"- 수익 거래: {successful_trades}건\n"
-            message += f"- 손실 거래: {total_trades - successful_trades}건\n"
+            message += f"🔸 Trading History Statistics\n"
+            message += f"- Total Trades: {total_trades}\n"
+            message += f"- Profitable Trades: {successful_trades}\n"
+            message += f"- Loss Trades: {total_trades - successful_trades}\n"
 
             if total_trades > 0:
-                message += f"- 승률: {(successful_trades / total_trades * 100):.2f}%\n"
+                message += f"- Win Rate: {(successful_trades / total_trades * 100):.2f}%\n"
             else:
-                message += f"- 승률: 0.00%\n"
+                message += f"- Win Rate: 0.00%\n"
 
-            message += f"- 누적 수익률: {total_profit:.2f}%\n\n"
+            message += f"- Cumulative Return: {total_profit:.2f}%\n\n"
 
-            # 4. 강화된 면책 조항
-            message += "📝 안내사항:\n"
-            message += "- 이 보고서는 AI 기반 시뮬레이션 결과이며, 실제 매매와 무관합니다.\n"
-            message += "- 본 정보는 단순 참고용이며, 투자 결정과 책임은 전적으로 투자자에게 있습니다.\n"
-            message += "- 이 채널은 리딩방이 아니며, 특정 종목 매수/매도를 권유하지 않습니다."
+            # 4. Enhanced disclaimer
+            message += "📝 Important Notice:\n"
+            message += "- This report is an AI-based simulation result and is not related to actual trading.\n"
+            message += "- This information is for reference only. Investment decisions and responsibilities rest entirely with the investor.\n"
+            message += "- This channel is not a trading room and does not recommend buying/selling specific stocks."
 
             return message
 
         except Exception as e:
             logger.error(f"Error generating report summary: {str(e)}")
-            error_msg = f"보고서 생성 중 오류가 발생했습니다: {str(e)}"
+            error_msg = f"Error occurred while generating report: {str(e)}"
             return error_msg
 
     async def process_reports(self, pdf_report_paths: List[str]) -> Tuple[int, int]:
@@ -1275,7 +1275,7 @@ class StockTrackingAgent:
                     continue
 
                 # Skip if already holding this stock
-                if analysis_result.get("decision") == "보유 중":
+                if analysis_result.get("decision") == "Already holding":
                     logger.info(f"Skipping stock in holdings: {analysis_result.get('ticker')} - {analysis_result.get('company_name')}")
                     continue
 
@@ -1284,21 +1284,21 @@ class StockTrackingAgent:
                 company_name = analysis_result.get("company_name")
                 current_price = analysis_result.get("current_price", 0)
                 scenario = analysis_result.get("scenario", {})
-                sector = analysis_result.get("sector", "알 수 없음")
+                sector = analysis_result.get("sector", "Unknown")
                 sector_diverse = analysis_result.get("sector_diverse", True)
                 rank_change_msg = analysis_result.get("rank_change_msg", "")
                 rank_change_percentage = analysis_result.get("rank_change_percentage", 0)
 
                 # Skip if sector diversity check fails
                 if not sector_diverse:
-                    logger.info(f"Purchase deferred: {company_name}({ticker}) - Preventing sector over-investment '.*'")
+                    logger.info(f"Purchase deferred: {company_name}({ticker}) - Preventing sector over-investment")
                     continue
 
                 # Process buy if entry decision
                 buy_score = scenario.get("buy_score", 0)
                 min_score = scenario.get("min_score", 0)
                 logger.info(f"Buy score check: {company_name}({ticker}) - Score: {buy_score}")
-                if analysis_result.get("decision") == "진입":
+                if analysis_result.get("decision") == "Entry":
                     # Process buy
                     buy_success = await self.buy_stock(ticker, company_name, current_price, scenario, rank_change_msg)
 
@@ -1323,7 +1323,7 @@ class StockTrackingAgent:
                                 company_name=company_name,
                                 price=current_price,
                                 scenario=scenario,
-                                source="AI분석",
+                                source="AI Analysis",
                                 trade_result=trade_result
                             )
                         except Exception as signal_err:
@@ -1338,7 +1338,7 @@ class StockTrackingAgent:
                                 company_name=company_name,
                                 price=current_price,
                                 scenario=scenario,
-                                source="AI분석",
+                                source="AI Analysis",
                                 trade_result=trade_result
                             )
                         except Exception as signal_err:
@@ -1352,13 +1352,13 @@ class StockTrackingAgent:
                 else:
                     reason = ""
                     if buy_score < min_score:
-                        reason = f"매수 점수 부족 ({buy_score} < {min_score})"
-                    elif analysis_result.get("decision") != "진입":
-                        reason = f"진입 결정 아님 (결정: {analysis_result.get('decision')})"
+                        reason = f"Buy score insufficient ({buy_score} < {min_score})"
+                    elif analysis_result.get("decision") != "Entry":
+                        reason = f"Not an entry decision (Decision: {analysis_result.get('decision')})"
 
                     logger.info(f"Purchase deferred: {company_name}({ticker}) - {reason}")
 
-            logger.info(f"Report processing complete - Purchased: {buy_count}items, Sold: {sell_count} items")
+            logger.info(f"Report processing complete - Purchased: {buy_count} stocks, Sold: {sell_count} stocks")
             return buy_count, sell_count
 
         except Exception as e:
@@ -1421,22 +1421,22 @@ class StockTrackingAgent:
                 except Exception as e:
                     logger.error(f"Translation failed: {str(e)}. Using original Korean messages.")
 
-            # 각 메시지 전송
+            # Send each message
             success = True
             for message in self.message_queue:
                 logger.info(f"Sending Telegram message: {chat_id}")
                 try:
-                    # 텔레그램 메시지 길이 제한 (4096자)
+                    # Telegram message length limit (4096 characters)
                     MAX_MESSAGE_LENGTH = 4096
 
                     if len(message) <= MAX_MESSAGE_LENGTH:
-                        # 메시지가 짧으면 한 번에 전송
+                        # Send in one message if short
                         await self.telegram_bot.send_message(
                             chat_id=chat_id,
                             text=message
                         )
                     else:
-                        # 메시지가 길면 분할 전송
+                        # Split and send if long
                         parts = []
                         current_part = ""
 
@@ -1451,20 +1451,20 @@ class StockTrackingAgent:
                         if current_part:
                             parts.append(current_part.rstrip())
 
-                        # 분할된 메시지 전송
+                        # Send split messages
                         for i, part in enumerate(parts, 1):
                             await self.telegram_bot.send_message(
                                 chat_id=chat_id,
                                 text=f"[{i}/{len(parts)}]\n{part}"
                             )
-                            await asyncio.sleep(0.5)  # 분할 메시지 간 짧은 지연
+                            await asyncio.sleep(0.5)  # Short delay between split messages
 
                     logger.info(f"Telegram message sent: {chat_id}")
                 except TelegramError as e:
                     logger.error(f"Telegram message send failed: {e}")
                     success = False
 
-                # API 제한 방지를 위한 지연
+                # Delay to prevent API rate limiting
                 await asyncio.sleep(1)
 
             # Send to broadcast channels if configured (wait for completion)
@@ -1474,7 +1474,7 @@ class StockTrackingAgent:
                 await translation_task
                 logger.info("Broadcast channel messages sent successfully")
 
-            # 메시지 큐 초기화
+            # Clear message queue
             self.message_queue = []
 
             return success

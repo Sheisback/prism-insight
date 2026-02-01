@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-분석 종목 성과 심층 분석 리포트
+Analysis Performance Deep Dive Report
 
-트리거 유형별, 매매/관망별 성과를 통계적으로 분석하여
-향후 필터 조정 여부를 결정하는 데 도움을 주는 리포트를 생성합니다.
+Statistically analyzes performance by trigger type and trade/watch decisions
+to help determine whether filters should be adjusted.
 
 Usage:
-    python performance_analysis_report.py                    # 전체 리포트
-    python performance_analysis_report.py --format markdown  # 마크다운 출력
-    python performance_analysis_report.py --output report.md # 파일로 저장
+    python performance_analysis_report.py                    # Full report
+    python performance_analysis_report.py --format markdown  # Markdown output
+    python performance_analysis_report.py --output report.md # Save to file
 """
 from dotenv import load_dotenv
 load_dotenv()
@@ -23,45 +23,45 @@ from typing import Dict, List, Any, Optional, Tuple
 from pathlib import Path
 from collections import defaultdict
 
-# 로깅 설정
+# Logging setup
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# 프로젝트 루트 경로
+# Project root path
 PROJECT_ROOT = Path(__file__).parent
 DB_PATH = PROJECT_ROOT / "stock_tracking_db.sqlite"
 
-# 통계 라이브러리 (선택적)
+# Statistics library (optional)
 try:
     from scipy import stats
     SCIPY_AVAILABLE = True
 except ImportError:
     SCIPY_AVAILABLE = False
-    logger.warning("scipy 패키지가 없어 통계적 유의성 검정이 비활성화됩니다.")
+    logger.warning("scipy package not available, statistical significance testing disabled.")
 
 
 class PerformanceAnalyzer:
-    """분석 성과 심층 분석기"""
+    """Deep performance analyzer for analyzed stocks"""
 
     def __init__(self, db_path: str = None):
         """
         Args:
-            db_path: SQLite DB 경로
+            db_path: SQLite DB path
         """
         self.db_path = db_path or str(DB_PATH)
         self.today = datetime.now().strftime("%Y-%m-%d")
 
     def connect_db(self) -> sqlite3.Connection:
-        """DB 연결"""
+        """Connect to database"""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
 
     def get_all_completed_data(self) -> List[Dict[str, Any]]:
-        """완료된 모든 추적 데이터 조회"""
+        """Query all completed tracking data"""
         conn = self.connect_db()
         try:
             cursor = conn.execute("""
@@ -75,10 +75,10 @@ class PerformanceAnalyzer:
             conn.close()
 
     def get_overview_stats(self) -> Dict[str, Any]:
-        """전체 현황 통계"""
+        """Overall status statistics"""
         conn = self.connect_db()
         try:
-            # 전체 추적 상태별 건수
+            # Count by tracking status
             cursor = conn.execute("""
                 SELECT
                     tracking_status,
@@ -88,7 +88,7 @@ class PerformanceAnalyzer:
             """)
             status_counts = {row['tracking_status']: row['count'] for row in cursor.fetchall()}
 
-            # 전체 매매/관망 건수
+            # Count by traded/watched
             cursor = conn.execute("""
                 SELECT
                     was_traded,
@@ -101,7 +101,7 @@ class PerformanceAnalyzer:
                 key = 'traded' if row['was_traded'] else 'watched'
                 traded_counts[key] = row['count']
 
-            # 기간별 총 건수
+            # Count by period
             cursor = conn.execute("""
                 SELECT
                     strftime('%Y-%m', analyzed_date) as month,
@@ -123,7 +123,7 @@ class PerformanceAnalyzer:
             conn.close()
 
     def analyze_by_trigger_type(self) -> Dict[str, Dict[str, Any]]:
-        """트리거 유형별 성과 분석"""
+        """Analyze performance by trigger type"""
         conn = self.connect_db()
         try:
             cursor = conn.execute("""
@@ -142,7 +142,7 @@ class PerformanceAnalyzer:
                 WHERE tracking_status = 'completed'
             """)
 
-            # 트리거 유형별 데이터 수집
+            # Collect data by trigger type
             trigger_data = defaultdict(lambda: {
                 'returns_7d': [],
                 'returns_14d': [],
@@ -179,7 +179,7 @@ class PerformanceAnalyzer:
                 if row['risk_reward_ratio'] is not None:
                     data['rr_ratios'].append(row['risk_reward_ratio'])
 
-            # 통계 계산
+            # Calculate statistics
             results = {}
             for trigger_type, data in trigger_data.items():
                 results[trigger_type] = {
@@ -195,7 +195,7 @@ class PerformanceAnalyzer:
                     'watched_avg_30d': self._safe_mean(data['watched_returns_30d']),
                     'avg_buy_score': self._safe_mean(data['buy_scores']),
                     'avg_rr_ratio': self._safe_mean(data['rr_ratios']),
-                    # 원본 데이터 (통계 검정용)
+                    # Raw data (for statistical testing)
                     '_returns_30d': data['returns_30d'],
                     '_traded_returns_30d': data['traded_returns_30d'],
                     '_watched_returns_30d': data['watched_returns_30d']
@@ -206,7 +206,7 @@ class PerformanceAnalyzer:
             conn.close()
 
     def analyze_traded_vs_watched(self) -> Dict[str, Any]:
-        """매매 vs 관망 성과 비교"""
+        """Compare traded vs watched performance"""
         conn = self.connect_db()
         try:
             cursor = conn.execute("""
@@ -253,7 +253,7 @@ class PerformanceAnalyzer:
                 }
             }
 
-            # 통계적 유의성 검정
+            # Statistical significance test
             if SCIPY_AVAILABLE and traded_returns['30d'] and watched_returns['30d']:
                 if len(traded_returns['30d']) >= 5 and len(watched_returns['30d']) >= 5:
                     t_stat, p_value = stats.ttest_ind(
@@ -272,10 +272,10 @@ class PerformanceAnalyzer:
             conn.close()
 
     def analyze_rr_threshold_impact(self) -> Dict[str, Any]:
-        """손익비 기준별 성과 분석
+        """Analyze performance by risk-reward ratio threshold
 
-        손익비 1.5, 1.75, 2.0, 2.5 기준별로
-        매매/관망 시 성과가 어떻게 달랐는지 분석
+        Analyzes how performance differs between traded/watched decisions
+        at various RR thresholds (1.5, 1.75, 2.0, 2.5)
         """
         conn = self.connect_db()
         try:
@@ -289,7 +289,7 @@ class PerformanceAnalyzer:
                   AND risk_reward_ratio IS NOT NULL
             """)
 
-            # 손익비 구간별 데이터 수집
+            # Collect data by RR range
             thresholds = [0, 1.0, 1.5, 1.75, 2.0, 2.5, 100]
             rr_data = {}
 
@@ -309,7 +309,7 @@ class PerformanceAnalyzer:
                 if rr is None or ret is None:
                     continue
 
-                # 해당 구간 찾기
+                # Find matching range
                 for i in range(len(thresholds) - 1):
                     low, high = thresholds[i], thresholds[i+1]
                     if low <= rr < high:
@@ -321,7 +321,7 @@ class PerformanceAnalyzer:
                             rr_data[label]['watched_returns'].append(ret)
                         break
 
-            # 통계 계산
+            # Calculate statistics
             result = {}
             for label, data in rr_data.items():
                 result[label] = {
@@ -340,7 +340,7 @@ class PerformanceAnalyzer:
             conn.close()
 
     def get_missed_opportunities(self, top_n: int = 10) -> List[Dict[str, Any]]:
-        """놓친 기회 분석 (관망했는데 크게 상승한 종목)"""
+        """Missed opportunities analysis (watched stocks that surged)"""
         conn = self.connect_db()
         try:
             cursor = conn.execute("""
@@ -369,7 +369,7 @@ class PerformanceAnalyzer:
             conn.close()
 
     def get_avoided_losses(self, top_n: int = 10) -> List[Dict[str, Any]]:
-        """회피한 손실 분석 (관망했는데 크게 하락한 종목)"""
+        """Avoided losses analysis (watched stocks that dropped)"""
         conn = self.connect_db()
         try:
             cursor = conn.execute("""
@@ -398,10 +398,10 @@ class PerformanceAnalyzer:
             conn.close()
 
     def generate_recommendations(self) -> List[str]:
-        """데이터 기반 권고사항 생성"""
+        """Generate data-driven recommendations"""
         recommendations = []
 
-        # 매매 vs 관망 분석
+        # Traded vs watched analysis
         tv = self.analyze_traded_vs_watched()
         if tv['traded']['count'] >= 10 and tv['watched']['count'] >= 10:
             traded_avg = tv['traded']['avg_30d'] or 0
@@ -409,49 +409,49 @@ class PerformanceAnalyzer:
 
             if watched_avg > traded_avg and watched_avg - traded_avg > 0.05:
                 recommendations.append(
-                    f"⚠️ 관망 종목({watched_avg*100:.1f}%)이 매매 종목({traded_avg*100:.1f}%)보다 "
-                    f"30일 평균 수익률이 높습니다. 필터 완화를 고려하세요."
+                    f"⚠️ Watched stocks ({watched_avg*100:.1f}%) outperform traded stocks ({traded_avg*100:.1f}%) "
+                    f"in 30-day avg return. Consider relaxing filters."
                 )
             elif traded_avg > watched_avg and traded_avg - watched_avg > 0.05:
                 recommendations.append(
-                    f"✅ 매매 종목({traded_avg*100:.1f}%)이 관망 종목({watched_avg*100:.1f}%)보다 "
-                    f"30일 평균 수익률이 높습니다. 현재 필터가 효과적입니다."
+                    f"✅ Traded stocks ({traded_avg*100:.1f}%) outperform watched stocks ({watched_avg*100:.1f}%) "
+                    f"in 30-day avg return. Current filters are effective."
                 )
 
-            # 통계적 유의성
+            # Statistical significance
             if 't_test' in tv and tv['t_test']['significant']:
                 recommendations.append(
-                    f"📊 매매/관망 수익률 차이가 통계적으로 유의합니다 (p={tv['t_test']['p_value']:.4f})"
+                    f"📊 Traded/watched return difference is statistically significant (p={tv['t_test']['p_value']:.4f})"
                 )
 
-        # 트리거 유형별 분석
+        # Trigger type analysis
         trigger_stats = self.analyze_by_trigger_type()
         if trigger_stats:
-            # 가장 성과 좋은 트리거
+            # Best performing trigger
             best_trigger = max(
                 trigger_stats.items(),
                 key=lambda x: x[1]['avg_30d_return'] or -999
             )
             if best_trigger[1]['avg_30d_return'] and best_trigger[1]['count'] >= 5:
                 recommendations.append(
-                    f"🏆 가장 좋은 트리거: '{best_trigger[0]}' "
-                    f"(30일 평균 {best_trigger[1]['avg_30d_return']*100:.1f}%, "
-                    f"승률 {best_trigger[1]['win_rate_30d']*100:.0f}%)"
+                    f"🏆 Best trigger: '{best_trigger[0]}' "
+                    f"(30d avg {best_trigger[1]['avg_30d_return']*100:.1f}%, "
+                    f"win rate {best_trigger[1]['win_rate_30d']*100:.0f}%)"
                 )
 
-            # 관망했는데 성과 좋았던 트리거
+            # Triggers with strong watched performance
             for trigger, data in trigger_stats.items():
                 watched_avg = data.get('watched_avg_30d')
                 if watched_avg and watched_avg > 0.1 and len(data['_watched_returns_30d']) >= 3:
                     recommendations.append(
-                        f"💡 '{trigger}' 트리거의 관망 종목이 30일 평균 "
-                        f"{watched_avg*100:.1f}% 상승했습니다. 해당 유형 필터 완화 검토 필요."
+                        f"💡 '{trigger}' watched stocks gained {watched_avg*100:.1f}% on avg in 30 days. "
+                        f"Consider relaxing filters for this trigger type."
                     )
 
-        # 손익비 구간별 분석
+        # Risk-reward threshold analysis
         rr_stats = self.analyze_rr_threshold_impact()
         if rr_stats:
-            # 1.5~2.0 구간의 관망 종목 성과
+            # Watched performance in 1.5~2.0 range
             for label in ['1.5~1.75', '1.75~2.0']:
                 if label in rr_stats:
                     data = rr_stats[label]
@@ -460,32 +460,32 @@ class PerformanceAnalyzer:
                         win_rate = data['win_rate_watched']
                         if avg_ret and avg_ret > 0.05 and win_rate and win_rate > 0.5:
                             recommendations.append(
-                                f"📈 손익비 {label} 구간 관망 종목: "
-                                f"평균 {avg_ret*100:.1f}%, 승률 {win_rate*100:.0f}%. "
-                                f"손익비 기준 완화 시 추가 수익 가능성 있음."
+                                f"📈 RR {label} watched stocks: "
+                                f"avg {avg_ret*100:.1f}%, win rate {win_rate*100:.0f}%. "
+                                f"Potential gains if RR threshold is relaxed."
                             )
 
-        # 데이터 부족 경고
+        # Data insufficiency warning
         total_completed = sum(
             1 for d in [tv['traded'], tv['watched']]
             for _ in range(d['count'])
         )
         if total_completed < 30:
             recommendations.append(
-                f"⏳ 완료된 추적 데이터가 {total_completed}건으로 부족합니다. "
-                f"최소 30건 이상 누적 후 의사결정을 권장합니다."
+                f"⏳ Only {total_completed} completed tracking records. "
+                f"Recommend accumulating at least 30 before making filter decisions."
             )
 
         return recommendations
 
     def generate_full_report(self, format: str = "text") -> str:
-        """전체 분석 리포트 생성
+        """Generate full analysis report
 
         Args:
-            format: "text" 또는 "markdown"
+            format: "text" or "markdown"
 
         Returns:
-            리포트 문자열
+            Report string
         """
         if format == "markdown":
             return self._generate_markdown_report()
@@ -493,53 +493,53 @@ class PerformanceAnalyzer:
             return self._generate_text_report()
 
     def _generate_text_report(self) -> str:
-        """텍스트 형식 리포트"""
+        """Generate text format report"""
         lines = []
         sep = "="*70
 
         lines.append(sep)
-        lines.append(f"📊 PRISM-INSIGHT 트리거 성과 분석 리포트")
-        lines.append(f"생성일: {self.today}")
+        lines.append(f"📊 PRISM-INSIGHT Trigger Performance Analysis Report")
+        lines.append(f"Generated: {self.today}")
         lines.append(sep)
         lines.append("")
 
-        # 1. 전체 현황
+        # 1. Overview
         overview = self.get_overview_stats()
-        lines.append("## 1. 전체 현황")
+        lines.append("## 1. Overview")
         lines.append("-"*40)
-        lines.append(f"  총 추적 건수: {overview['total']}")
+        lines.append(f"  Total tracked: {overview['total']}")
         for status, count in overview['status_counts'].items():
-            status_kr = {'pending': '대기중', 'in_progress': '추적중', 'completed': '완료'}.get(status, status)
-            lines.append(f"    - {status_kr}: {count}건")
-        lines.append(f"  매매: {overview['traded_counts'].get('traded', 0)}건")
-        lines.append(f"  관망: {overview['traded_counts'].get('watched', 0)}건")
+            status_en = {'pending': 'Pending', 'in_progress': 'In Progress', 'completed': 'Completed'}.get(status, status)
+            lines.append(f"    - {status_en}: {count} records")
+        lines.append(f"  Traded: {overview['traded_counts'].get('traded', 0)} records")
+        lines.append(f"  Watched: {overview['traded_counts'].get('watched', 0)} records")
         lines.append("")
 
-        # 2. 매매 vs 관망
-        lines.append("## 2. 매매 vs 관망 성과 비교")
+        # 2. Traded vs Watched
+        lines.append("## 2. Traded vs Watched Performance")
         lines.append("-"*40)
         tv = self.analyze_traded_vs_watched()
-        for label, data in [('매매', tv['traded']), ('관망', tv['watched'])]:
+        for label, data in [('Traded', tv['traded']), ('Watched', tv['watched'])]:
             if data['count'] > 0:
                 lines.append(f"  [{label}] (n={data['count']})")
-                lines.append(f"    7일 평균: {self._fmt_pct(data['avg_7d'])}")
-                lines.append(f"    14일 평균: {self._fmt_pct(data['avg_14d'])}")
-                lines.append(f"    30일 평균: {self._fmt_pct(data['avg_30d'])} (표준편차: {self._fmt_pct(data['std_30d'])})")
-                lines.append(f"    승률: {self._fmt_pct(data['win_rate'])}")
+                lines.append(f"    7d avg: {self._fmt_pct(data['avg_7d'])}")
+                lines.append(f"    14d avg: {self._fmt_pct(data['avg_14d'])}")
+                lines.append(f"    30d avg: {self._fmt_pct(data['avg_30d'])} (std: {self._fmt_pct(data['std_30d'])})")
+                lines.append(f"    Win rate: {self._fmt_pct(data['win_rate'])}")
         if 't_test' in tv:
-            sig = "유의" if tv['t_test']['significant'] else "비유의"
-            lines.append(f"  [t-검정] p-value={tv['t_test']['p_value']:.4f} ({sig})")
+            sig = "Significant" if tv['t_test']['significant'] else "Not significant"
+            lines.append(f"  [t-test] p-value={tv['t_test']['p_value']:.4f} ({sig})")
         lines.append("")
 
-        # 3. 트리거 유형별
-        lines.append("## 3. 트리거 유형별 성과")
+        # 3. By Trigger Type
+        lines.append("## 3. Performance by Trigger Type")
         lines.append("-"*40)
         trigger_stats = self.analyze_by_trigger_type()
         if trigger_stats:
-            # 헤더
-            lines.append(f"{'트리거':<25} {'건수':>6} {'매매율':>8} {'30일평균':>10} {'승률':>8}")
+            # Header
+            lines.append(f"{'Trigger':<25} {'Count':>6} {'Trade%':>8} {'30d Avg':>10} {'Win%':>8}")
             lines.append("-"*60)
-            # 30일 평균 수익률 기준 정렬
+            # Sort by 30d avg return
             sorted_triggers = sorted(
                 trigger_stats.items(),
                 key=lambda x: x[1]['avg_30d_return'] or -999,
@@ -553,15 +553,15 @@ class PerformanceAnalyzer:
                     f"{self._fmt_pct(data['win_rate_30d']):>8}"
                 )
         else:
-            lines.append("  데이터 없음")
+            lines.append("  No data")
         lines.append("")
 
-        # 4. 손익비 구간별
-        lines.append("## 4. 손익비 구간별 성과")
+        # 4. By Risk-Reward Range
+        lines.append("## 4. Performance by Risk-Reward Range")
         lines.append("-"*40)
         rr_stats = self.analyze_rr_threshold_impact()
         if rr_stats:
-            lines.append(f"{'구간':<12} {'건수':>6} {'매매':>6} {'관망':>6} {'전체평균':>10} {'관망평균':>10}")
+            lines.append(f"{'Range':<12} {'Total':>6} {'Trade':>6} {'Watch':>6} {'All Avg':>10} {'Watch Avg':>10}")
             lines.append("-"*55)
             for label, data in rr_stats.items():
                 if data['total_count'] > 0:
@@ -572,11 +572,11 @@ class PerformanceAnalyzer:
                         f"{self._fmt_pct(data['avg_watched_return']):>10}"
                     )
         else:
-            lines.append("  데이터 없음")
+            lines.append("  No data")
         lines.append("")
 
-        # 5. 놓친 기회
-        lines.append("## 5. 놓친 기회 (관망 → 10%+ 상승)")
+        # 5. Missed Opportunities
+        lines.append("## 5. Missed Opportunities (Watched → 10%+ gain)")
         lines.append("-"*40)
         missed = self.get_missed_opportunities(5)
         if missed:
@@ -589,14 +589,14 @@ class PerformanceAnalyzer:
                     f"    {item['analyzed_price']:,.0f} → {item['tracked_30d_price']:,.0f} "
                     f"({self._fmt_pct(item['tracked_30d_return'])})"
                 )
-                lines.append(f"    점수: {item['buy_score']}/{item['min_score']}, 손익비: {item['risk_reward_ratio']:.2f}")
-                lines.append(f"    사유: {item['skip_reason']}")
+                lines.append(f"    Score: {item['buy_score']}/{item['min_score']}, RR: {item['risk_reward_ratio']:.2f}")
+                lines.append(f"    Reason: {item['skip_reason']}")
         else:
-            lines.append("  해당 없음")
+            lines.append("  None")
         lines.append("")
 
-        # 6. 회피한 손실
-        lines.append("## 6. 회피한 손실 (관망 → 10%+ 하락)")
+        # 6. Avoided Losses
+        lines.append("## 6. Avoided Losses (Watched → 10%+ drop)")
         lines.append("-"*40)
         avoided = self.get_avoided_losses(5)
         if avoided:
@@ -609,56 +609,56 @@ class PerformanceAnalyzer:
                     f"    {item['analyzed_price']:,.0f} → {item['tracked_30d_price']:,.0f} "
                     f"({self._fmt_pct(item['tracked_30d_return'])})"
                 )
-                lines.append(f"    점수: {item['buy_score']}/{item['min_score']}, 손익비: {item['risk_reward_ratio']:.2f}")
+                lines.append(f"    Score: {item['buy_score']}/{item['min_score']}, RR: {item['risk_reward_ratio']:.2f}")
         else:
-            lines.append("  해당 없음")
+            lines.append("  None")
         lines.append("")
 
-        # 7. 권고사항
-        lines.append("## 7. 데이터 기반 권고사항")
+        # 7. Recommendations
+        lines.append("## 7. Data-Driven Recommendations")
         lines.append("-"*40)
         recommendations = self.generate_recommendations()
         if recommendations:
             for rec in recommendations:
                 lines.append(f"  • {rec}")
         else:
-            lines.append("  권고사항 없음 (데이터 추가 수집 필요)")
+            lines.append("  No recommendations (need more data)")
         lines.append("")
 
         lines.append(sep)
-        lines.append("© PRISM-INSIGHT 투자 전략 분석 시스템")
+        lines.append("© PRISM-INSIGHT Investment Strategy Analysis System")
         lines.append(sep)
 
         return "\n".join(lines)
 
     def _generate_markdown_report(self) -> str:
-        """마크다운 형식 리포트"""
+        """Generate markdown format report"""
         lines = []
 
-        lines.append(f"# 📊 PRISM-INSIGHT 트리거 성과 분석 리포트")
+        lines.append(f"# 📊 PRISM-INSIGHT Trigger Performance Analysis Report")
         lines.append(f"")
-        lines.append(f"**생성일**: {self.today}")
+        lines.append(f"**Generated**: {self.today}")
         lines.append("")
 
-        # 1. 전체 현황
+        # 1. Overview
         overview = self.get_overview_stats()
-        lines.append("## 1. 전체 현황")
+        lines.append("## 1. Overview")
         lines.append("")
-        lines.append(f"- **총 추적 건수**: {overview['total']}")
+        lines.append(f"- **Total tracked**: {overview['total']}")
         for status, count in overview['status_counts'].items():
-            status_kr = {'pending': '대기중', 'in_progress': '추적중', 'completed': '완료'}.get(status, status)
-            lines.append(f"  - {status_kr}: {count}건")
-        lines.append(f"- **매매**: {overview['traded_counts'].get('traded', 0)}건")
-        lines.append(f"- **관망**: {overview['traded_counts'].get('watched', 0)}건")
+            status_en = {'pending': 'Pending', 'in_progress': 'In Progress', 'completed': 'Completed'}.get(status, status)
+            lines.append(f"  - {status_en}: {count} records")
+        lines.append(f"- **Traded**: {overview['traded_counts'].get('traded', 0)} records")
+        lines.append(f"- **Watched**: {overview['traded_counts'].get('watched', 0)} records")
         lines.append("")
 
-        # 2. 매매 vs 관망
-        lines.append("## 2. 매매 vs 관망 성과 비교")
+        # 2. Traded vs Watched
+        lines.append("## 2. Traded vs Watched Performance")
         lines.append("")
         tv = self.analyze_traded_vs_watched()
-        lines.append("| 구분 | 건수 | 7일 | 14일 | 30일 | 승률 |")
+        lines.append("| Type | Count | 7d | 14d | 30d | Win Rate |")
         lines.append("|------|------|-----|------|------|------|")
-        for label, data in [('매매', tv['traded']), ('관망', tv['watched'])]:
+        for label, data in [('Traded', tv['traded']), ('Watched', tv['watched'])]:
             lines.append(
                 f"| {label} | {data['count']} | "
                 f"{self._fmt_pct(data['avg_7d'])} | "
@@ -667,17 +667,17 @@ class PerformanceAnalyzer:
                 f"{self._fmt_pct(data['win_rate'])} |"
             )
         if 't_test' in tv:
-            sig = "✅ 유의" if tv['t_test']['significant'] else "❌ 비유의"
+            sig = "✅ Significant" if tv['t_test']['significant'] else "❌ Not significant"
             lines.append("")
-            lines.append(f"> **t-검정**: p-value = {tv['t_test']['p_value']:.4f} ({sig})")
+            lines.append(f"> **t-test**: p-value = {tv['t_test']['p_value']:.4f} ({sig})")
         lines.append("")
 
-        # 3. 트리거 유형별
-        lines.append("## 3. 트리거 유형별 성과")
+        # 3. By Trigger Type
+        lines.append("## 3. Performance by Trigger Type")
         lines.append("")
         trigger_stats = self.analyze_by_trigger_type()
         if trigger_stats:
-            lines.append("| 트리거 유형 | 건수 | 매매율 | 30일 평균 | 승률 |")
+            lines.append("| Trigger Type | Count | Trade % | 30d Avg | Win Rate |")
             lines.append("|-------------|------|--------|-----------|------|")
             sorted_triggers = sorted(
                 trigger_stats.items(),
@@ -692,15 +692,15 @@ class PerformanceAnalyzer:
                     f"{self._fmt_pct(data['win_rate_30d'])} |"
                 )
         else:
-            lines.append("*데이터 없음*")
+            lines.append("*No data*")
         lines.append("")
 
-        # 4. 손익비 구간별
-        lines.append("## 4. 손익비 구간별 성과")
+        # 4. By Risk-Reward Range
+        lines.append("## 4. Performance by Risk-Reward Range")
         lines.append("")
         rr_stats = self.analyze_rr_threshold_impact()
         if rr_stats:
-            lines.append("| 손익비 구간 | 전체 | 매매 | 관망 | 전체 평균 | 관망 평균 |")
+            lines.append("| RR Range | Total | Traded | Watched | All Avg | Watch Avg |")
             lines.append("|-------------|------|------|------|-----------|-----------|")
             for label, data in rr_stats.items():
                 if data['total_count'] > 0:
@@ -711,35 +711,35 @@ class PerformanceAnalyzer:
                         f"{self._fmt_pct(data['avg_watched_return'])} |"
                     )
         else:
-            lines.append("*데이터 없음*")
+            lines.append("*No data*")
         lines.append("")
 
-        # 5. 권고사항
-        lines.append("## 5. 데이터 기반 권고사항")
+        # 5. Recommendations
+        lines.append("## 5. Data-Driven Recommendations")
         lines.append("")
         recommendations = self.generate_recommendations()
         if recommendations:
             for rec in recommendations:
                 lines.append(f"- {rec}")
         else:
-            lines.append("*권고사항 없음 (데이터 추가 수집 필요)*")
+            lines.append("*No recommendations (need more data)*")
         lines.append("")
 
         lines.append("---")
-        lines.append("*© PRISM-INSIGHT 투자 전략 분석 시스템*")
+        lines.append("*© PRISM-INSIGHT Investment Strategy Analysis System*")
 
         return "\n".join(lines)
 
-    # === 유틸리티 메서드 ===
+    # === Utility methods ===
 
     def _safe_mean(self, values: List[float]) -> Optional[float]:
-        """안전한 평균 계산"""
+        """Safe mean calculation"""
         if not values:
             return None
         return sum(values) / len(values)
 
     def _safe_std(self, values: List[float]) -> Optional[float]:
-        """안전한 표준편차 계산"""
+        """Safe standard deviation calculation"""
         if not values or len(values) < 2:
             return None
         mean = sum(values) / len(values)
@@ -747,14 +747,14 @@ class PerformanceAnalyzer:
         return variance ** 0.5
 
     def _win_rate(self, returns: List[float]) -> Optional[float]:
-        """승률 계산 (수익률 > 0인 비율)"""
+        """Win rate calculation (ratio of returns > 0)"""
         if not returns:
             return None
         winners = sum(1 for r in returns if r > 0)
         return winners / len(returns)
 
     def _fmt_pct(self, value: Optional[float]) -> str:
-        """퍼센트 포맷팅"""
+        """Percentage formatting"""
         if value is None:
             return "N/A"
         return f"{value*100:+.1f}%"
@@ -762,31 +762,31 @@ class PerformanceAnalyzer:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="분석 종목 성과 심층 분석 리포트",
+        description="Analysis Performance Deep Dive Report",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-예시:
-    python performance_analysis_report.py                    # 텍스트 리포트
-    python performance_analysis_report.py --format markdown  # 마크다운 리포트
-    python performance_analysis_report.py --output report.md # 파일로 저장
+Examples:
+    python performance_analysis_report.py                    # Text report
+    python performance_analysis_report.py --format markdown  # Markdown report
+    python performance_analysis_report.py --output report.md # Save to file
         """
     )
     parser.add_argument(
         "--format",
         choices=["text", "markdown"],
         default="text",
-        help="출력 형식 (기본: text)"
+        help="Output format (default: text)"
     )
     parser.add_argument(
         "--output",
         type=str,
-        help="리포트를 저장할 파일 경로"
+        help="File path to save report"
     )
     parser.add_argument(
         "--db",
         type=str,
         default=None,
-        help="SQLite DB 경로 (기본: ./stock_tracking_db.sqlite)"
+        help="SQLite DB path (default: ./stock_tracking_db.sqlite)"
     )
 
     args = parser.parse_args()
@@ -797,7 +797,7 @@ def main():
     if args.output:
         with open(args.output, 'w', encoding='utf-8') as f:
             f.write(report)
-        print(f"리포트가 저장되었습니다: {args.output}")
+        print(f"Report saved: {args.output}")
     else:
         print(report)
 

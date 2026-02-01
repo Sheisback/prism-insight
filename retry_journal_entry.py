@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-매매일지 재시도 스크립트
-trading_history에서 데이터를 가져와 journal entry를 재생성합니다.
+Trading Journal Retry Script
+Retrieves data from trading_history and regenerates journal entries.
 
-사용법:
-    # 특정 거래 ID로 재시도
+Usage:
+    # Retry by specific trade ID
     python retry_journal_entry.py --id 40
 
-    # 특정 종목코드로 최근 거래 재시도
+    # Retry recent trade by ticker
     python retry_journal_entry.py --ticker 035720
 
-    # 모든 journal 미생성 거래 재시도
+    # Retry all trades without journal entries
     python retry_journal_entry.py --all-missing
 """
 
@@ -32,10 +32,10 @@ logger = logging.getLogger(__name__)
 
 
 async def retry_journal_entry(db_path: str, trade_id: int = None, ticker: str = None):
-    """특정 거래에 대한 journal entry 재생성"""
+    """Regenerate journal entry for a specific trade"""
     from stock_tracking_agent import StockTrackingAgent
 
-    # DB에서 거래 정보 조회
+    # Query trade info from DB
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
@@ -48,21 +48,21 @@ async def retry_journal_entry(db_path: str, trade_id: int = None, ticker: str = 
             (ticker,)
         )
     else:
-        logger.error("trade_id 또는 ticker를 지정해야 합니다")
+        logger.error("Must specify trade_id or ticker")
         return False
 
     row = cursor.fetchone()
     if not row:
-        logger.error(f"거래 기록을 찾을 수 없습니다 (id={trade_id}, ticker={ticker})")
+        logger.error(f"Trade record not found (id={trade_id}, ticker={ticker})")
         return False
 
     trade_data = dict(row)
-    logger.info(f"거래 기록 조회 완료: {trade_data['company_name']}({trade_data['ticker']})")
-    logger.info(f"  - 매수: {trade_data['buy_price']:,.0f}원 ({trade_data['buy_date']})")
-    logger.info(f"  - 매도: {trade_data['sell_price']:,.0f}원 ({trade_data['sell_date']})")
-    logger.info(f"  - 수익률: {trade_data['profit_rate']:.2f}%")
+    logger.info(f"Trade record retrieved: {trade_data['company_name']}({trade_data['ticker']})")
+    logger.info(f"  - Buy: {trade_data['buy_price']:,.0f} ({trade_data['buy_date']})")
+    logger.info(f"  - Sell: {trade_data['sell_price']:,.0f} ({trade_data['sell_date']})")
+    logger.info(f"  - Return: {trade_data['profit_rate']:.2f}%")
 
-    # 이미 journal이 있는지 확인
+    # Check if journal entry already exists
     cursor.execute(
         """
         SELECT id FROM trading_journal
@@ -72,22 +72,22 @@ async def retry_journal_entry(db_path: str, trade_id: int = None, ticker: str = 
     )
     existing = cursor.fetchone()
     if existing:
-        logger.warning(f"이미 journal entry가 존재합니다 (journal_id={existing['id']})")
-        confirm = input("덮어쓰시겠습니까? (y/N): ")
+        logger.warning(f"Journal entry already exists (journal_id={existing['id']})")
+        confirm = input("Overwrite? (y/N): ")
         if confirm.lower() != 'y':
-            logger.info("취소되었습니다")
+            logger.info("Cancelled")
             return False
-        # 기존 entry 삭제
+        # Delete existing entry
         cursor.execute("DELETE FROM trading_journal WHERE id = ?", (existing['id'],))
         conn.commit()
-        logger.info(f"기존 journal entry 삭제됨 (id={existing['id']})")
+        logger.info(f"Existing journal entry deleted (id={existing['id']})")
 
     conn.close()
 
-    # StockTrackingAgent로 journal entry 생성
+    # Create journal entry using StockTrackingAgent
     agent = StockTrackingAgent(db_path=db_path, enable_journal=True)
 
-    # stock_data 구성
+    # Construct stock_data
     stock_data = {
         'ticker': trade_data['ticker'],
         'company_name': trade_data['company_name'],
@@ -96,27 +96,27 @@ async def retry_journal_entry(db_path: str, trade_id: int = None, ticker: str = 
         'scenario': trade_data['scenario'] or '{}'
     }
 
-    # 매도 사유 추론 (scenario에서 추출 시도)
-    sell_reason = "시스템 매도"
+    # Infer sell reason (try extracting from scenario)
+    sell_reason = "System sell"
     try:
         scenario = json.loads(trade_data['scenario'] or '{}')
         if trade_data['profit_rate'] < 0:
             stop_loss = scenario.get('stop_loss')
             if stop_loss and trade_data['sell_price'] <= stop_loss:
-                sell_reason = f"손절가({stop_loss:,.0f}원) 도달"
+                sell_reason = f"Stop loss ({stop_loss:,.0f}) reached"
             else:
-                sell_reason = "손실 청산"
+                sell_reason = "Loss liquidation"
         else:
             target_price = scenario.get('target_price')
             if target_price and trade_data['sell_price'] >= target_price:
-                sell_reason = f"목표가({target_price:,.0f}원) 도달"
+                sell_reason = f"Target price ({target_price:,.0f}) reached"
             else:
-                sell_reason = "익절"
+                sell_reason = "Profit taking"
     except:
         pass
 
-    logger.info(f"매도 사유: {sell_reason}")
-    logger.info("Journal entry 생성 시작...")
+    logger.info(f"Sell reason: {sell_reason}")
+    logger.info("Starting journal entry creation...")
 
     try:
         result = await agent._create_journal_entry(
@@ -128,26 +128,26 @@ async def retry_journal_entry(db_path: str, trade_id: int = None, ticker: str = 
         )
 
         if result:
-            logger.info("Journal entry 생성 완료!")
+            logger.info("Journal entry created successfully!")
             return True
         else:
-            logger.error("Journal entry 생성 실패")
+            logger.error("Journal entry creation failed")
             return False
 
     except Exception as e:
-        logger.error(f"Journal entry 생성 중 오류: {e}")
+        logger.error(f"Error during journal entry creation: {e}")
         import traceback
         traceback.print_exc()
         return False
 
 
 async def retry_all_missing(db_path: str):
-    """journal이 없는 모든 거래에 대해 재시도"""
+    """Retry all trades without journal entries"""
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # journal이 없는 거래 조회
+    # Query trades without journal entries
     cursor.execute("""
         SELECT th.id, th.ticker, th.company_name, th.sell_date, th.profit_rate
         FROM trading_history th
@@ -161,38 +161,38 @@ async def retry_all_missing(db_path: str):
     conn.close()
 
     if not missing:
-        logger.info("모든 거래에 journal이 존재합니다")
+        logger.info("All trades have journal entries")
         return
 
-    logger.info(f"Journal 미생성 거래: {len(missing)}건")
+    logger.info(f"Trades without journal: {len(missing)} records")
     for row in missing:
         logger.info(f"  - [{row['id']}] {row['company_name']}({row['ticker']}) "
                    f"{row['sell_date'][:10]} ({row['profit_rate']:.2f}%)")
 
-    confirm = input(f"\n{len(missing)}건의 journal을 생성하시겠습니까? (y/N): ")
+    confirm = input(f"\nCreate journal for {len(missing)} records? (y/N): ")
     if confirm.lower() != 'y':
-        logger.info("취소되었습니다")
+        logger.info("Cancelled")
         return
 
     success = 0
     for row in missing:
         logger.info(f"\n{'='*50}")
-        logger.info(f"처리 중: {row['company_name']}({row['ticker']})")
+        logger.info(f"Processing: {row['company_name']}({row['ticker']})")
         result = await retry_journal_entry(db_path, trade_id=row['id'])
         if result:
             success += 1
 
-    logger.info(f"\n완료: {success}/{len(missing)}건 성공")
+    logger.info(f"\nCompleted: {success}/{len(missing)} successful")
 
 
 def main():
-    parser = argparse.ArgumentParser(description='매매일지 재시도 스크립트')
+    parser = argparse.ArgumentParser(description='Trading journal retry script')
     parser.add_argument('--db-path', default='stock_tracking_db.sqlite',
-                       help='데이터베이스 경로')
-    parser.add_argument('--id', type=int, help='거래 ID')
-    parser.add_argument('--ticker', help='종목코드 (최근 거래)')
+                       help='Database path')
+    parser.add_argument('--id', type=int, help='Trade ID')
+    parser.add_argument('--ticker', help='Ticker code (recent trade)')
     parser.add_argument('--all-missing', action='store_true',
-                       help='journal 미생성 거래 모두 재시도')
+                       help='Retry all trades without journal entries')
 
     args = parser.parse_args()
 
@@ -202,7 +202,7 @@ def main():
         asyncio.run(retry_journal_entry(args.db_path, trade_id=args.id, ticker=args.ticker))
     else:
         parser.print_help()
-        print("\n예시:")
+        print("\nExamples:")
         print("  python retry_journal_entry.py --id 40")
         print("  python retry_journal_entry.py --ticker 035720")
         print("  python retry_journal_entry.py --all-missing")

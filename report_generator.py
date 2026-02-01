@@ -1,5 +1,5 @@
 """
-보고서 생성 및 변환 모듈
+Report generation and conversion module
 """
 import asyncio
 import atexit
@@ -18,11 +18,11 @@ from mcp_agent.app import MCPApp
 from mcp_agent.workflows.llm.augmented_llm import RequestParams
 from mcp_agent.workflows.llm.augmented_llm_anthropic import AnthropicAugmentedLLM
 
-# 로거 설정
+# Logger setup
 logger = logging.getLogger(__name__)
 
 # ============================================================================
-# 전역 MCPApp 관리 (프로세스 누적 방지)
+# Global MCPApp management (prevent process accumulation)
 # ============================================================================
 _global_mcp_app: Optional[MCPApp] = None
 _app_lock = asyncio.Lock()
@@ -31,76 +31,76 @@ _app_initialized = False
 
 async def get_or_create_global_mcp_app() -> MCPApp:
     """
-    전역 MCPApp 인스턴스를 가져오거나 생성
-    
-    이 방식을 사용하면:
-    - 서버 프로세스가 한 번만 시작됨
-    - 매 요청마다 새로운 프로세스를 생성하지 않음
-    - 리소스 누수 방지
-    
+    Get or create global MCPApp instance
+
+    Using this approach:
+    - Server process starts only once
+    - No new process creation per request
+    - Prevents resource leaks
+
     Returns:
-        MCPApp: 전역 MCPApp 인스턴스
+        MCPApp: Global MCPApp instance
     """
     global _global_mcp_app, _app_initialized
-    
+
     async with _app_lock:
         if _global_mcp_app is None or not _app_initialized:
-            logger.info("전역 MCPApp 초기화 시작")
+            logger.info("Starting global MCPApp initialization")
             _global_mcp_app = MCPApp(name="telegram_ai_bot_global")
             await _global_mcp_app.initialize()
             _app_initialized = True
-            logger.info(f"전역 MCPApp 초기화 완료 (Session ID: {_global_mcp_app.session_id})")
+            logger.info(f"Global MCPApp initialization complete (Session ID: {_global_mcp_app.session_id})")
         return _global_mcp_app
 
 
 async def cleanup_global_mcp_app():
-    """전역 MCPApp 정리"""
+    """Cleanup global MCPApp"""
     global _global_mcp_app, _app_initialized
-    
+
     async with _app_lock:
         if _global_mcp_app is not None and _app_initialized:
-            logger.info("전역 MCPApp 정리 시작")
+            logger.info("Starting global MCPApp cleanup")
             try:
                 await _global_mcp_app.cleanup()
-                logger.info("전역 MCPApp 정리 완료")
+                logger.info("Global MCPApp cleanup complete")
             except Exception as e:
-                logger.error(f"전역 MCPApp 정리 중 오류: {e}")
+                logger.error(f"Error during global MCPApp cleanup: {e}")
             finally:
                 _global_mcp_app = None
                 _app_initialized = False
 
 
 async def reset_global_mcp_app():
-    """전역 MCPApp 재시작 (오류 발생 시)"""
-    logger.warning("전역 MCPApp 재시작 시도")
+    """Restart global MCPApp (on error)"""
+    logger.warning("Attempting to restart global MCPApp")
     await cleanup_global_mcp_app()
     return await get_or_create_global_mcp_app()
 
 
 def _cleanup_on_exit():
-    """프로그램 종료 시 정리"""
+    """Cleanup on program exit"""
     global _global_mcp_app
     try:
         if _global_mcp_app is not None:
-            logger.info("프로그램 종료 시 전역 MCPApp 정리")
+            logger.info("Cleaning up global MCPApp on program exit")
             asyncio.run(cleanup_global_mcp_app())
     except Exception as e:
-        logger.error(f"종료 시 정리 중 오류: {e}")
+        logger.error(f"Error during exit cleanup: {e}")
 
 
-# 프로그램 종료 시 자동 정리
+# Auto cleanup on program exit
 atexit.register(_cleanup_on_exit)
 # ============================================================================
 
-# 상수 정의
+# Constant definitions
 REPORTS_DIR = Path("reports")
-REPORTS_DIR.mkdir(exist_ok=True)  # 디렉토리가 없으면 생성
+REPORTS_DIR.mkdir(exist_ok=True)  # Create directory if it doesn't exist
 HTML_REPORTS_DIR = Path("html_reports")
-HTML_REPORTS_DIR.mkdir(exist_ok=True)  # HTML 보고서 디렉토리
+HTML_REPORTS_DIR.mkdir(exist_ok=True)  # HTML reports directory
 PDF_REPORTS_DIR = Path("pdf_reports")
-PDF_REPORTS_DIR.mkdir(exist_ok=True)  # PDF 보고서 디렉토리
+PDF_REPORTS_DIR.mkdir(exist_ok=True)  # PDF reports directory
 
-# US 주식 보고서 디렉토리
+# US stock reports directory
 US_REPORTS_DIR = Path("prism-us/reports")
 US_REPORTS_DIR.mkdir(exist_ok=True, parents=True)
 US_PDF_REPORTS_DIR = Path("prism-us/pdf_reports")
@@ -108,33 +108,33 @@ US_PDF_REPORTS_DIR.mkdir(exist_ok=True, parents=True)
 
 
 # =============================================================================
-# US 주식 보고서 저장 및 캐시 함수
+# US Stock Report Caching Functions
 # =============================================================================
 
 def get_cached_us_report(ticker: str) -> tuple:
-    """US 주식 캐시된 보고서 검색
+    """Search for cached US stock report
 
     Args:
-        ticker: 티커 심볼 (예: AAPL, MSFT)
+        ticker: Ticker symbol (e.g., AAPL, MSFT)
 
     Returns:
         tuple: (is_cached, content, md_path, pdf_path)
     """
-    # 티커로 시작하는 모든 보고서 파일 찾기
+    # Find all report files starting with the ticker
     report_files = list(US_REPORTS_DIR.glob(f"{ticker}_*.md"))
 
     if not report_files:
         return False, "", None, None
 
-    # 최신순으로 정렬
+    # Sort by latest
     latest_file = max(report_files, key=lambda p: p.stat().st_mtime)
 
-    # 파일이 24시간 이내에 생성되었는지 확인
+    # Check if file was created within 24 hours
     file_age = datetime.now() - datetime.fromtimestamp(latest_file.stat().st_mtime)
-    if file_age.days >= 1:  # 24시간 이상 지난 파일은 캐시로 사용하지 않음
+    if file_age.days >= 1:  # Don't use files older than 24 hours as cache
         return False, "", None, None
 
-    # 해당 PDF 파일도 있는지 확인
+    # Check if corresponding PDF file exists
     pdf_file = None
     pdf_files = list(US_PDF_REPORTS_DIR.glob(f"{ticker}_*.pdf"))
     if pdf_files:
@@ -143,9 +143,9 @@ def get_cached_us_report(ticker: str) -> tuple:
     with open(latest_file, "r", encoding="utf-8") as f:
         content = f.read()
 
-    # PDF 파일이 없으면 생성
+    # Generate PDF if it doesn't exist
     if not pdf_file:
-        # 회사명 추출 (파일명: {ticker}_{name}_{date}_analysis.md)
+        # Extract company name (filename format: {ticker}_{name}_{date}_analysis.md)
         parts = os.path.basename(latest_file).split('_')
         company_name = parts[1] if len(parts) > 1 else ticker
         pdf_file = save_us_pdf_report(ticker, company_name, latest_file)
@@ -154,18 +154,18 @@ def get_cached_us_report(ticker: str) -> tuple:
 
 
 def save_us_report(ticker: str, company_name: str, content: str) -> Path:
-    """US 주식 보고서를 파일로 저장
+    """Save US stock report to file
 
     Args:
-        ticker: 티커 심볼 (예: AAPL)
-        company_name: 회사명
-        content: 보고서 내용
+        ticker: Ticker symbol (e.g., AAPL)
+        company_name: Company name
+        content: Report content
 
     Returns:
-        Path: 저장된 파일 경로
+        Path: Path to saved file
     """
     reference_date = datetime.now().strftime("%Y%m%d")
-    # 파일명에서 공백 및 특수문자 제거
+    # Remove spaces and special characters from filename
     safe_company_name = company_name.replace(" ", "_").replace(".", "").replace(",", "")
     filename = f"{ticker}_{safe_company_name}_{reference_date}_analysis.md"
     filepath = US_REPORTS_DIR / filename
@@ -178,29 +178,29 @@ def save_us_report(ticker: str, company_name: str, content: str) -> Path:
 
 
 def save_us_pdf_report(ticker: str, company_name: str, md_path: Path) -> Path:
-    """US 주식 마크다운 파일을 PDF로 변환하여 저장
+    """Convert US stock markdown file to PDF and save
 
     Args:
-        ticker: 티커 심볼
-        company_name: 회사명
-        md_path: 마크다운 파일 경로
+        ticker: Ticker symbol
+        company_name: Company name
+        md_path: Markdown file path
 
     Returns:
-        Path: 생성된 PDF 파일 경로
+        Path: Generated PDF file path
     """
     from pdf_converter import markdown_to_pdf
 
     reference_date = datetime.now().strftime("%Y%m%d")
-    # 파일명에서 공백 및 특수문자 제거
+    # Remove spaces and special characters from filename
     safe_company_name = company_name.replace(" ", "_").replace(".", "").replace(",", "")
     pdf_filename = f"{ticker}_{safe_company_name}_{reference_date}_analysis.pdf"
     pdf_path = US_PDF_REPORTS_DIR / pdf_filename
 
     try:
         markdown_to_pdf(str(md_path), str(pdf_path), 'playwright', add_theme=True)
-        logger.info(f"US PDF 보고서 생성 완료: {pdf_path}")
+        logger.info(f"US PDF report generated: {pdf_path}")
     except Exception as e:
-        logger.error(f"US PDF 변환 중 오류: {e}")
+        logger.error(f"Error converting US PDF: {e}")
         raise
 
     return pdf_path
@@ -208,24 +208,24 @@ def save_us_pdf_report(ticker: str, company_name: str, md_path: Path) -> Path:
 
 def generate_us_report_response_sync(ticker: str, company_name: str) -> str:
     """
-    US 주식 상세 보고서를 동기 방식으로 생성 (백그라운드 스레드에서 호출됨)
+    Generate US stock detailed report synchronously (called from background thread)
 
     Args:
-        ticker: 티커 심볼 (예: AAPL)
-        company_name: 회사명 (예: Apple Inc.)
+        ticker: Ticker symbol (e.g., AAPL)
+        company_name: Company name (e.g., Apple Inc.)
 
     Returns:
-        str: 생성된 보고서 내용
+        str: Generated report content
     """
     try:
-        logger.info(f"US 동기식 보고서 생성 시작: {ticker} ({company_name})")
+        logger.info(f"US sync report generation started: {ticker} ({company_name})")
 
-        # 프로젝트 루트 디렉토리 설정 (절대 경로)
+        # Set project root directory (absolute path)
         project_root = os.path.dirname(os.path.abspath(__file__))
         prism_us_dir = os.path.join(project_root, 'prism-us')
 
-        # 별도의 프로세스로 US 분석 수행
-        # prism-us/cores/us_analysis.py의 analyze_us_stock 함수 사용
+        # Run US analysis in separate process
+        # Uses analyze_us_stock function from prism-us/cores/us_analysis.py
         cmd = [
             sys.executable,  # 현재 Python 인터프리터
             "-c",
@@ -235,7 +235,7 @@ import json
 import sys
 import os
 
-# 절대 경로 사용 (Docker 호환성)
+# Use absolute paths (Docker compatibility)
 project_root = r'{project_root}'
 prism_us_dir = r'{prism_us_dir}'
 sys.path.insert(0, prism_us_dir)
@@ -246,7 +246,7 @@ from check_market_day import get_reference_date
 
 async def run():
     try:
-        # 마지막 거래일 자동 감지
+        # Auto-detect last trading day
         ref_date = get_reference_date()
         result = await analyze_us_stock(
             ticker="{ticker}",
@@ -254,12 +254,12 @@ async def run():
             reference_date=ref_date,
             language="ko"
         )
-        # 구분자를 사용하여 결과 출력의 시작과 끝을 표시
+        # Use delimiters to mark start and end of result output
         print("RESULT_START")
         print(json.dumps({{"success": True, "result": result}}))
         print("RESULT_END")
     except Exception as e:
-        # 구분자를 사용하여 에러 출력의 시작과 끝을 표시
+        # Use delimiters to mark start and end of error output
         print("RESULT_START")
         print(json.dumps({{"success": False, "error": str(e)}}))
         print("RESULT_END")
@@ -269,42 +269,42 @@ if __name__ == "__main__":
             """
         ]
 
-        logger.info(f"US 외부 프로세스 실행: {ticker} (cwd: {project_root})")
-        process = subprocess.run(cmd, capture_output=True, text=True, timeout=1200, cwd=project_root)  # 20분 타임아웃
+        logger.info(f"US external process execution: {ticker} (cwd: {project_root})")
+        process = subprocess.run(cmd, capture_output=True, text=True, timeout=1200, cwd=project_root)  # 20 min timeout
 
-        # stderr 로깅 (디버깅용)
+        # Log stderr (for debugging)
         if process.stderr:
-            logger.warning(f"US 외부 프로세스 stderr: {process.stderr[:500]}")
+            logger.warning(f"US external process stderr: {process.stderr[:500]}")
 
-        # 출력 초기화 - 경고 방지를 위해 변수 미리 선언
+        # Initialize output - pre-declare variable to prevent warnings
         output = ""
 
-        # 출력 파싱 - 구분자를 사용하여 실제 JSON 출력 부분만 추출
+        # Parse output - extract only actual JSON output using delimiters
         try:
             output = process.stdout
-            # 로그 출력에서 RESULT_START와 RESULT_END 사이의 JSON 데이터만 추출
+            # Extract only JSON data between RESULT_START and RESULT_END from log output
             if "RESULT_START" in output and "RESULT_END" in output:
                 result_start = output.find("RESULT_START") + len("RESULT_START")
                 result_end = output.find("RESULT_END")
                 json_str = output[result_start:result_end].strip()
 
-                # JSON 파싱
+                # Parse JSON
                 parsed_output = json.loads(json_str)
 
                 if parsed_output.get('success', False):
                     result = parsed_output.get('result', '')
-                    logger.info(f"US 외부 프로세스 결과: {len(result)} 글자")
+                    logger.info(f"US external process result: {len(result)} characters")
                     return result
                 else:
-                    error = parsed_output.get('error', '알 수 없는 오류')
-                    logger.error(f"US 외부 프로세스 오류: {error}")
-                    return f"US 주식 분석 중 오류가 발생했습니다: {error}"
+                    error = parsed_output.get('error', 'Unknown error')
+                    logger.error(f"US external process error: {error}")
+                    return f"Error occurred during US stock analysis: {error}"
             else:
-                # 구분자를 찾을 수 없는 경우 - 프로세스 실행 자체에 문제가 있을 수 있음
-                logger.error(f"US 외부 프로세스 출력에서 결과 구분자를 찾을 수 없습니다: {output[:500]}")
-                # stderr에 에러 로그가 있는지 확인
+                # If delimiters not found - process execution itself may have issues
+                logger.error(f"Could not find result delimiters in US external process output: {output[:500]}")
+                # Check if there's error log in stderr
                 if process.stderr:
-                    logger.error(f"US 외부 프로세스 에러 출력: {process.stderr[:500]}")
+                    logger.error(f"US external process error output: {process.stderr[:500]}")
                 return f"US 주식 분석 결과를 찾을 수 없습니다. 로그를 확인하세요."
         except json.JSONDecodeError as e:
             logger.error(f"US 외부 프로세스 출력 파싱 실패: {e}")
@@ -354,21 +354,21 @@ def get_cached_report(stock_code: str) -> tuple:
     Returns:
         tuple: (is_cached, content, md_path, pdf_path)
     """
-    # 종목 코드로 시작하는 모든 보고서 파일 찾기
+    # Find all report files starting with stock code
     report_files = list(REPORTS_DIR.glob(f"{stock_code}_*.md"))
 
     if not report_files:
         return False, "", None, None
 
-    # 최신순으로 정렬
+    # Sort by latest
     latest_file = max(report_files, key=lambda p: p.stat().st_mtime)
 
-    # 파일이 24시간 이내에 생성되었는지 확인
+    # Check if file was created within 24 hours
     file_age = datetime.now() - datetime.fromtimestamp(latest_file.stat().st_mtime)
-    if file_age.days >= 1:  # 24시간 이상 지난 파일은 캐시로 사용하지 않음
+    if file_age.days >= 1:  # Don't use files older than 24 hours as cache
         return False, "", None, None
 
-    # 해당 PDF 파일도 있는지 확인
+    # Check if corresponding PDF file exists
     pdf_file = None
     pdf_files = list(PDF_REPORTS_DIR.glob(f"{stock_code}_*.pdf"))
     if pdf_files:
@@ -377,9 +377,9 @@ def get_cached_report(stock_code: str) -> tuple:
     with open(latest_file, "r", encoding="utf-8") as f:
         content = f.read()
 
-    # PDF 파일이 없으면 생성
+    # Generate PDF if it doesn't exist
     if not pdf_file:
-        # 회사명 추출 (파일명: {code}_{name}_{date}_analysis.md)
+        # Extract company name (filename format: {code}_{name}_{date}_analysis.md)
         company_name = os.path.basename(latest_file).split('_')[1]
         pdf_file = save_pdf_report(stock_code, company_name, latest_file)
 
@@ -545,16 +545,16 @@ if __name__ == "__main__":
             """
         ]
 
-        # 프로젝트 루트 디렉토리 설정 (cores 모듈 import를 위해 필수)
+        # Set project root directory (required for cores module import)
         project_root = os.path.dirname(os.path.abspath(__file__))
 
-        logger.info(f"외부 프로세스 실행: {stock_code} (cwd: {project_root})")
+        logger.info(f"External process execution: {stock_code} (cwd: {project_root})")
 
-        # Popen으로 실행하여 실시간 로그 저장
+        # Run with Popen to save real-time logs
         with open(log_file, "w", encoding="utf-8") as f:
             f.write(f"=== Subprocess Log for {stock_code} ({company_name}) ===\n")
             f.write(f"Started at: {datetime.now().isoformat()}\n")
-            f.write(f"Timeout: 1800 seconds (30분)\n")
+            f.write(f"Timeout: 1800 seconds (30 min)\n")
             f.write("=" * 60 + "\n\n")
             f.flush()
 
@@ -567,9 +567,9 @@ if __name__ == "__main__":
             )
 
             try:
-                stdout, stderr = process.communicate(timeout=1800)  # 30분 타임아웃
+                stdout, stderr = process.communicate(timeout=1800)  # 30 min timeout
 
-                # 로그 파일에 기록
+                # Write to log file
                 f.write("\n=== STDOUT ===\n")
                 f.write(stdout or "(empty)")
                 f.write("\n\n=== STDERR ===\n")
@@ -580,7 +580,7 @@ if __name__ == "__main__":
                 process.kill()
                 stdout, stderr = process.communicate()
 
-                # 타임아웃 시에도 로그 저장
+                # Save log even on timeout
                 f.write("\n=== TIMEOUT OCCURRED ===\n")
                 f.write(f"Timeout at: {datetime.now().isoformat()}\n")
                 f.write("\n=== STDOUT (before timeout) ===\n")
@@ -588,43 +588,43 @@ if __name__ == "__main__":
                 f.write("\n\n=== STDERR (before timeout) ===\n")
                 f.write(stderr or "(empty)")
 
-                logger.error(f"외부 프로세스 타임아웃: {stock_code}, 로그 파일: {log_file}")
-                return f"분석 시간이 초과되었습니다. 로그 파일을 확인하세요: {log_file}"
+                logger.error(f"External process timeout: {stock_code}, log file: {log_file}")
+                return f"Analysis time exceeded. Check log file: {log_file}"
 
-        # stderr 로깅 (디버깅용)
+        # Log stderr (for debugging)
         if stderr:
-            logger.warning(f"외부 프로세스 stderr (전체 로그: {log_file}): {stderr[:500]}")
+            logger.warning(f"External process stderr (full log: {log_file}): {stderr[:500]}")
 
-        # 출력 파싱 - 구분자를 사용하여 실제 JSON 출력 부분만 추출
+        # Parse output - extract only actual JSON output using delimiters
         try:
-            # 로그 출력에서 RESULT_START와 RESULT_END 사이의 JSON 데이터만 추출
+            # Extract only JSON data between RESULT_START and RESULT_END from log output
             if "RESULT_START" in stdout and "RESULT_END" in stdout:
                 result_start = stdout.find("RESULT_START") + len("RESULT_START")
                 result_end = stdout.find("RESULT_END")
                 json_str = stdout[result_start:result_end].strip()
 
-                # JSON 파싱
+                # Parse JSON
                 parsed_output = json.loads(json_str)
 
                 if parsed_output.get('success', False):
                     result = parsed_output.get('result', '')
-                    logger.info(f"외부 프로세스 결과: {len(result)} 글자")
+                    logger.info(f"External process result: {len(result)} characters")
                     return result
                 else:
-                    error = parsed_output.get('error', '알 수 없는 오류')
-                    logger.error(f"외부 프로세스 오류: {error}, 로그 파일: {log_file}")
-                    return f"분석 중 오류가 발생했습니다: {error}"
+                    error = parsed_output.get('error', 'Unknown error')
+                    logger.error(f"External process error: {error}, log file: {log_file}")
+                    return f"Error occurred during analysis: {error}"
             else:
-                # 구분자를 찾을 수 없는 경우 - 프로세스 실행 자체에 문제가 있을 수 있음
-                logger.error(f"외부 프로세스 출력에서 결과 구분자를 찾을 수 없습니다. 로그 파일: {log_file}")
-                logger.error(f"stdout 일부: {stdout[:500] if stdout else '(empty)'}")
+                # If delimiters not found - process execution itself may have issues
+                logger.error(f"Could not find result delimiters in external process output. Log file: {log_file}")
+                logger.error(f"stdout excerpt: {stdout[:500] if stdout else '(empty)'}")
                 if stderr:
-                    logger.error(f"stderr 일부: {stderr[:500]}")
-                return f"분석 결과를 찾을 수 없습니다. 로그 파일: {log_file}"
+                    logger.error(f"stderr excerpt: {stderr[:500]}")
+                return f"Could not find analysis result. Log file: {log_file}"
         except json.JSONDecodeError as e:
-            logger.error(f"외부 프로세스 출력 파싱 실패: {e}, 로그 파일: {log_file}")
-            logger.error(f"출력 내용: {stdout[:1000] if stdout else '(empty)'}")
-            return f"분석 결과 파싱 중 오류가 발생했습니다. 로그 파일: {log_file}"
+            logger.error(f"Failed to parse external process output: {e}, log file: {log_file}")
+            logger.error(f"Output content: {stdout[:1000] if stdout else '(empty)'}")
+            return f"Error occurred while parsing analysis result. Log file: {log_file}"
     except Exception as e:
         logger.error(f"동기식 보고서 생성 중 오류: {str(e)}")
         import traceback
@@ -1210,10 +1210,10 @@ async def generate_us_follow_up_response(ticker, ticker_name, conversation_conte
             server_names=["perplexity", "yahoo_finance"]
         )
 
-        # LLM 연결
+        # Connect to LLM
         llm = await agent.attach_llm(AnthropicAugmentedLLM)
 
-        # 응답 생성
+        # Generate response
         response = await llm.generate_str(
             message=f"""사용자의 추가 질문에 대해 답변해주세요.
 
@@ -1225,18 +1225,18 @@ async def generate_us_follow_up_response(ticker, ticker_name, conversation_conte
                 maxTokens=2000
             )
         )
-        app_logger.info(f"US 추가 질문 응답 생성 결과: {str(response)[:100]}...")
+        app_logger.info(f"US follow-up response generated: {str(response)[:100]}...")
 
         return clean_model_response(response)
 
     except Exception as e:
-        logger.error(f"US 추가 응답 생성 중 오류: {str(e)}")
+        logger.error(f"Error generating US follow-up response: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
 
-        # 오류 발생 시 전역 app 재시작 시도
+        # Try restarting global app on error
         try:
-            logger.warning("오류 발생으로 인한 전역 MCPApp 재시작 시도")
+            logger.warning("Attempting to restart global MCPApp due to error")
             await reset_global_mcp_app()
         except Exception as reset_error:
             logger.error(f"MCPApp 재시작 실패: {reset_error}")
@@ -1267,30 +1267,30 @@ async def generate_journal_conversation_response(
         str: AI 응답
     """
     try:
-        # 전역 MCPApp 사용
+        # Use global MCPApp
         app = await get_or_create_global_mcp_app()
         app_logger = app.logger
 
-        # 현재 날짜
+        # Current date
         current_date = datetime.now().strftime('%Y년 %m월 %d일')
 
-        # 종목 컨텍스트
+        # Ticker context
         ticker_context = ""
         if ticker and ticker_name:
             ticker_context = f"\n현재 대화 중인 종목: {ticker_name} ({ticker})"
 
-        # 대화 히스토리
+        # Conversation history
         history_text = ""
         if conversation_history:
             history_items = []
-            for item in conversation_history[-5:]:  # 최근 5개만
+            for item in conversation_history[-5:]:  # Last 5 items only
                 role = "사용자" if item.get('role') == 'user' else "AI"
                 content = item.get('content', '')[:200]
                 history_items.append(f"[{role}] {content}")
             if history_items:
                 history_text = "\n\n## 최근 대화 히스토리\n" + "\n".join(history_items)
 
-        # 에이전트 생성
+        # Create agent
         agent = Agent(
             name="journal_conversation_agent",
             instruction=f"""당신은 사용자의 투자 파트너이자 친구입니다. 텔레그램에서 자유로운 대화를 나눕니다.
@@ -1330,10 +1330,10 @@ async def generate_journal_conversation_response(
             server_names=["perplexity", "kospi_kosdaq"]
         )
 
-        # LLM 연결
+        # Connect to LLM
         llm = await agent.attach_llm(AnthropicAugmentedLLM)
 
-        # 응답 생성
+        # Generate response
         response = await llm.generate_str(
             message=f"""사용자 메시지: {user_message}
 
@@ -1343,16 +1343,16 @@ async def generate_journal_conversation_response(
                 maxTokens=2000
             )
         )
-        app_logger.info(f"저널 대화 응답 생성 완료: user_id={user_id}, response_len={len(response)}")
+        app_logger.info(f"Journal conversation response generated: user_id={user_id}, response_len={len(response)}")
 
         return clean_model_response(response)
 
     except Exception as e:
-        logger.error(f"저널 대화 응답 생성 중 오류: {str(e)}")
+        logger.error(f"Error generating journal conversation response: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
 
-        # 오류 발생 시 전역 app 재시작 시도
+        # Try restarting global app on error
         try:
             await reset_global_mcp_app()
         except Exception:

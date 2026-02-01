@@ -2,14 +2,14 @@
 """
 Migrate watchlist_history to analysis_performance_tracker
 
-기존 watchlist_history 데이터를 analysis_performance_tracker 테이블로 마이그레이션합니다.
-- 7/14/30일 후 가격 데이터를 pykrx에서 조회하여 수익률 계산
-- trading_history와 비교하여 was_traded 필드 설정
-- trigger_type이 없는 경우 기본값 사용
+Migrates existing watchlist_history data to the analysis_performance_tracker table.
+- Calculates returns by querying 7/14/30 day price data from pykrx
+- Sets was_traded field by comparing with trading_history
+- Uses default value if trigger_type is missing
 
 Usage:
-    python utils/migrate_watchlist_to_performance_tracker.py --dry-run  # 미리보기
-    python utils/migrate_watchlist_to_performance_tracker.py            # 실행
+    python utils/migrate_watchlist_to_performance_tracker.py --dry-run  # Preview
+    python utils/migrate_watchlist_to_performance_tracker.py            # Execute
 """
 
 import argparse
@@ -43,7 +43,7 @@ _TRIGGER_MAP: Dict[tuple, str] = {}
 
 def load_trigger_results_map(project_root: Path) -> Dict[tuple, str]:
     """
-    trigger_results JSON 파일에서 (ticker, date) -> trigger_type 매핑 생성
+    Create (ticker, date) -> trigger_type mapping from trigger_results JSON files
     """
     global _TRIGGER_MAP
 
@@ -91,15 +91,15 @@ def load_trigger_results_map(project_root: Path) -> Dict[tuple, str]:
 
 def simplify_trigger_type(trigger_type: str) -> str:
     """
-    trigger_batch.py의 트리거 이름을 간소화
+    Simplify trigger names from trigger_batch.py
     """
     mapping = {
-        '거래량 급증 상위주': '거래량 급증',
-        '갭 상승 모멘텀 상위주': '갭 상승',
-        '시총 대비 집중 자금 유입 상위주': '자금 유입',
-        '일중 상승률 상위주': '일중 상승',
-        '마감 강도 상위주': '마감 강도',
-        '거래량 증가 상위 횡보주': '횡보 거래량',
+        '거래량 급증 상위주': 'Volume Surge',
+        '갭 상승 모멘텀 상위주': 'Gap Up',
+        '시총 대비 집중 자금 유입 상위주': 'Capital Inflow',
+        '일중 상승률 상위주': 'Intraday Surge',
+        '마감 강도 상위주': 'Closing Strength',
+        '거래량 증가 상위 횡보주': 'Sideways Volume',
     }
     return mapping.get(trigger_type, trigger_type)
 
@@ -122,7 +122,7 @@ def get_db_path() -> Path:
 
 def get_traded_tickers(conn: sqlite3.Connection) -> dict:
     """
-    trading_history에서 매매한 종목 목록 조회
+    Query list of traded stocks from trading_history
     Returns: {ticker: [buy_dates]}
     """
     cursor = conn.cursor()
@@ -146,7 +146,7 @@ def get_traded_tickers(conn: sqlite3.Connection) -> dict:
 
 def get_price_on_date(ticker: str, target_date: str) -> float | None:
     """
-    특정 날짜의 종가 조회 (pykrx 사용)
+    Query closing price for a specific date (using pykrx)
     target_date: YYYY-MM-DD format
     """
     if not PYKRX_AVAILABLE:
@@ -169,10 +169,10 @@ def get_price_on_date(ticker: str, target_date: str) -> float | None:
         target_dt = datetime.strptime(target_date, "%Y-%m-%d")
         for idx in df.index:
             if idx.date() >= target_dt.date():
-                return float(df.loc[idx, '종가'])
+                return float(df.loc[idx, '종가'])  # 종가 = Close
 
         # If no future date, use last available
-        return float(df.iloc[-1]['종가'])
+        return float(df.iloc[-1]['종가'])  # 종가 = Close
 
     except Exception as e:
         logger.debug(f"Failed to get price for {ticker} on {target_date}: {e}")
@@ -181,7 +181,7 @@ def get_price_on_date(ticker: str, target_date: str) -> float | None:
 
 def calculate_tracking_data(analyzed_date: str, analyzed_price: float, ticker: str) -> dict:
     """
-    7/14/30일 후 가격 및 수익률 계산
+    Calculate prices and returns after 7/14/30 days
     """
     result = {
         'tracked_7d_date': None, 'tracked_7d_price': None, 'tracked_7d_return': None,
@@ -210,7 +210,7 @@ def calculate_tracking_data(analyzed_date: str, analyzed_price: float, ticker: s
             if price:
                 result['tracked_7d_date'] = target_date
                 result['tracked_7d_price'] = price
-                result['tracked_7d_return'] = (price - analyzed_price) / analyzed_price  # 소수점 형태 (0.078 = 7.8%)
+                result['tracked_7d_return'] = (price - analyzed_price) / analyzed_price  # Decimal format (0.078 = 7.8%)
 
         # 14-day tracking
         if days_passed >= 14:
@@ -219,7 +219,7 @@ def calculate_tracking_data(analyzed_date: str, analyzed_price: float, ticker: s
             if price:
                 result['tracked_14d_date'] = target_date
                 result['tracked_14d_price'] = price
-                result['tracked_14d_return'] = (price - analyzed_price) / analyzed_price  # 소수점 형태
+                result['tracked_14d_return'] = (price - analyzed_price) / analyzed_price  # Decimal format
 
         # 30-day tracking
         if days_passed >= 30:
@@ -228,7 +228,7 @@ def calculate_tracking_data(analyzed_date: str, analyzed_price: float, ticker: s
             if price:
                 result['tracked_30d_date'] = target_date
                 result['tracked_30d_price'] = price
-                result['tracked_30d_return'] = (price - analyzed_price) / analyzed_price  # 소수점 형태
+                result['tracked_30d_return'] = (price - analyzed_price) / analyzed_price  # Decimal format
 
         # Determine tracking status
         if result['tracked_30d_return'] is not None:
@@ -246,16 +246,16 @@ def calculate_tracking_data(analyzed_date: str, analyzed_price: float, ticker: s
 
 def determine_trigger_type(record: dict, trigger_map: Dict[tuple, str] = None) -> str:
     """
-    기존 데이터에서 trigger_type 결정
+    Determine trigger_type from existing data
 
-    우선순위:
-    1. 기존 trigger_type 필드
-    2. trigger_results JSON 매핑
-    3. rationale 텍스트 분석
+    Priority:
+    1. Existing trigger_type field
+    2. trigger_results JSON mapping
+    3. Rationale text analysis
 
-    트리거 유형:
-    - 오전: 거래량 급증, 갭 상승, 자금 유입
-    - 오후: 일중 상승, 마감 강도, 횡보 거래량
+    Trigger types:
+    - Morning: Volume surge, Gap up, Capital inflow
+    - Afternoon: Intraday surge, Closing strength, Sideways volume
     """
     # 1. Use existing trigger_type if available
     if record.get('trigger_type') and record['trigger_type'].strip():
@@ -279,34 +279,34 @@ def determine_trigger_type(record: dict, trigger_map: Dict[tuple, str] = None) -
     # Heuristics based on rationale/skip_reason
     combined = (rationale + ' ' + skip_reason).lower()
 
-    # 오전 트리거
+    # Morning triggers
     if '급등' in combined or 'surge' in combined or ('거래량' in combined and '급증' in combined):
-        return '거래량 급증'
+        return 'Volume Surge'
     elif '갭' in combined or 'gap' in combined:
-        return '갭 상승'
+        return 'Gap Up'
     elif '자금' in combined and '유입' in combined:
-        return '자금 유입'
+        return 'Capital Inflow'
 
-    # 오후 트리거
+    # Afternoon triggers
     elif '일중' in combined or ('장중' in combined and '상승' in combined):
-        return '일중 상승'
+        return 'Intraday Surge'
     elif '마감' in combined or '강도' in combined:
-        return '마감 강도'
+        return 'Closing Strength'
     elif '횡보' in combined:
-        return '횡보 거래량'
+        return 'Sideways Volume'
 
-    # 기타
+    # Others
     elif '돌파' in combined or 'breakout' in combined:
-        return '기술적 돌파'
+        return 'Technical Breakout'
     elif '뉴스' in combined or 'news' in combined:
-        return '뉴스 촉발'
+        return 'News Catalyst'
     else:
-        return '종합 분석'  # Default
+        return 'Comprehensive Analysis'  # Default
 
 
 def determine_trigger_mode(analyzed_date: str) -> str:
     """
-    분석 시간에서 trigger_mode 결정 (morning/afternoon)
+    Determine trigger_mode from analysis time (morning/afternoon)
     """
     try:
         if ' ' in analyzed_date:
@@ -320,7 +320,7 @@ def determine_trigger_mode(analyzed_date: str) -> str:
 
 def check_was_traded(ticker: str, analyzed_date: str, traded_tickers: dict) -> int:
     """
-    해당 분석 후 실제 매매 여부 확인
+    Check if actually traded after this analysis
     """
     if ticker not in traded_tickers:
         return 0
@@ -354,9 +354,9 @@ def parse_scenario(scenario_str: str) -> dict:
 
 def migrate_data(conn: sqlite3.Connection, dry_run: bool = True, reset: bool = False) -> dict:
     """
-    watchlist_history + stock_holdings + trading_history → analysis_performance_tracker 마이그레이션
+    Migrate watchlist_history + stock_holdings + trading_history → analysis_performance_tracker
 
-    기간 통일: watchlist_history의 최소 날짜를 기준으로 trading 데이터도 필터링
+    Period unification: Filter trading data based on minimum date from watchlist_history
     """
     cursor = conn.cursor()
 
@@ -399,7 +399,7 @@ def migrate_data(conn: sqlite3.Connection, dry_run: bool = True, reset: bool = F
     project_root = Path(__file__).parent.parent
     trigger_map = load_trigger_results_map(project_root)
 
-    # Reset option: 기존 데이터 삭제 후 다시 마이그레이션
+    # Reset option: Delete existing data and re-migrate
     if reset and not dry_run:
         cursor.execute("DELETE FROM analysis_performance_tracker")
         logger.info("Cleared existing analysis_performance_tracker data for re-migration")
@@ -424,7 +424,7 @@ def migrate_data(conn: sqlite3.Connection, dry_run: bool = True, reset: bool = F
 
     all_records = []
 
-    # ===== 0. 기간 통일을 위해 watchlist_history 최소 날짜 조회 =====
+    # ===== 0. Query minimum date from watchlist_history for period unification =====
     cursor.execute("SELECT MIN(DATE(analyzed_date)) FROM watchlist_history")
     min_watchlist_date = cursor.fetchone()[0]
 
@@ -434,7 +434,7 @@ def migrate_data(conn: sqlite3.Connection, dry_run: bool = True, reset: bool = F
     else:
         min_watchlist_date = '2000-01-01'  # Fallback if no watchlist data
 
-    # ===== 1. watchlist_history (관망 결정) =====
+    # ===== 1. watchlist_history (watch decision) =====
     # Check which columns exist in watchlist_history
     cursor.execute("PRAGMA table_info(watchlist_history)")
     watchlist_columns = {col[1] for col in cursor.fetchall()}
@@ -467,7 +467,7 @@ def migrate_data(conn: sqlite3.Connection, dry_run: bool = True, reset: bool = F
         ORDER BY analyzed_date
     """)
     watchlist_records = cursor.fetchall()
-    logger.info(f"Found {len(watchlist_records)} records in watchlist_history (관망)")
+    logger.info(f"Found {len(watchlist_records)} records in watchlist_history (watch)")
 
     for row in watchlist_records:
         # Build column index mapping
@@ -496,19 +496,19 @@ def migrate_data(conn: sqlite3.Connection, dry_run: bool = True, reset: bool = F
             'analyzed_date': row[col_idx['analyzed_date']],
             'buy_score': row[col_idx['buy_score']],
             'min_score': row[col_idx['min_score']],
-            'decision': row[col_idx['decision']] or '관망',
+            'decision': row[col_idx['decision']] or 'watch',
             'skip_reason': row[col_idx['skip_reason']],
             'target_price': target_price,
             'stop_loss': stop_loss,
             'risk_reward_ratio': risk_reward_ratio,
             'trigger_type': row[col_idx['trigger_type']] if has_trigger_type else None,
             'trigger_mode': row[col_idx['trigger_mode']] if has_trigger_mode else None,
-            'was_traded': 0,  # watchlist = 관망
+            'was_traded': 0,  # watchlist = watch
             'rationale': row[col_idx['rationale']] if has_rationale else None
         }
         all_records.append(record)
 
-    # ===== 2. trading_history (완료된 매매) - 기간 필터 적용 =====
+    # ===== 2. trading_history (completed trades) - Apply date filter =====
     cursor.execute("""
         SELECT
             id, ticker, company_name, buy_price, buy_date, scenario
@@ -518,11 +518,11 @@ def migrate_data(conn: sqlite3.Connection, dry_run: bool = True, reset: bool = F
     """, (min_watchlist_date,))
     trading_records = cursor.fetchall()
 
-    # 전체 건수 조회 (로깅용)
+    # Query total count (for logging)
     cursor.execute("SELECT COUNT(*) FROM trading_history")
     total_trading = cursor.fetchone()[0]
     stats['skipped_date_filter'] += total_trading - len(trading_records)
-    logger.info(f"Found {len(trading_records)} records in trading_history (완료 매매, 기간 필터: >= {min_watchlist_date}, 전체: {total_trading})")
+    logger.info(f"Found {len(trading_records)} records in trading_history (completed trades, date filter: >= {min_watchlist_date}, total: {total_trading})")
 
     for row in trading_records:
         scenario = parse_scenario(row[5])
@@ -535,19 +535,19 @@ def migrate_data(conn: sqlite3.Connection, dry_run: bool = True, reset: bool = F
             'analyzed_date': row[4],
             'buy_score': scenario.get('buy_score'),
             'min_score': scenario.get('min_score'),
-            'decision': scenario.get('decision', '진입'),
+            'decision': scenario.get('decision', 'entry'),
             'skip_reason': None,
             'target_price': scenario.get('target_price'),
             'stop_loss': scenario.get('stop_loss'),
             'risk_reward_ratio': scenario.get('risk_reward_ratio'),
             'trigger_type': None,
             'trigger_mode': None,
-            'was_traded': 1,  # trading_history = 매매
+            'was_traded': 1,  # trading_history = traded
             'rationale': scenario.get('rationale')
         }
         all_records.append(record)
 
-    # ===== 3. stock_holdings (현재 보유) - 기간 필터 적용 =====
+    # ===== 3. stock_holdings (current holdings) - Apply date filter =====
     cursor.execute("""
         SELECT
             ticker, company_name, buy_price, buy_date, scenario
@@ -557,11 +557,11 @@ def migrate_data(conn: sqlite3.Connection, dry_run: bool = True, reset: bool = F
     """, (min_watchlist_date,))
     holdings_records = cursor.fetchall()
 
-    # 전체 건수 조회 (로깅용)
+    # Query total count (for logging)
     cursor.execute("SELECT COUNT(*) FROM stock_holdings")
     total_holdings = cursor.fetchone()[0]
     stats['skipped_date_filter'] += total_holdings - len(holdings_records)
-    logger.info(f"Found {len(holdings_records)} records in stock_holdings (현재 보유, 기간 필터: >= {min_watchlist_date}, 전체: {total_holdings})")
+    logger.info(f"Found {len(holdings_records)} records in stock_holdings (current holdings, date filter: >= {min_watchlist_date}, total: {total_holdings})")
 
     for row in holdings_records:
         scenario = parse_scenario(row[4])
@@ -574,14 +574,14 @@ def migrate_data(conn: sqlite3.Connection, dry_run: bool = True, reset: bool = F
             'analyzed_date': row[3],
             'buy_score': scenario.get('buy_score'),
             'min_score': scenario.get('min_score'),
-            'decision': scenario.get('decision', '진입'),
+            'decision': scenario.get('decision', 'entry'),
             'skip_reason': None,
             'target_price': scenario.get('target_price'),
             'stop_loss': scenario.get('stop_loss'),
             'risk_reward_ratio': scenario.get('risk_reward_ratio'),
             'trigger_type': None,
             'trigger_mode': None,
-            'was_traded': 1,  # stock_holdings = 매매
+            'was_traded': 1,  # stock_holdings = traded
             'rationale': scenario.get('rationale')
         }
         all_records.append(record)
@@ -706,8 +706,8 @@ def main():
         print(f"  - Skipped (date filter):          {stats['skipped_date_filter']}")
         print(f"  - Skipped (already migrated):     {stats['skipped_existing']}")
         print(f"Records migrated:                   {stats['migrated']}")
-        print(f"  - Traded (매매):                  {stats['traded']}")
-        print(f"  - Watched (관망):                 {stats['watched']}")
+        print(f"  - Traded:                         {stats['traded']}")
+        print(f"  - Watched:                        {stats['watched']}")
         if stats['traded'] + stats['watched'] > 0:
             trade_rate = stats['traded'] / (stats['traded'] + stats['watched']) * 100
             print(f"  - Trade rate:                     {trade_rate:.1f}%")

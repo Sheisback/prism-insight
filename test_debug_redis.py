@@ -4,7 +4,7 @@ import json
 import asyncio
 from pathlib import Path
 
-# .env 로드
+# Load .env
 from dotenv import load_dotenv
 load_dotenv(Path('.env'))
 
@@ -13,13 +13,13 @@ print('=== Debug Test ===')
 from upstash_redis import Redis
 from messaging.redis_signal_publisher import SignalPublisher
 
-# Redis 직접 테스트
+# Test Redis directly
 redis = Redis(
     url=os.environ['UPSTASH_REDIS_REST_URL'],
     token=os.environ['UPSTASH_REDIS_REST_TOKEN']
 )
 
-# xadd 직접 테스트
+# Test xadd directly
 print('Testing direct xadd...')
 try:
     result = redis.xadd('prism:trading-signals', {'data': json.dumps({'test': 'direct_test'})})
@@ -30,7 +30,7 @@ except Exception as e:
     print(f'Direct xadd error: {type(e).__name__}: {e}')
     traceback.print_exc()
 
-# SignalPublisher 테스트
+# Test SignalPublisher
 publisher = SignalPublisher()
 publisher._redis = redis
 print(f'Publisher _redis is set: {publisher._is_connected()}')
@@ -40,7 +40,7 @@ async def test_publish():
     try:
         result = await publisher.publish_buy_signal(
             ticker='TEST001',
-            company_name='테스트',
+            company_name='Test',
             price=10000
         )
         print(f'Publisher result: {result}')

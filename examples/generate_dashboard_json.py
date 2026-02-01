@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-주식 포트폴리오 대시보드용 JSON 데이터 생성 스크립트
-Cron으로 주기적 실행 (예: */5 * * * * - 5분마다)
+JSON Data Generation Script for Stock Portfolio Dashboard
+Run periodically with Cron (e.g., */5 * * * * - every 5 minutes)
 
 Usage:
     python generate_dashboard_json.py
 
 Output:
-    ./dashboard/public/dashboard_data.json - 대시보드에서 사용할 모든 데이터
+    ./dashboard/public/dashboard_data.json - All data for dashboard
 """
 from dotenv import load_dotenv
-load_dotenv()  # .env 파일에서 환경변수 로드
+load_dotenv()  # Load environment variables from .env file
 
 import sqlite3
 import json
@@ -22,18 +22,18 @@ from typing import Dict, List, Any
 import logging
 import os
 
-# 로깅 설정 (다른 import 전에 먼저 설정)
+# Logging setup (configure before other imports)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# 경로 설정 (다른 모듈 import 전에 먼저 설정)
+# Path setup (configure before importing other modules)
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 TRADING_DIR = PROJECT_ROOT / "trading"
-sys.path.insert(0, str(SCRIPT_DIR))  # examples/ 폴더 추가 (translation_utils용)
+sys.path.insert(0, str(SCRIPT_DIR))  # Add examples/ folder for translation_utils
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(TRADING_DIR))
 
@@ -41,7 +41,7 @@ sys.path.insert(0, str(TRADING_DIR))
 try:
     from krx_data_client import get_index_ohlcv_by_date
 
-    # pykrx 호환 래퍼
+    # pykrx compatibility wrapper
     class stock:
         @staticmethod
         def get_index_ohlcv_by_date(fromdate, todate, ticker):
@@ -50,41 +50,41 @@ try:
     PYKRX_AVAILABLE = True
 except ImportError:
     PYKRX_AVAILABLE = False
-    logger.warning("krx_data_client 패키지가 설치되어 있지 않습니다. 시장 지수 데이터를 가져올 수 없습니다.")
+    logger.warning("krx_data_client package not installed. Cannot fetch market index data.")
 
-# 번역 유틸리티 import (경로 설정 후에 import)
+# Import translation utility (after path setup)
 try:
     from translation_utils import DashboardTranslator
     TRANSLATION_AVAILABLE = True
 except ImportError:
     TRANSLATION_AVAILABLE = False
-    logger.warning("번역 유틸리티를 찾을 수 없습니다. 영어 번역이 비활성화됩니다.")
+    logger.warning("Translation utility not found. English translation disabled.")
 
-# 설정파일 로딩
+# Load configuration file
 CONFIG_FILE = TRADING_DIR / "config" / "kis_devlp.yaml"
 try:
     with open(CONFIG_FILE, encoding="UTF-8") as f:
         _cfg = yaml.load(f, Loader=yaml.FullLoader)
 except FileNotFoundError:
     _cfg = {"default_mode": "demo"}
-    logger.warning(f"설정 파일을 찾을 수 없습니다: {CONFIG_FILE}. 기본 모드(demo)를 사용합니다.")
+    logger.warning(f"Configuration file not found: {CONFIG_FILE}. Using default mode (demo).")
 
-# 한국투자증권 API 모듈 import
+# Import Korea Investment & Securities API module
 try:
     from trading.domestic_stock_trading import DomesticStockTrading
     KIS_AVAILABLE = True
 except ImportError:
     KIS_AVAILABLE = False
-    logger.warning("한국투자증권 API 모듈을 찾을 수 없습니다. 실전투자 데이터를 가져올 수 없습니다.")
+    logger.warning("Korea Investment & Securities API module not found. Cannot fetch live trading data.")
 
 
 class DashboardDataGenerator:
     def __init__(self, db_path: str = None, output_path: str = None, trading_mode: str = None, enable_translation: bool = True):
-        # db_path 기본값: 프로젝트 루트의 stock_tracking_db.sqlite
+        # db_path default: stock_tracking_db.sqlite in project root
         if db_path is None:
             db_path = str(PROJECT_ROOT / "stock_tracking_db.sqlite")
         
-        # output_path 기본값: examples/dashboard/public/dashboard_data.json
+        # output_path default: examples/dashboard/public/dashboard_data.json
         if output_path is None:
             output_path = str(SCRIPT_DIR / "dashboard" / "public" / "dashboard_data.json")
         
@@ -93,16 +93,16 @@ class DashboardDataGenerator:
         self.trading_mode = trading_mode if trading_mode is not None else _cfg.get("default_mode", "demo")
         self.enable_translation = enable_translation and TRANSLATION_AVAILABLE
         
-        # 번역기 초기화
+        # Initialize translator
         if self.enable_translation:
             try:
                 self.translator = DashboardTranslator(model="gpt-5-nano")
-                logger.info("번역 기능이 활성화되었습니다.")
+                logger.info("Translation enabled.")
             except Exception as e:
                 self.enable_translation = False
-                logger.error(f"번역기 초기화 실패: {str(e)}")
+                logger.error(f"Translator initialization failed: {str(e)}")
         else:
-            logger.info("번역 기능이 비활성화되었습니다.")
+            logger.info("Translation disabled.")
         
     def connect_db(self):
         """DB 연결"""

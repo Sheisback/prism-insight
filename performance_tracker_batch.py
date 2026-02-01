@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-분석 후 성과 추적 배치 스크립트
+Post-Analysis Performance Tracking Batch Script
 
-분석한 종목(매매/관망 모두)의 7일/14일/30일 후 가격을 추적하여
-어떤 트리거 유형이 실제로 좋은 성과를 내는지 통계를 수집합니다.
+Tracks prices at 7/14/30 days after analysis for all stocks (both traded and watched)
+to collect statistics on which trigger types actually perform well.
 
 Usage:
-    python performance_tracker_batch.py              # 모든 추적 대상 업데이트
-    python performance_tracker_batch.py --dry-run    # 실제 DB 업데이트 없이 테스트
-    python performance_tracker_batch.py --report     # 현재 추적 상태 리포트
+    python performance_tracker_batch.py              # Update all tracking targets
+    python performance_tracker_batch.py --dry-run    # Test without actual DB updates
+    python performance_tracker_batch.py --report     # Current tracking status report
 """
 from dotenv import load_dotenv
 load_dotenv()
@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Tuple
 from pathlib import Path
 
-# 로깅 설정
+# Logging setup
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -33,7 +33,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# 프로젝트 루트 경로
+# Project root path
 PROJECT_ROOT = Path(__file__).parent
 DB_PATH = PROJECT_ROOT / "stock_tracking_db.sqlite"
 
@@ -46,20 +46,20 @@ try:
     KRX_AVAILABLE = True
 except ImportError:
     KRX_AVAILABLE = False
-    logger.warning("krx_data_client 패키지가 설치되어 있지 않습니다.")
+    logger.warning("krx_data_client package is not installed.")
 
 
 class PerformanceTrackerBatch:
-    """분석 종목 성과 추적 배치 처리기"""
+    """Batch processor for tracking analyzed stock performance"""
 
-    # 추적 일수 기준
+    # Tracking day thresholds
     TRACK_DAYS = [7, 14, 30]
 
     def __init__(self, db_path: str = None, dry_run: bool = False):
         """
         Args:
-            db_path: SQLite DB 경로
-            dry_run: True이면 실제 DB 업데이트 없이 테스트만
+            db_path: SQLite DB path
+            dry_run: If True, test only without actual DB updates
         """
         self.db_path = db_path or str(DB_PATH)
         self.dry_run = dry_run
@@ -67,16 +67,16 @@ class PerformanceTrackerBatch:
         self.today_yyyymmdd = datetime.now().strftime("%Y%m%d")
 
     def connect_db(self) -> sqlite3.Connection:
-        """DB 연결"""
+        """Connect to database"""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
 
     def get_tracking_targets(self) -> List[Dict[str, Any]]:
-        """추적 대상 종목 조회
+        """Query stocks that need tracking
 
         Returns:
-            추적이 필요한 종목 리스트
+            List of stocks that need tracking
         """
         conn = self.connect_db()
         try:
@@ -118,66 +118,66 @@ class PerformanceTrackerBatch:
             conn.close()
 
     def get_current_price(self, ticker: str) -> Optional[float]:
-        """종목 현재가 조회
+        """Query current stock price
 
         Args:
-            ticker: 종목코드 (6자리)
+            ticker: Stock code (6 digits)
 
         Returns:
-            현재 종가 또는 None
+            Current close price or None
         """
         if not KRX_AVAILABLE:
-            logger.error("krx_data_client를 사용할 수 없습니다.")
+            logger.error("krx_data_client is not available.")
             return None
 
         try:
-            # 최근 7일 내 가장 가까운 영업일 가져오기
+            # Get nearest business day within last 7 days
             today = datetime.now().strftime("%Y%m%d")
             week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y%m%d")
 
             df = get_market_ohlcv_by_date(week_ago, today, ticker)
 
             if df is None or df.empty:
-                logger.warning(f"[{ticker}] 가격 데이터 없음")
+                logger.warning(f"[{ticker}] No price data available")
                 return None
 
-            # 가장 최근 종가 반환 (krx_data_client는 영문 컬럼명 사용)
+            # Return most recent close price (krx_data_client uses English column names)
             close_col = 'Close' if 'Close' in df.columns else '종가'
             latest_close = df[close_col].iloc[-1]
             return float(latest_close)
 
         except Exception as e:
-            logger.error(f"[{ticker}] 가격 조회 실패: {e}")
+            logger.error(f"[{ticker}] Price query failed: {e}")
             return None
 
     def calculate_days_elapsed(self, analyzed_date: str) -> int:
-        """분석일로부터 경과 일수 계산
+        """Calculate days elapsed since analysis date
 
         Args:
-            analyzed_date: 분석일 (YYYY-MM-DD 또는 YYYY-MM-DD HH:MM:SS)
+            analyzed_date: Analysis date (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS)
 
         Returns:
-            경과 일수
+            Days elapsed
         """
         try:
-            # 시간 부분이 포함된 경우 날짜만 추출
+            # Extract date only if timestamp is included
             date_only = analyzed_date.split(' ')[0] if ' ' in analyzed_date else analyzed_date
             analyzed = datetime.strptime(date_only, "%Y-%m-%d")
             today = datetime.now()
             return (today - analyzed).days
         except Exception as e:
-            logger.error(f"날짜 계산 오류: {e}")
+            logger.error(f"Date calculation error: {e}")
             return 0
 
     def calculate_return(self, analyzed_price: float, current_price: float) -> float:
-        """수익률 계산
+        """Calculate return rate
 
         Args:
-            analyzed_price: 분석 시점 가격
-            current_price: 현재 가격
+            analyzed_price: Price at analysis time
+            current_price: Current price
 
         Returns:
-            수익률 (예: 0.05 = 5%)
+            Return rate (e.g., 0.05 = 5%)
         """
         if analyzed_price <= 0:
             return 0.0
@@ -190,33 +190,33 @@ class PerformanceTrackerBatch:
         current_price: float,
         analyzed_price: float
     ) -> Dict[str, Any]:
-        """추적 기록 업데이트
+        """Update tracking record
 
         Args:
-            record: 기존 레코드 정보 (이미 기록된 값 확인용)
-            days_elapsed: 경과 일수
-            current_price: 현재 가격
-            analyzed_price: 분석 시점 가격
+            record: Existing record info (to check already recorded values)
+            days_elapsed: Days elapsed
+            current_price: Current price
+            analyzed_price: Price at analysis time
 
         Returns:
-            업데이트할 필드와 값
+            Fields and values to update
         """
         updates = {}
         return_rate = self.calculate_return(analyzed_price, current_price)
 
-        # 7일차 업데이트 (아직 기록되지 않았고, 7일 이상 경과한 경우)
+        # 7-day update (if not yet recorded and 7+ days elapsed)
         if days_elapsed >= 7 and record.get('tracked_7d_return') is None:
             updates['tracked_7d_date'] = self.today
             updates['tracked_7d_price'] = current_price
             updates['tracked_7d_return'] = return_rate
 
-        # 14일차 업데이트 (아직 기록되지 않았고, 14일 이상 경과한 경우)
+        # 14-day update (if not yet recorded and 14+ days elapsed)
         if days_elapsed >= 14 and record.get('tracked_14d_return') is None:
             updates['tracked_14d_date'] = self.today
             updates['tracked_14d_price'] = current_price
             updates['tracked_14d_return'] = return_rate
 
-        # 30일차 업데이트 (아직 기록되지 않았고, 30일 이상 경과한 경우)
+        # 30-day update (if not yet recorded and 30+ days elapsed)
         if days_elapsed >= 30 and record.get('tracked_30d_return') is None:
             updates['tracked_30d_date'] = self.today
             updates['tracked_30d_price'] = current_price
@@ -231,14 +231,14 @@ class PerformanceTrackerBatch:
         return updates
 
     def apply_updates(self, record_id: int, updates: Dict[str, Any]) -> bool:
-        """DB에 업데이트 적용
+        """Apply updates to database
 
         Args:
-            record_id: 레코드 ID
-            updates: 업데이트할 필드와 값
+            record_id: Record ID
+            updates: Fields and values to update
 
         Returns:
-            성공 여부
+            Success status
         """
         if not updates:
             return True
@@ -249,7 +249,7 @@ class PerformanceTrackerBatch:
 
         conn = self.connect_db()
         try:
-            # 동적으로 UPDATE 쿼리 생성
+            # Dynamically generate UPDATE query
             set_clause = ", ".join([f"{k} = ?" for k in updates.keys()])
             values = list(updates.values()) + [record_id]
 
@@ -258,25 +258,25 @@ class PerformanceTrackerBatch:
             conn.commit()
             return True
         except Exception as e:
-            logger.error(f"DB 업데이트 실패 (ID {record_id}): {e}")
+            logger.error(f"DB update failed (ID {record_id}): {e}")
             conn.rollback()
             return False
         finally:
             conn.close()
 
     def run(self) -> Dict[str, Any]:
-        """배치 실행
+        """Execute batch
 
         Returns:
-            실행 결과 통계
+            Execution result statistics
         """
         logger.info("="*60)
-        logger.info(f"성과 추적 배치 시작: {self.today}")
+        logger.info(f"Performance tracking batch started: {self.today}")
         if self.dry_run:
-            logger.info("[DRY-RUN 모드] 실제 DB 업데이트 없음")
+            logger.info("[DRY-RUN mode] No actual DB updates")
         logger.info("="*60)
 
-        # 통계
+        # Statistics
         stats = {
             'total': 0,
             'updated': 0,
@@ -287,16 +287,16 @@ class PerformanceTrackerBatch:
             'by_decision': {'traded': 0, 'watched': 0}
         }
 
-        # 추적 대상 조회
+        # Query tracking targets
         targets = self.get_tracking_targets()
         stats['total'] = len(targets)
-        logger.info(f"추적 대상: {stats['total']}개 종목")
+        logger.info(f"Tracking targets: {stats['total']} stocks")
 
         if not targets:
-            logger.info("추적 대상 종목이 없습니다.")
+            logger.info("No stocks to track.")
             return stats
 
-        # 각 종목 처리
+        # Process each stock
         for record in targets:
             ticker = record['ticker']
             company_name = record['company_name']
@@ -305,10 +305,10 @@ class PerformanceTrackerBatch:
             analyzed_price = record['analyzed_price']
             was_traded = record['was_traded']
 
-            # 경과 일수 계산
+            # Calculate days elapsed
             days_elapsed = self.calculate_days_elapsed(analyzed_date)
 
-            # 이미 추적이 완료된 기간은 건너뛰기
+            # Skip if tracking already completed for this period
             should_update = False
             if days_elapsed >= 7 and record['tracked_7d_price'] is None:
                 should_update = True
@@ -318,24 +318,24 @@ class PerformanceTrackerBatch:
                 should_update = True
 
             if not should_update:
-                logger.debug(f"[{ticker}] {company_name}: 업데이트 불필요 (경과 {days_elapsed}일)")
+                logger.debug(f"[{ticker}] {company_name}: No update needed ({days_elapsed} days elapsed)")
                 stats['skipped'] += 1
                 continue
 
-            logger.info(f"[{ticker}] {company_name}: 경과 {days_elapsed}일, 트리거={trigger_type}")
+            logger.info(f"[{ticker}] {company_name}: {days_elapsed} days elapsed, trigger={trigger_type}")
 
-            # 현재가 조회
+            # Query current price
             current_price = self.get_current_price(ticker)
             if current_price is None:
-                logger.warning(f"[{ticker}] 가격 조회 실패, 건너뜀")
+                logger.warning(f"[{ticker}] Price query failed, skipping")
                 stats['errors'] += 1
                 continue
 
-            # 수익률 계산
+            # Calculate return
             return_rate = self.calculate_return(analyzed_price, current_price)
-            logger.info(f"  분석가: {analyzed_price:,.0f} → 현재가: {current_price:,.0f} ({return_rate*100:+.2f}%)")
+            logger.info(f"  Analyzed: {analyzed_price:,.0f} → Current: {current_price:,.0f} ({return_rate*100:+.2f}%)")
 
-            # 업데이트 내용 결정
+            # Determine updates
             updates = self.update_tracking_record(
                 record,
                 days_elapsed,
@@ -343,48 +343,48 @@ class PerformanceTrackerBatch:
                 analyzed_price
             )
 
-            # DB 업데이트
+            # Apply DB updates
             if self.apply_updates(record['id'], updates):
                 stats['updated'] += 1
 
-                # 트리거 유형별 통계
+                # Statistics by trigger type
                 if trigger_type not in stats['by_trigger_type']:
                     stats['by_trigger_type'][trigger_type] = {'count': 0, 'returns': []}
                 stats['by_trigger_type'][trigger_type]['count'] += 1
                 stats['by_trigger_type'][trigger_type]['returns'].append(return_rate)
 
-                # 매매/관망 분류
+                # Classify traded/watched
                 if was_traded:
                     stats['by_decision']['traded'] += 1
                 else:
                     stats['by_decision']['watched'] += 1
 
-                # 완료된 건수
+                # Count completed
                 if updates.get('tracking_status') == 'completed':
                     stats['completed'] += 1
             else:
                 stats['errors'] += 1
 
-        # 결과 요약
+        # Summary
         logger.info("="*60)
-        logger.info("배치 실행 완료")
-        logger.info(f"  전체: {stats['total']}, 업데이트: {stats['updated']}, "
-                   f"건너뜀: {stats['skipped']}, 오류: {stats['errors']}")
-        logger.info(f"  완료: {stats['completed']}, 매매: {stats['by_decision']['traded']}, "
-                   f"관망: {stats['by_decision']['watched']}")
+        logger.info("Batch execution completed")
+        logger.info(f"  Total: {stats['total']}, Updated: {stats['updated']}, "
+                   f"Skipped: {stats['skipped']}, Errors: {stats['errors']}")
+        logger.info(f"  Completed: {stats['completed']}, Traded: {stats['by_decision']['traded']}, "
+                   f"Watched: {stats['by_decision']['watched']}")
         logger.info("="*60)
 
         return stats
 
     def generate_report(self) -> str:
-        """추적 현황 리포트 생성
+        """Generate tracking status report
 
         Returns:
-            리포트 문자열
+            Report string
         """
         conn = self.connect_db()
         try:
-            # 전체 통계
+            # Overall statistics
             cursor = conn.execute("""
                 SELECT
                     tracking_status,
@@ -394,7 +394,7 @@ class PerformanceTrackerBatch:
             """)
             status_stats = {row['tracking_status']: row['count'] for row in cursor.fetchall()}
 
-            # 트리거 유형별 통계
+            # Statistics by trigger type
             cursor = conn.execute("""
                 SELECT
                     trigger_type,
@@ -409,10 +409,10 @@ class PerformanceTrackerBatch:
             """)
             trigger_stats = cursor.fetchall()
 
-            # 매매 vs 관망 성과 비교
+            # Traded vs watched performance comparison
             cursor = conn.execute("""
                 SELECT
-                    CASE WHEN was_traded = 1 THEN '매매' ELSE '관망' END as decision,
+                    CASE WHEN was_traded = 1 THEN 'Traded' ELSE 'Watched' END as decision,
                     COUNT(*) as count,
                     AVG(tracked_7d_return) as avg_7d_return,
                     AVG(tracked_14d_return) as avg_14d_return,
@@ -423,30 +423,30 @@ class PerformanceTrackerBatch:
             """)
             decision_stats = cursor.fetchall()
 
-            # 리포트 생성
+            # Generate report
             report = []
             report.append("="*70)
-            report.append(f"📊 분석 종목 성과 추적 리포트 ({self.today})")
+            report.append(f"📊 Analyzed Stock Performance Tracking Report ({self.today})")
             report.append("="*70)
             report.append("")
 
-            # 추적 상태별 현황
-            report.append("## 1. 추적 상태별 현황")
+            # Status overview
+            report.append("## 1. Status Overview")
             report.append("-"*40)
             for status, count in status_stats.items():
                 status_name = {
-                    'pending': '대기 중',
-                    'in_progress': '추적 중',
-                    'completed': '완료'
+                    'pending': 'Pending',
+                    'in_progress': 'In Progress',
+                    'completed': 'Completed'
                 }.get(status, status)
-                report.append(f"  {status_name}: {count}건")
+                report.append(f"  {status_name}: {count} records")
             report.append("")
 
-            # 트리거 유형별 성과
-            report.append("## 2. 트리거 유형별 성과 (완료된 추적만)")
+            # Performance by trigger type
+            report.append("## 2. Performance by Trigger Type (Completed only)")
             report.append("-"*40)
             if trigger_stats:
-                report.append(f"{'트리거 유형':<25} {'건수':>6} {'매매':>6} {'7일':>8} {'14일':>8} {'30일':>8}")
+                report.append(f"{'Trigger Type':<25} {'Count':>6} {'Traded':>6} {'7d':>8} {'14d':>8} {'30d':>8}")
                 report.append("-"*70)
                 for row in trigger_stats:
                     trigger_type = row['trigger_type'] or 'unknown'
@@ -456,21 +456,21 @@ class PerformanceTrackerBatch:
                     avg_14d = row['avg_14d_return']
                     avg_30d = row['avg_30d_return']
 
-                    # 수익률 포맷팅
+                    # Format returns
                     r7 = f"{avg_7d*100:+.1f}%" if avg_7d else "N/A"
                     r14 = f"{avg_14d*100:+.1f}%" if avg_14d else "N/A"
                     r30 = f"{avg_30d*100:+.1f}%" if avg_30d else "N/A"
 
                     report.append(f"{trigger_type:<25} {count:>6} {traded:>6} {r7:>8} {r14:>8} {r30:>8}")
             else:
-                report.append("  완료된 추적 데이터가 없습니다.")
+                report.append("  No completed tracking data.")
             report.append("")
 
-            # 매매 vs 관망 성과
-            report.append("## 3. 매매 vs 관망 성과 비교")
+            # Traded vs watched performance
+            report.append("## 3. Traded vs Watched Performance")
             report.append("-"*40)
             if decision_stats:
-                report.append(f"{'구분':<10} {'건수':>6} {'7일':>10} {'14일':>10} {'30일':>10}")
+                report.append(f"{'Type':<10} {'Count':>6} {'7d':>10} {'14d':>10} {'30d':>10}")
                 report.append("-"*50)
                 for row in decision_stats:
                     decision = row['decision']
@@ -485,10 +485,10 @@ class PerformanceTrackerBatch:
 
                     report.append(f"{decision:<10} {count:>6} {r7:>10} {r14:>10} {r30:>10}")
             else:
-                report.append("  완료된 추적 데이터가 없습니다.")
+                report.append("  No completed tracking data.")
             report.append("")
 
-            # 최근 추적 완료 종목
+            # Recently completed tracking
             cursor = conn.execute("""
                 SELECT
                     ticker,
@@ -507,7 +507,7 @@ class PerformanceTrackerBatch:
             """)
             recent = cursor.fetchall()
 
-            report.append("## 4. 최근 추적 완료 종목 (최대 10건)")
+            report.append("## 4. Recently Completed Tracking (max 10)")
             report.append("-"*40)
             if recent:
                 for row in recent:
@@ -517,16 +517,16 @@ class PerformanceTrackerBatch:
                     analyzed_price = row['analyzed_price']
                     final_price = row['tracked_30d_price']
                     return_rate = row['tracked_30d_return']
-                    was_traded = "매매" if row['was_traded'] else "관망"
+                    was_traded = "Traded" if row['was_traded'] else "Watched"
 
                     ret_str = f"{return_rate*100:+.1f}%" if return_rate else "N/A"
                     final_str = f"{final_price:,.0f}" if final_price else "N/A"
                     analyzed_str = f"{analyzed_price:,.0f}" if analyzed_price else "N/A"
                     report.append(f"  [{ticker}] {name}")
-                    report.append(f"    트리거: {trigger}, 결정: {was_traded}")
-                    report.append(f"    분석가: {analyzed_str} → 30일 후: {final_str} ({ret_str})")
+                    report.append(f"    Trigger: {trigger}, Decision: {was_traded}")
+                    report.append(f"    Analyzed: {analyzed_str} → 30d later: {final_str} ({ret_str})")
             else:
-                report.append("  완료된 추적 데이터가 없습니다.")
+                report.append("  No completed tracking data.")
             report.append("")
 
             report.append("="*70)
@@ -539,30 +539,30 @@ class PerformanceTrackerBatch:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="분석 종목 성과 추적 배치",
+        description="Analyzed Stock Performance Tracking Batch",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-예시:
-    python performance_tracker_batch.py              # 전체 추적 업데이트
-    python performance_tracker_batch.py --dry-run    # 테스트 모드
-    python performance_tracker_batch.py --report     # 현황 리포트만 출력
+Examples:
+    python performance_tracker_batch.py              # Update all tracking
+    python performance_tracker_batch.py --dry-run    # Test mode
+    python performance_tracker_batch.py --report     # Print status report only
         """
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="실제 DB 업데이트 없이 테스트만 수행"
+        help="Test only without actual DB updates"
     )
     parser.add_argument(
         "--report",
         action="store_true",
-        help="현재 추적 상태 리포트 출력"
+        help="Print current tracking status report"
     )
     parser.add_argument(
         "--db",
         type=str,
         default=None,
-        help="SQLite DB 경로 (기본: ./stock_tracking_db.sqlite)"
+        help="SQLite DB path (default: ./stock_tracking_db.sqlite)"
     )
 
     args = parser.parse_args()
@@ -570,14 +570,14 @@ def main():
     tracker = PerformanceTrackerBatch(db_path=args.db, dry_run=args.dry_run)
 
     if args.report:
-        # 리포트만 출력
+        # Print report only
         report = tracker.generate_report()
         print(report)
     else:
-        # 배치 실행
+        # Execute batch
         stats = tracker.run()
 
-        # 결과 리포트도 함께 출력
+        # Also print result report
         print("\n")
         report = tracker.generate_report()
         print(report)

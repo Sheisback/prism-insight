@@ -133,7 +133,7 @@ class TestJournalContext:
         # Get context for a stock with no history
         context = agent._get_relevant_journal_context(
             ticker="005930",
-            sector="반도체"
+            sector="Semiconductor"
         )
 
         # Should return empty string when no entries
@@ -159,14 +159,14 @@ class TestJournalContext:
              one_line_summary, confidence_score, compression_layer, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            "005930", "삼성전자", now, "sell",
-            70000, now, '{"sector": "반도체", "buy_score": 8}', 75000,
-            "목표가 달성", 7.14, 10,
+            "005930", "Samsung Electronics", now, "sell",
+            70000, now, '{"sector": "Semiconductor", "buy_score": 8}', 75000,
+            "Target price reached", 7.14, 10,
             '{"buy_context_summary": "Test buy context"}',
-            '{"buy_quality": "적절"}',
-            '[{"condition": "급등 후", "action": "분할 매도", "reason": "변동성"}]',
-            '["급등후조정", "분할매도"]',
-            "급등 후 분할 매도로 수익 실현",
+            '{"buy_quality": "Appropriate"}',
+            '[{"condition": "After surge", "action": "Partial sell", "reason": "Volatility"}]',
+            '["Post-surge adjustment", "Partial sell"]',
+            "Profit realized through partial sell after surge",
             0.8, 1, now
         ))
         agent.conn.commit()
@@ -174,14 +174,14 @@ class TestJournalContext:
         # Get context
         context = agent._get_relevant_journal_context(
             ticker="005930",
-            sector="반도체"
+            sector="Semiconductor"
         )
 
         # Verify context contains expected information
         # Context format: includes profit rate, holding days, and summary
-        assert "수익률" in context or "7.1" in context, "Context should contain profit info"
-        assert "급등" in context or "분할 매도" in context, "Context should contain summary"
-        assert "동일 종목" in context, "Context should have same stock section"
+        assert "profit" in context.lower() or "7.1" in context, "Context should contain profit info"
+        assert "surge" in context.lower() or "partial" in context.lower(), "Context should contain summary"
+        assert "same stock" in context.lower() or "동일 종목" in context, "Context should have same stock section"
 
         agent.conn.close()
 
@@ -211,7 +211,7 @@ class TestScoreAdjustment:
 
         adjustment, reasons = agent._get_score_adjustment_from_context(
             ticker="005930",
-            sector="반도체"
+            sector="Semiconductor"
         )
 
         assert adjustment == 0, "No adjustment without history"
@@ -235,15 +235,15 @@ class TestScoreAdjustment:
                  profit_rate, one_line_summary, compression_layer, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                "005930", "삼성전자", now, "sell",
+                "005930", "Samsung Electronics", now, "sell",
                 -8.0 - i,  # Loss of -8%, -9%, -10%
-                "손절 매도", 1, now
+                "Stop loss sell", 1, now
             ))
         agent.conn.commit()
 
         adjustment, reasons = agent._get_score_adjustment_from_context(
             ticker="005930",
-            sector="반도체"
+            sector="Semiconductor"
         )
 
         assert adjustment < 0, "Should have negative adjustment for losses"
@@ -267,15 +267,15 @@ class TestScoreAdjustment:
                  profit_rate, one_line_summary, compression_layer, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                "005930", "삼성전자", now, "sell",
+                "005930", "Samsung Electronics", now, "sell",
                 12.0 + i,  # Profit of 12%, 13%, 14%
-                "목표가 달성", 1, now
+                "Target price reached", 1, now
             ))
         agent.conn.commit()
 
         adjustment, reasons = agent._get_score_adjustment_from_context(
             ticker="005930",
-            sector="반도체"
+            sector="Semiconductor"
         )
 
         assert adjustment > 0, "Should have positive adjustment for gains"
@@ -400,8 +400,8 @@ class TestCompression:
                  profit_rate, one_line_summary, compression_layer, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                f"00593{i}", f"테스트종목{i}", now, "sell",
-                5.0 + i, f"테스트 요약 {i}", 1, now
+                f"00593{i}", f"Test Stock{i}", now, "sell",
+                5.0 + i, f"Test summary {i}", 1, now
             ))
         agent.conn.commit()
 
@@ -515,9 +515,9 @@ class TestCompression:
             {
                 "id": 1,
                 "ticker": "005930",
-                "company_name": "삼성전자",
+                "company_name": "Samsung Electronics",
                 "profit_rate": 5.5,
-                "one_line_summary": "테스트 요약",
+                "one_line_summary": "Test summary",
                 "lessons": '[{"action": "교훈1"}]',
                 "pattern_tags": '["태그1", "태그2"]'
             }
@@ -526,7 +526,7 @@ class TestCompression:
         formatted = agent._format_entries_for_compression(entries)
 
         assert "005930" in formatted
-        assert "삼성전자" in formatted
+        assert "Samsung Electronics" in formatted
         assert "5.5%" in formatted or "5.5" in formatted
         assert "교훈1" in formatted
 
@@ -853,7 +853,7 @@ class TestTradingPrinciples:
         # Get context
         context = agent._get_relevant_journal_context(
             ticker="005930",
-            sector="반도체"
+            sector="Semiconductor"
         )
 
         assert "핵심 매매 원칙" in context, "Context should include principles section"
@@ -926,7 +926,7 @@ class TestMigrationScript:
         agent.trading_agent = MagicMock()
         await agent.initialize(language="ko")
 
-        # Insert test journal entries with lessons (simulating 카카오, 삼성전자 data)
+        # Insert test journal entries with lessons (simulating Kakao, Samsung Electronics data)
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         lessons1 = json.dumps([
             {"condition": "대량거래 급락 시", "action": "즉시 정리", "reason": "무효", "priority": "high"},
@@ -941,13 +941,13 @@ class TestMigrationScript:
             INSERT INTO trading_journal
             (ticker, company_name, trade_date, trade_type, lessons, compression_layer, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, ('035720', '카카오', now, 'sell', lessons1, 1, now))
+        """, ('035720', 'Kakao', now, 'sell', lessons1, 1, now))
 
         agent.cursor.execute("""
             INSERT INTO trading_journal
             (ticker, company_name, trade_date, trade_type, lessons, compression_layer, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, ('005930', '삼성전자', now, 'sell', lessons2, 1, now))
+        """, ('005930', 'Samsung Electronics', now, 'sell', lessons2, 1, now))
         agent.conn.commit()
 
         # Simulate migration
@@ -1077,7 +1077,7 @@ class TestCleanupStaleData:
             (ticker, company_name, trade_date, trade_type, profit_rate,
              one_line_summary, compression_layer, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, ("005930", "삼성전자", old_date, "sell", 5.0, "오래된 거래", 3, old_date))
+        """, ("005930", "Samsung Electronics", old_date, "sell", 5.0, "오래된 거래", 3, old_date))
 
         # Recent Layer 3 entry (should NOT be archived)
         agent.cursor.execute("""
@@ -1085,7 +1085,7 @@ class TestCleanupStaleData:
             (ticker, company_name, trade_date, trade_type, profit_rate,
              one_line_summary, compression_layer, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, ("035720", "카카오", recent_date, "sell", 3.0, "최근 거래", 3, recent_date))
+        """, ("035720", "Kakao", recent_date, "sell", 3.0, "최근 거래", 3, recent_date))
 
         agent.conn.commit()
 

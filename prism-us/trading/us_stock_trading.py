@@ -645,9 +645,9 @@ class USStockTrading:
                            exchange: str = None) -> Dict[str, Any]:
         """
         Reserved order buy for US stock (executed at next market open)
-        예약주문 매수 - 다음 장 시작시 자동 실행
+        Reserved buy order - automatically executed at next market open
 
-        Note: US reserved orders only support LIMIT orders (지정가주문만 가능)
+        Note: US reserved orders only support LIMIT orders (only limit price orders allowed)
 
         Args:
             ticker: Stock ticker symbol
@@ -773,7 +773,7 @@ class USStockTrading:
                             use_moo: bool = False, exchange: str = None) -> Dict[str, Any]:
         """
         Reserved order sell for US stock (executed at next market open)
-        예약주문 매도 - 다음 장 시작시 자동 실행
+        Reserved sell order - automatically executed at next market open
 
         Note: US reserved sell orders support LIMIT or MOO (Market On Open)
 
@@ -903,7 +903,7 @@ class USStockTrading:
         Smart buy - automatically choose best method based on market hours
 
         - Market open: Execute market price buy immediately
-        - Market closed + limit_price provided: Place reserved order (지정가 예약주문)
+        - Market closed + limit_price provided: Place reserved order (limit price reserved order)
         - Market closed + no limit_price: Return error (reserved order requires limit price)
 
         Args:
@@ -948,8 +948,8 @@ class USStockTrading:
         Smart sell - automatically choose best method based on market hours
 
         - Market open: Execute market price sell immediately
-        - Market closed + limit_price provided: Place reserved order (지정가 예약주문)
-        - Market closed + use_moo=True: Place reserved MOO order (시장가 예약주문)
+        - Market closed + limit_price provided: Place reserved order (limit price reserved order)
+        - Market closed + use_moo=True: Place reserved MOO order (market price reserved order)
         - Market closed + no limit_price + no use_moo: Return error
 
         Args:
@@ -1331,15 +1331,15 @@ class USStockTrading:
         """
         # Use inquire-present-balance API for accurate USD cash info
         api_url = "/uapi/overseas-stock/v1/trading/inquire-present-balance"
-        tr_id = "CTRP6504R"  # 해외주식 체결기준 현재잔고
+        tr_id = "CTRP6504R"  # Overseas stock settlement-based current balance
 
         params = {
             "CANO": self.trenv.my_acct,
             "ACNT_PRDT_CD": self.trenv.my_prod,
-            "WCRC_FRCR_DVSN_CD": "02",  # 02: 외화
-            "NATN_CD": "840",  # 미국
-            "TR_MKET_CD": "00",  # 전체
-            "INQR_DVSN_CD": "00"  # 전체
+            "WCRC_FRCR_DVSN_CD": "02",  # 02: Foreign currency
+            "NATN_CD": "840",  # USA
+            "TR_MKET_CD": "00",  # All
+            "INQR_DVSN_CD": "00"  # All
         }
 
         try:

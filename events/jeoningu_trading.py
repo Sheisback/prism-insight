@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Jeon Ingu Contrarian Trading System - '전인구경제연구소' Analysis & Trading Simulator
+Jeon Ingu Contrarian Trading System - Analysis & Trading Simulator
+(전인구경제연구소 - Jeon Ingu Economic Research Institute)
 
 Simplified strategy:
 - Jeon says UP → Buy KODEX Inverse 2X (252670)
@@ -41,7 +42,7 @@ from events.jeoningu_price_fetcher import get_current_price
 DATA_DIR = Path(__file__).parent
 SECRETS_DIR = Path(__file__).parent.parent
 
-# Output directories - 산출물을 하위 디렉토리에 정리
+# Output directories - organize outputs in subdirectories
 LOGS_DIR = DATA_DIR / "logs"
 TRANSCRIPTS_DIR = DATA_DIR / "transcripts"
 AUDIO_TEMP_DIR = DATA_DIR / "audio_temp"
@@ -64,17 +65,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Constants
-CHANNEL_ID = "UCznImSIaxZR7fdLCICLdgaQ"  # 전인구경제연구소
+CHANNEL_ID = "UCznImSIaxZR7fdLCICLdgaQ"  # Jeon Ingu Economic Research Institute (전인구경제연구소)
 RSS_URL = f"https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL_ID}"
 VIDEO_HISTORY_FILE = DATA_DIR / "jeoningu_video_history.json"
 AUDIO_FILE = AUDIO_TEMP_DIR / "temp_audio.mp3"
 
 # Trading configuration
-INITIAL_CAPITAL = 10000000  # 1천만원 초기 자본
+INITIAL_CAPITAL = 10000000  # 10 million KRW initial capital
 
 # Stock codes
-KODEX_LEVERAGE = "122630"  # KODEX 레버리지
-KODEX_INVERSE_2X = "252670"  # KODEX 200선물인버스2X
+KODEX_LEVERAGE = "122630"  # KODEX Leverage
+KODEX_INVERSE_2X = "252670"  # KODEX 200 Futures Inverse 2X
 
 
 class JeoninguTrading:
@@ -165,39 +166,39 @@ class JeoninguTrading:
 
     def create_title_filter_agent(self, title: str) -> Agent:
         """Create AI agent for filtering video titles"""
-        instruction = f"""당신은 유튜브 영상 제목을 분석하는 전문가입니다.
-전인구경제연구소 채널의 영상 제목을 보고, 전인구 본인의 의견인지 게스트 인터뷰인지 판단합니다.
+        instruction = f"""You are an expert at analyzing YouTube video titles.
+Review the title from Jeon Ingu Economic Research Institute channel and determine whether it's Jeon Ingu's own opinion or a guest interview.
 
-## 영상 제목
+## Video Title
 {title}
 
-## 판단 기준
+## Classification Criteria
 
-**인터뷰 영상 (게스트가 나와서 대화하는 영상):**
-- "교수", "박사", "애널리스트", "작가", "전문가" 등 직함이 있는 사람 이름이 나옴
-- "1부", "2부", "3부" 같은 시리즈 번호가 있음
-- 예시:
-  * "일본이 금리를 올리는 이유(ft. 김경원 교수 2부)" → 인터뷰
-  * "앞으로 한국 이 업종을 사야 합니다(ft.소현철 교수 2부)" → 인터뷰
-  * "AI 때문에 더 외로워질 겁니다(ft.윤덕환 작가 2부)" → 인터뷰
-  * "환율이 진짜로 오르는 이유는 이것입니다(ft.김경원 교수 1부)" → 인터뷰
-  * "미국과 북한이 달라졌습니다 먼저 이 주식을 사세요(ft. 소현철 교수 3부)" → 인터뷰
+**Interview Video (guest appears for discussion):**
+- Contains person's name with titles like "Professor", "Doctor", "Analyst", "Writer", "Expert"
+- Contains series numbers like "Part 1", "Part 2" (1부, 2부, 3부 in Korean)
+- Examples:
+  * "Why Japan is raising interest rates (ft. Professor Kim Part 2)" → Interview
+  * "You should buy this Korean industry (ft. Professor So Part 2)" → Interview
+  * "AI will make us more lonely (ft. Writer Yoon Part 2)" → Interview
+  * "The real reason exchange rates are rising (ft. Professor Kim Part 1)" → Interview
+  * "US and North Korea changed, buy these stocks first (ft. Professor So Part 3)" → Interview
 
-**본인 의견 영상 (전인구 혼자 말하는 영상):**
-- 사람 이름/직함이 없고 숫자나 주제만 있음
-- "ft." 자체가 없음
-- 예시:
-  * "내년에 저는 여기에 투자할 겁니다(ft.1개 오픈)" → 본인 의견
-  * "쿠팡 특별세무조사, 정부와 싸우는 쿠팡 주식 사도 될까?" → 본인 의견
-  * "결국 환율 1480원 방어선도 뚫렸습니다" → 본인 의견
-  * "미국주식 팔고 한국주식 사면 100% 양도세 감면(ft.환율급락)" → 본인 의견
+**Own Opinion Video (Jeon Ingu speaking alone):**
+- No person names/titles, only numbers or topics
+- No "ft." at all
+- Examples:
+  * "Next year I will invest here (ft. 1 open)" → Own opinion
+  * "Coupang special tax audit, should we buy Coupang stock fighting the government?" → Own opinion
+  * "Finally the 1480 won defense line was broken" → Own opinion
+  * "100% capital gains tax exemption if selling US stocks and buying Korean stocks (ft. exchange rate drop)" → Own opinion
 
-## 핵심 규칙
-- "교수", "박사", "작가", "애널리스트" 등 직함 + "1부/2부/3부" → **무조건 인터뷰**
-- 사람 이름 없고 숫자만 있으면(예: "ft.1개") → 본인 의견
+## Core Rules
+- Title with "Professor", "Doctor", "Writer", "Analyst" + "Part 1/2/3" (or 1부/2부/3부) → **Always Interview**
+- No person names, only numbers (e.g., "ft.1") → Own opinion
 
-## 출력
-"본인의견" 또는 "인터뷰" 중 하나만 출력하세요.
+## Output
+Output only one of: "Own Opinion" or "Interview"
 """
         return Agent(
             name="title_filter",
@@ -232,7 +233,7 @@ class JeoninguTrading:
                 async with app.run() as _:
                     llm = await agent.attach_llm(OpenAIAugmentedLLM)
                     result = await llm.generate_str(
-                        message="위 제목을 분석하고 '본인의견' 또는 '인터뷰' 중 하나만 출력하세요.",
+                        message="Analyze the above title and output only 'Own Opinion' or 'Interview'.",
                         request_params=RequestParams(
                             model="gpt-4.1-mini",  # Better instruction following than nano ($0.40/1M in, $1.60/1M out)
                             maxTokens=10,
@@ -243,8 +244,8 @@ class JeoninguTrading:
                     )
                 
                 classification = result.strip()
-                
-                if classification == "본인의견":
+
+                if classification == "Own Opinion":
                     filtered_videos.append(video)
                     logger.info(f"✅ [{classification}] {title}")
                 else:
@@ -270,7 +271,7 @@ class JeoninguTrading:
             except Exception:
                 pass
 
-        # 쿠키 파일 경로
+        # Cookie file path
         cookies_file = SECRETS_DIR / "youtube_cookies.txt"
         
         if not cookies_file.exists():
@@ -280,8 +281,8 @@ class JeoninguTrading:
 
         try:
             import subprocess
-            
-            # Docker로 yt-dlp 실행
+
+            # Run yt-dlp with Docker
             output_template = "/downloads/temp_audio.%(ext)s"
             
             cmd = [
@@ -301,11 +302,11 @@ class JeoninguTrading:
             if result.returncode != 0:
                 logger.error(f"Docker yt-dlp failed: {result.stderr}")
                 return None
-            
-            # 결과 파일 찾기 (SECRETS_DIR에 생성됨)
+
+            # Find result file (created in SECRETS_DIR)
             output_file = SECRETS_DIR / "temp_audio.mp3"
             if output_file.exists():
-                # AUDIO_TEMP_DIR로 이동
+                # Move to AUDIO_TEMP_DIR
                 target_file = AUDIO_TEMP_DIR / "temp_audio.mp3"
                 output_file.rename(target_file)
                 logger.info(f"Audio extraction successful: {target_file}")
@@ -328,7 +329,7 @@ class JeoninguTrading:
         try:
             file_size = Path(audio_file).stat().st_size
             file_size_mb = file_size / 1024 / 1024
-            max_size = 20 * 1024 * 1024  # 20MB (보수적으로 설정)
+            max_size = 20 * 1024 * 1024  # 20MB (conservative limit)
 
             logger.info(f"File size: {file_size_mb:.2f}MB")
             
@@ -351,7 +352,7 @@ class JeoninguTrading:
                         model="whisper-1",
                         file=f,
                         language="ko",
-                        timeout=600.0  # 10분 타임아웃 (긴 오디오 대비)
+                        timeout=600.0  # 10 minute timeout for long audio
                     )
                 
                 elapsed = time.time() - start_time
@@ -372,7 +373,7 @@ class JeoninguTrading:
             from pydub import AudioSegment
 
             audio = AudioSegment.from_mp3(audio_file)
-            chunk_length_ms = 5 * 60 * 1000  # 5분 (20MB 제한을 고려한 안전한 크기)
+            chunk_length_ms = 5 * 60 * 1000  # 5 minutes (safe size considering 20MB limit)
             chunks = []
             transcripts = []
 
@@ -384,7 +385,7 @@ class JeoninguTrading:
                 chunk = audio[i:i + chunk_length_ms]
                 chunk_file = AUDIO_TEMP_DIR / f"temp_audio_chunk_{i//chunk_length_ms}.mp3"
                 chunk.export(chunk_file, format="mp3")
-                
+
                 # Verify chunk size doesn't exceed 20MB
                 chunk_size = chunk_file.stat().st_size
                 if chunk_size > 20 * 1024 * 1024:
@@ -433,49 +434,49 @@ class JeoninguTrading:
         - Jeon NEUTRAL → Sell all
         - Jeon DOWN → Leverage (122630)
         """
-        instruction = f"""당신은 전인구경제연구소 콘텐츠를 분석하는 역발상 투자 전문가입니다.
+        instruction = f"""You are a contrarian investment expert analyzing Jeon Ingu Economic Research Institute content.
 
-## 영상 정보
-- 제목: {video_info['title']}
-- 게시일: {video_info['published']}
+## Video Information
+- Title: {video_info['title']}
+- Published: {video_info['published']}
 - URL: {video_info['link']}
 
-## 영상 자막
+## Video Transcript
 {transcript}
 
-## 분석 과제
+## Analysis Tasks
 
-### 1단계: 콘텐츠 유형 판별
-전인구 본인이 직접 출연하여 시장 의견을 제시하는 영상인가?
-- "본인의견": 전인구 단독으로 영상을 찍으며 직접 시장 전망 언급
-- "스킵": 인터뷰 형식으로 질의응답이 포함된 경우, 단순 뉴스 요약, 게스트 인터뷰만 있는 경우
+### Step 1: Content Type Classification
+Is this a video where Jeon Ingu personally presents market opinions?
+- "Own Opinion": Jeon Ingu films solo and directly mentions market outlook
+- "Skip": Interview format with Q&A, simple news summary, or guest interview only
 
-### 2단계: 시장 기조 분석
-전인구가 시장에 대해 어떤 기조로 말하는지 판단:
-- "상승": 낙관적 전망, 매수 추천, 긍정적 시그널 강조
-- "하락": 비관적 전망, 매도/관망 추천, 부정적 시그널 강조
-- "중립": 명확한 방향성 없음, 애매한 의견
+### Step 2: Market Sentiment Analysis
+Determine Jeon Ingu's market sentiment:
+- "Bullish": Optimistic outlook, buy recommendations, emphasizing positive signals
+- "Bearish": Pessimistic outlook, sell/hold recommendations, emphasizing negative signals
+- "Neutral": No clear direction, ambiguous opinion
 
-### 3단계: 역발상 전략 결정
+### Step 3: Contrarian Strategy Decision
 
-**투자 종목 (2개만 사용)**:
-- KODEX 레버리지 (122630): 코스피 200 지수 2배 추종
-- KODEX 200선물인버스2X (252670): 코스피 200 반대 방향 2배
+**Investment Instruments (use only 2)**:
+- KODEX Leverage (122630): 2x tracking of KOSPI 200 index
+- KODEX 200 Futures Inverse 2X (252670): 2x opposite direction of KOSPI 200
 
-**전략 규칙**:
-1. 전인구 **상승** 기조 → 반대로 **하락**에 베팅 → **KODEX 200선물인버스2X(252670) 매수**
-2. 전인구 **중립** 기조 → 관망 → **보유 종목 전량 매도 (현금화)**
-3. 전인구 **하락** 기조 → 반대로 **상승**에 베팅 → **KODEX 레버리지(122630) 매수**
+**Strategy Rules**:
+1. Jeon **Bullish** sentiment → Bet opposite on **decline** → **Buy KODEX 200 Futures Inverse 2X (252670)**
+2. Jeon **Neutral** sentiment → Wait and see → **Sell all holdings (cash out)**
+3. Jeon **Bearish** sentiment → Bet opposite on **rise** → **Buy KODEX Leverage (122630)**
 
-**포지션 관리**:
-- 항상 1개 종목만 보유 (122630 또는 252670)
-- 다른 종목으로 전환 시: 기존 보유 종목 매도 → 새 종목 매수
-- 중립일 때: 보유 종목 있으면 무조건 매도
-- 매수 시: **가용 잔액 전액 투자** (올인 전략)
+**Position Management**:
+- Always hold only 1 instrument (122630 or 252670)
+- When switching: Sell existing holdings → Buy new instrument
+- When neutral: Must sell if holding any position
+- When buying: **Invest full available balance** (all-in strategy)
 
-## 출력 형식 (JSON)
+## Output Format (JSON)
 
-반드시 아래 JSON 스키마를 따라 출력하세요 (마크다운 코드블록 없이 순수 JSON만):
+Output must follow the JSON schema below (pure JSON only, no markdown code blocks):
 
 ```json
 {{
@@ -485,23 +486,23 @@ class JeoninguTrading:
     "video_date": "{video_info['published']}",
     "video_url": "{video_info['link']}"
   }},
-  "content_type": "본인의견" | "스킵",
-  "jeon_sentiment": "상승" | "하락" | "중립",
-  "jeon_reasoning": "전인구의 핵심 발언을 2-3개 문장으로 요약",
-  "contrarian_action": "인버스2X매수" | "레버리지매수" | "전량매도",
+  "content_type": "Own Opinion" | "Skip",
+  "jeon_sentiment": "Bullish" | "Bearish" | "Neutral",
+  "jeon_reasoning": "Summarize Jeon Ingu's key statements in 2-3 sentences",
+  "contrarian_action": "Buy Inverse 2X" | "Buy Leverage" | "Sell All",
   "target_stock": {{
     "code": "252670" | "122630" | null,
-    "name": "KODEX 200선물인버스2X" | "KODEX 레버리지" | null
+    "name": "KODEX 200 Futures Inverse 2X" | "KODEX Leverage" | null
   }},
-  "telegram_summary": "텔레그램 메시지 내용 (5줄 이내, 이모지 포함)"
+  "telegram_summary": "Telegram message content (within 5 lines, include emojis)"
 }}
 ```
 
-## 중요 사항
-- **반드시 valid JSON만 출력** (마크다운 코드블록 제거)
-- 자막 내용만 근거로 분석 (추측 금지)
-- 종목은 122630, 252670 중 하나만 선택
-- 중립일 때는 target_stock을 null로 설정
+## Important Notes
+- **Output valid JSON only** (remove markdown code blocks)
+- Analyze based only on transcript content (no speculation)
+- Choose only one instrument: 122630 or 252670
+- Set target_stock to null when neutral
 """
 
         return Agent(
@@ -521,7 +522,7 @@ class JeoninguTrading:
             async with app.run() as _:
                 llm = await agent.attach_llm(OpenAIAugmentedLLM)
                 result = await llm.generate_str(
-                    message="위 지시사항에 따라 영상을 분석하고 역발상 투자 전략을 JSON 형식으로 출력해주세요.",
+                    message="Analyze the video according to the instructions above and output the contrarian investment strategy in JSON format.",
                     request_params=RequestParams(
                         model="gpt-4.1",
                         maxTokens=8000,
@@ -564,35 +565,35 @@ class JeoninguTrading:
             summary = analysis.get('telegram_summary', '')
             video_url = analysis['video_info']['video_url']
             video_title = analysis['video_info']['title']
-            sentiment = analysis.get('jeon_sentiment', '알 수 없음')
-            action = analysis.get('contrarian_action', '관망')
+            sentiment = analysis.get('jeon_sentiment', 'Unknown')
+            action = analysis.get('contrarian_action', 'Hold')
 
             message_text = f"""
-🧪 <b>전인구 역발상 투자 실험</b>
+🧪 <b>Jeon Ingu Contrarian Investment Experiment</b>
 
-<i>전인구경제연구소의 예측과 정반대로 베팅하는 시뮬레이션입니다.
-커뮤니티에서 유명한 '전반꿀' 전략의 실제 효과를 검증하는 실험입니다.</i>
+<i>This is a simulation that bets the exact opposite of Jeon Ingu Economic Research Institute's predictions.
+An experiment to verify the actual effectiveness of the famous 'Jeon Inverse Honey' strategy in the community.</i>
 
 ━━━━━━━━━━━━━━━━━━━━
 
-📺 <b>최신 영상 분석</b>
+📺 <b>Latest Video Analysis</b>
 <b>{video_title}</b>
 
 {summary}
 
-📊 전인구 기조: <b>{sentiment}</b>
-💡 역발상 액션: <b>{action}</b>
+📊 Jeon Ingu Sentiment: <b>{sentiment}</b>
+💡 Contrarian Action: <b>{action}</b>
 
-🔗 <a href="{video_url}">영상 보기</a>
+🔗 <a href="{video_url}">Watch Video</a>
 
 ━━━━━━━━━━━━━━━━━━━━
 
-📈 <b>실시간 실적 확인</b>
-https://stocksimulation.kr/ 접속 후
-<b>'실험실'</b> 탭을 클릭하세요!
+📈 <b>Check Real-time Performance</b>
+Visit https://stocksimulation.kr/ and
+click the <b>'Lab'</b> tab!
 
-⚠️ 본 정보는 투자 권유가 아닌 참고용 정보입니다.
-💼 모든 투자 결정과 그 결과에 대한 책임은 투자자 본인에게 있습니다.
+⚠️ This information is for reference only, not investment advice.
+💼 All investment decisions and their consequences are the responsibility of the investor.
 """.strip()
 
             bot = Bot(token=self.telegram_bot_token)
@@ -638,97 +639,97 @@ https://stocksimulation.kr/ 접속 후
             message_parts = []
 
             if position:
-                # 포지션 보유 중
+                # Holding position
                 current_price = get_current_price(position['stock_code'])
                 current_value = position['quantity'] * current_price
                 unrealized_pl = current_value - position['buy_amount']
                 unrealized_pl_pct = (unrealized_pl / position['buy_amount']) * 100 if position['buy_amount'] > 0 else 0
-                
-                # 보유 기간 계산
+
+                # Calculate holding period
                 buy_date = datetime.fromisoformat(position['buy_date'].replace('Z', '+00:00')) if position.get('buy_date') else None
                 holding_days = (datetime.now(buy_date.tzinfo if buy_date and buy_date.tzinfo else None) - buy_date).days if buy_date else 0
-                
-                message_parts.append("📊 **현재 포지션**\n")
-                message_parts.append(f"🎯 {position['stock_name']}")
-                message_parts.append(f"┣ 보유: {position['quantity']:,}주 × {current_price:,.0f}원")
-                message_parts.append(f"┣ 평가금액: {current_value:,.0f}원")
-                message_parts.append(f"┣ 매수단가: {position['buy_price']:,.0f}원")
-                
-                # 평가손익 (색상 표시용 이모지)
-                pl_emoji = "🔴" if unrealized_pl < 0 else "🟢" if unrealized_pl > 0 else "⚪"
-                message_parts.append(f"┗ 평가손익: {pl_emoji} {unrealized_pl:+,.0f}원 ({unrealized_pl_pct:+.2f}%)")
-                
-                if holding_days > 0:
-                    message_parts.append(f"\n⏱ 보유 {holding_days}일차")
-                else:
-                    message_parts.append(f"\n⏱ 오늘 진입")
-            else:
-                # 현금 보유 중
-                unrealized_pl = 0  # 현금 보유 시 미실현 손익 없음
-                
-                message_parts.append("📊 **현재 포지션**\n")
-                message_parts.append(f"💵 현금 보유 중: {balance:,.0f}원")
 
-            # 구분선
+                message_parts.append("📊 **Current Position**\n")
+                message_parts.append(f"🎯 {position['stock_name']}")
+                message_parts.append(f"┣ Holdings: {position['quantity']:,} shares × {current_price:,.0f} KRW")
+                message_parts.append(f"┣ Market Value: {current_value:,.0f} KRW")
+                message_parts.append(f"┣ Avg Cost: {position['buy_price']:,.0f} KRW")
+
+                # Unrealized P&L (emoji for color indication)
+                pl_emoji = "🔴" if unrealized_pl < 0 else "🟢" if unrealized_pl > 0 else "⚪"
+                message_parts.append(f"┗ Unrealized P&L: {pl_emoji} {unrealized_pl:+,.0f} KRW ({unrealized_pl_pct:+.2f}%)")
+
+                if holding_days > 0:
+                    message_parts.append(f"\n⏱ Day {holding_days} holding")
+                else:
+                    message_parts.append(f"\n⏱ Entered today")
+            else:
+                # Cash position
+                unrealized_pl = 0  # No unrealized P&L when holding cash
+
+                message_parts.append("📊 **Current Position**\n")
+                message_parts.append(f"💵 Cash: {balance:,.0f} KRW")
+
+            # Separator
             message_parts.append("\n━━━━━━━━━━━━━━━━━━━━\n")
 
-            # 누적 성과 계산
-            # 총 손익 = 전체 실현손익 + 현재 미실현손익
+            # Calculate cumulative performance
+            # Total P&L = Total realized P&L + Current unrealized P&L
             if position:
                 total_pl = total_realized_pl + unrealized_pl
             else:
                 total_pl = total_realized_pl
-            
+
             total_assets_actual = INITIAL_CAPITAL + total_pl
             total_return_pct_actual = (total_pl / INITIAL_CAPITAL) * 100
-            
-            message_parts.append("📈 **누적 성과**")
-            message_parts.append(f"┣ 시작: {INITIAL_CAPITAL/10000:,.0f}만원")
-            message_parts.append(f"┣ 현재: {total_assets_actual/10000:,.0f}만원")
-            
+
+            message_parts.append("📈 **Cumulative Performance**")
+            message_parts.append(f"┣ Start: {INITIAL_CAPITAL/10000:,.0f}M KRW")
+            message_parts.append(f"┣ Current: {total_assets_actual/10000:,.0f}M KRW")
+
             return_emoji = "📈" if total_return_pct_actual > 0 else "📉" if total_return_pct_actual < 0 else "➖"
-            message_parts.append(f"┗ 수익률: {return_emoji} {total_return_pct_actual:+.2f}%")
+            message_parts.append(f"┗ Return: {return_emoji} {total_return_pct_actual:+.2f}%")
 
-            # 청산 기록이 있으면 트레이딩 통계 표시
+            # Show trading statistics if there are closed trades
             if metrics['total_trades'] > 0:
-                message_parts.append(f"\n🎲 **트레이딩 기록**")
-                message_parts.append(f"┣ 완료: {metrics['total_trades']}건")
-                
-                # 무승부가 있으면 표시
-                if metrics.get('draw_trades', 0) > 0:
-                    message_parts.append(f"┣ 승/무/패: {metrics['winning_trades']}승 {metrics['draw_trades']}무 {metrics['losing_trades']}패")
-                else:
-                    message_parts.append(f"┣ 승/패: {metrics['winning_trades']}승 {metrics['losing_trades']}패")
-                
-                message_parts.append(f"┣ 승률: {metrics['win_rate']:.0f}%")
-                message_parts.append(f"┗ 건당 평균: {metrics['avg_return_per_trade']:+.1f}%")
+                message_parts.append(f"\n🎲 **Trading Record**")
+                message_parts.append(f"┣ Completed: {metrics['total_trades']} trades")
 
-            # 최근 거래 히스토리 (최대 3건)
+                # Show draws if any
+                if metrics.get('draw_trades', 0) > 0:
+                    message_parts.append(f"┣ W/D/L: {metrics['winning_trades']}W {metrics['draw_trades']}D {metrics['losing_trades']}L")
+                else:
+                    message_parts.append(f"┣ W/L: {metrics['winning_trades']}W {metrics['losing_trades']}L")
+
+                message_parts.append(f"┣ Win Rate: {metrics['win_rate']:.0f}%")
+                message_parts.append(f"┗ Avg per Trade: {metrics['avg_return_per_trade']:+.1f}%")
+
+            # Recent trade history (max 3 trades)
             recent_trades = [t for t in trade_history if t.get('trade_type') in ('BUY', 'SELL')][:3]
             if recent_trades:
-                message_parts.append(f"\n📝 **최근 거래**")
+                message_parts.append(f"\n📝 **Recent Trades**")
                 for trade in recent_trades:
                     trade_date = trade.get('analyzed_date', '')[:10]
                     trade_type = trade.get('trade_type')
                     stock_name = trade.get('stock_name', '')
-                    # 종목명 축약
-                    short_name = stock_name.replace('KODEX ', '').replace('200선물', '')
-                    
+                    # Shorten stock name
+                    short_name = stock_name.replace('KODEX ', '').replace('200 Futures', '')
+
                     if trade_type == 'BUY':
-                        message_parts.append(f"• {trade_date} 매수 {short_name}")
+                        message_parts.append(f"• {trade_date} Buy {short_name}")
                     elif trade_type == 'SELL':
                         pl = trade.get('profit_loss', 0)
                         pl_pct = trade.get('profit_loss_pct', 0)
-                        
-                        # 손익에 따라 이모지 선택
+
+                        # Choose emoji based on P&L
                         if pl > 0:
-                            pl_emoji = "✅"  # 승
+                            pl_emoji = "✅"  # Win
                         elif pl < 0:
-                            pl_emoji = "❌"  # 패
+                            pl_emoji = "❌"  # Loss
                         else:
-                            pl_emoji = "➖"  # 무승부
-                        
-                        message_parts.append(f"• {trade_date} 매도 {short_name} {pl_emoji}{pl_pct:+.1f}%")
+                            pl_emoji = "➖"  # Draw
+
+                        message_parts.append(f"• {trade_date} Sell {short_name} {pl_emoji}{pl_pct:+.1f}%")
 
             message_text = "\n".join(message_parts)
 
@@ -782,7 +783,7 @@ https://stocksimulation.kr/ 접속 후
             trades_executed = []
 
             # Case 1: NEUTRAL → Sell all positions
-            if sentiment == '중립':
+            if sentiment == 'Neutral':
                 if current_position:
                     # Sell current position - get real price
                     sell_price = get_current_price(current_position['stock_code'])
@@ -813,14 +814,14 @@ https://stocksimulation.kr/ 접속 후
                         'profit_loss_pct': profit_loss_pct,
                         'balance_before': current_balance,
                         # balance_after = balance_before + profit_loss for SELL
-                        # Reason: 실현 손익만큼 자산이 증감 (주식 → 현금 전환 + 손익 반영)
+                        # Reason: Assets change by realized P&L (stock → cash conversion + P&L reflection)
                         'balance_after': new_balance,
                         'cumulative_return_pct': cumulative_return_pct,
-                        'notes': f"중립 기조로 전량 매도 (손익: {profit_loss:,.0f}원, {profit_loss_pct:+.2f}%)"
+                        'notes': f"Sell all on neutral sentiment (P&L: {profit_loss:,.0f} KRW, {profit_loss_pct:+.2f}%)"
                     }
                     await self.db.insert_trade(sell_trade)
                     trades_executed.append(sell_trade)
-                    logger.info(f"✅ SELL: {current_position['stock_name']} (중립 기조)")
+                    logger.info(f"✅ SELL: {current_position['stock_name']} (neutral sentiment)")
                 else:
                     # No position to sell, just record analysis
                     record = {
@@ -836,13 +837,13 @@ https://stocksimulation.kr/ 접속 후
                         'balance_before': current_balance,
                         'balance_after': current_balance,
                         'cumulative_return_pct': ((current_balance - INITIAL_CAPITAL) / INITIAL_CAPITAL) * 100,
-                        'notes': '중립 기조, 보유 종목 없음'
+                        'notes': 'Neutral sentiment, no holdings'
                     }
                     await self.db.insert_trade(record)
-                    logger.info("중립 기조, 보유 종목 없음")
+                    logger.info("Neutral sentiment, no holdings")
 
             # Case 2: UP or DOWN → Buy target stock
-            elif sentiment in ['상승', '하락']:
+            elif sentiment in ['Bullish', 'Bearish']:
                 target_code = target_stock.get('code')
                 target_name = target_stock.get('name')
 
@@ -884,12 +885,12 @@ https://stocksimulation.kr/ 접속 후
                         'balance_before': current_balance,
                         'balance_after': new_balance,
                         'cumulative_return_pct': cumulative_return_pct,
-                        'notes': f"종목 전환을 위한 매도 → {target_name} 매수 예정"
+                        'notes': f"Sell for position switch → {target_name} buy scheduled"
                     }
                     await self.db.insert_trade(sell_trade)
                     trades_executed.append(sell_trade)
                     current_balance = new_balance
-                    logger.info(f"✅ SELL: {current_position['stock_name']} (종목 전환)")
+                    logger.info(f"✅ SELL: {current_position['stock_name']} (position switch)")
 
                 elif current_position and current_position['stock_code'] == target_code:
                     # Already holding target stock, no action needed
@@ -906,15 +907,15 @@ https://stocksimulation.kr/ 접속 후
                         'balance_before': current_balance,
                         'balance_after': current_balance,
                         'cumulative_return_pct': ((current_balance - INITIAL_CAPITAL) / INITIAL_CAPITAL) * 100,
-                        'notes': f'이미 {target_name} 보유 중, 액션 없음'
+                        'notes': f'Already holding {target_name}, no action'
                     }
                     await self.db.insert_trade(record)
-                    logger.info(f"이미 {target_name} 보유 중")
+                    logger.info(f"Already holding {target_name}")
                     return
 
                 # Step 2: Buy target stock with FULL BALANCE - get real price
                 buy_price = get_current_price(target_code)
-                quantity = int(current_balance / buy_price)  # 전액 투자
+                quantity = int(current_balance / buy_price)  # Full balance investment
                 buy_amount = quantity * buy_price
 
                 # Use _BUY suffix when this is part of a position switch
@@ -940,15 +941,15 @@ https://stocksimulation.kr/ 접속 후
                     'amount': buy_amount,
                     'balance_before': current_balance,
                     # balance_after = balance_before for BUY
-                    # Reason: 현금 → 주식 전환이므로 총 자산 평가액은 변하지 않음
-                    # (실제 현금은 차감되고 주식이 증가하지만, 평가액 기준으로는 동일)
+                    # Reason: Cash → stock conversion, total asset valuation unchanged
+                    # (Actual cash is deducted and stock increases, but equal on valuation basis)
                     'balance_after': current_balance,
                     'cumulative_return_pct': ((current_balance - INITIAL_CAPITAL) / INITIAL_CAPITAL) * 100,
-                    'notes': f"{sentiment} 기조 → 역발상 {target_name} 전액 매수 ({buy_amount:,.0f}원)"
+                    'notes': f"{sentiment} sentiment → Contrarian {target_name} all-in buy ({buy_amount:,.0f} KRW)"
                 }
                 await self.db.insert_trade(buy_trade)
                 trades_executed.append(buy_trade)
-                logger.info(f"✅ BUY: {target_name} x {quantity} @ {buy_price:,} (전액 투자: {buy_amount:,.0f}원)")
+                logger.info(f"✅ BUY: {target_name} x {quantity} @ {buy_price:,} (all-in: {buy_amount:,.0f} KRW)")
 
             # Log performance metrics
             metrics = await self.db.calculate_performance_metrics()
@@ -996,8 +997,8 @@ https://stocksimulation.kr/ 접속 후
                 return None
 
             # Skip if not Jeon's own opinion
-            if analysis.get('content_type') == '스킵':
-                logger.info("Content type '스킵', skipping")
+            if analysis.get('content_type') == 'Skip':
+                logger.info("Content type 'Skip', skipping")
                 return analysis
 
             # Send Telegram (analysis summary)

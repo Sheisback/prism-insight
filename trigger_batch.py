@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 from dotenv import load_dotenv
-load_dotenv()  # .env 파일에서 환경변수 로드 (krx_data_client import 전에 필요)
+load_dotenv()  # Load environment variables from .env file (required before krx_data_client import)
 
 import sys
 import datetime
@@ -15,14 +15,14 @@ from krx_data_client import (
     get_market_ticker_name,
 )
 
-# pykrx 호환 래퍼 (기존 코드 호환성)
+# pykrx compatibility wrapper (for existing code compatibility)
 class stock_api:
     get_market_ohlcv_by_ticker = staticmethod(get_market_ohlcv_by_ticker)
     get_nearest_business_day_in_a_week = staticmethod(get_nearest_business_day_in_a_week)
     get_market_cap_by_ticker = staticmethod(get_market_cap_by_ticker)
     get_market_ticker_name = staticmethod(get_market_ticker_name)
 
-# 로거 설정
+# Logger configuration
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 ch = logging.StreamHandler()
@@ -31,116 +31,116 @@ ch.setFormatter(formatter)
 logger.addHandler(ch)
 
 
-# --- 데이터 수집 및 캐싱 함수 ---
+# --- Data collection and caching functions ---
 def get_snapshot(trade_date: str) -> pd.DataFrame:
     """
-    지정 거래일의 전체 종목 OHLCV 스냅샷을 반환합니다.
-    컬럼: "Open", "High", "Low", "Close", "Volume", "Amount"
+    Return OHLCV snapshot for all stocks on specified trading date.
+    Columns: "Open", "High", "Low", "Close", "Volume", "Amount"
     """
-    logger.debug(f"get_snapshot 호출: {trade_date}")
+    logger.debug(f"get_snapshot called: {trade_date}")
     df = stock_api.get_market_ohlcv_by_ticker(trade_date)
     if df.empty:
-        logger.error(f"{trade_date}에 대한 OHLCV 데이터가 없습니다.")
-        raise ValueError(f"{trade_date}에 대한 OHLCV 데이터가 없습니다.")
+        logger.error(f"No OHLCV data for {trade_date}.")
+        raise ValueError(f"No OHLCV data for {trade_date}.")
 
-    # 데이터 확인용
-    logger.debug(f"스냅샷 데이터 샘플: {df.head()}")
-    logger.debug(f"스냅샷 데이터 컬럼: {df.columns}")
+    # Data verification
+    logger.debug(f"Snapshot data sample: {df.head()}")
+    logger.debug(f"Snapshot data columns: {df.columns}")
 
     return df
 
 def get_previous_snapshot(trade_date: str) -> (pd.DataFrame, str):
     """
-    지정 거래일의 직전 영업일을 구한 후, 해당일의 OHLCV 스냅샷과 날짜를 반환합니다.
+    Find the previous business day before specified trading date and return OHLCV snapshot with date.
     """
-    # 날짜 객체로 변환
+    # Convert to date object
     date_obj = datetime.datetime.strptime(trade_date, '%Y%m%d')
 
-    # 하루 전으로 이동
+    # Move back one day
     prev_date_obj = date_obj - datetime.timedelta(days=1)
 
-    # 영업일 체크를 위해 문자열로 변환
+    # Convert to string for business day check
     prev_date_str = prev_date_obj.strftime('%Y%m%d')
 
-    # 직전 영업일 구하기
+    # Find previous business day
     prev_date = stock_api.get_nearest_business_day_in_a_week(prev_date_str, prev=True)
 
-    logger.debug(f"이전 거래일 확인 - 기준일: {trade_date}, 하루 전: {prev_date_str}, 직전 영업일: {prev_date}")
+    logger.debug(f"Previous trading day check - Base date: {trade_date}, Day before: {prev_date_str}, Previous business day: {prev_date}")
 
     df = stock_api.get_market_ohlcv_by_ticker(prev_date)
     if df.empty:
-        logger.error(f"{prev_date}에 대한 OHLCV 데이터가 없습니다.")
-        raise ValueError(f"{prev_date}에 대한 OHLCV 데이터가 없습니다.")
+        logger.error(f"No OHLCV data for {prev_date}.")
+        raise ValueError(f"No OHLCV data for {prev_date}.")
 
-    # 데이터 확인용
-    logger.debug(f"이전 거래일 데이터 샘플: {df.head()}")
-    logger.debug(f"이전 거래일 데이터 컬럼: {df.columns}")
+    # Data verification
+    logger.debug(f"Previous trading day data sample: {df.head()}")
+    logger.debug(f"Previous trading day data columns: {df.columns}")
 
     return df, prev_date
 
 
 def get_multi_day_ohlcv(ticker: str, end_date: str, days: int = 10) -> pd.DataFrame:
     """
-    특정 종목의 N일간 OHLCV 데이터를 조회합니다.
+    Query N-day OHLCV data for specific stock.
 
     Args:
-        ticker: 종목 코드
-        end_date: 종료일 (YYYYMMDD)
-        days: 조회할 영업일 수 (기본값: 10일)
+        ticker: Stock code
+        end_date: End date (YYYYMMDD)
+        days: Number of business days to query (default: 10 days)
 
     Returns:
         DataFrame with columns: Open, High, Low, Close, Volume, Amount
-        Index: 날짜
+        Index: Date
     """
     from krx_data_client import get_market_ohlcv_by_date
 
-    # 종료일로부터 충분한 과거 날짜 계산 (영업일 확보를 위해 여유 있게)
+    # Calculate sufficient past date from end date (with margin for business days)
     end_dt = datetime.datetime.strptime(end_date, '%Y%m%d')
-    start_dt = end_dt - datetime.timedelta(days=days * 2)  # 여유 있게 2배
+    start_dt = end_dt - datetime.timedelta(days=days * 2)  # 2x margin for business days
     start_date = start_dt.strftime('%Y%m%d')
 
     try:
         df = get_market_ohlcv_by_date(start_date, end_date, ticker)
         if df.empty:
-            logger.warning(f"{ticker}의 {days}일간 데이터가 없습니다.")
+            logger.warning(f"No {days}-day data for {ticker}.")
             return pd.DataFrame()
 
-        # 최근 N일만 선택
+        # Select only recent N days
         return df.tail(days)
     except Exception as e:
-        logger.error(f"{ticker} 멀티데이 조회 실패: {e}")
+        logger.error(f"Multi-day query failed for {ticker}: {e}")
         return pd.DataFrame()
 
 
 def get_market_cap_df(trade_date: str, market: str = "ALL") -> pd.DataFrame:
     """
-    지정 거래일의 전체 종목에 대한 시가총액 데이터를 DataFrame으로 반환합니다.
-    인덱스는 종목 코드이며, "시가총액" 컬럼을 포함합니다.
+    Return market cap data for all stocks on specified trading date as DataFrame.
+    Index is stock code, includes market cap column.
     """
-    logger.debug(f"get_market_cap_df 호출: {trade_date}, market={market}")
+    logger.debug(f"get_market_cap_df called: {trade_date}, market={market}")
     cap_df = stock_api.get_market_cap_by_ticker(trade_date, market=market)
     if cap_df.empty:
-        logger.error(f"{trade_date}의 시가총액 데이터가 없습니다.")
-        raise ValueError(f"{trade_date}의 시가총액 데이터가 없습니다.")
+        logger.error(f"No market cap data for {trade_date}.")
+        raise ValueError(f"No market cap data for {trade_date}.")
     return cap_df
 
 def filter_low_liquidity(df: pd.DataFrame, threshold: float = 0.2) -> pd.DataFrame:
     """
-    거래량 하위 N% 종목을 제외합니다 (저유동성 종목 필터링)
+    Filter out stocks in bottom N% by volume (low liquidity filtering)
     """
     volume_cutoff = np.percentile(df['Volume'], threshold * 100)
     return df[df['Volume'] > volume_cutoff]
 
 def apply_absolute_filters(df: pd.DataFrame, min_value: int = 500000000) -> pd.DataFrame:
     """
-    절대적 기준 필터링:
-    - 최소 거래대금 (5억원 이상)
-    - 유동성 충분한 종목
+    Absolute criteria filtering:
+    - Minimum trade value (500M KRW or more)
+    - Sufficient liquidity
     """
-    # 최소 거래대금 필터 (5억원 이상)
+    # Minimum trade value filter (500M KRW or more)
     filtered_df = df[df['Amount'] >= min_value]
 
-    # 시장 평균의 20% 이상 거래량 필터
+    # Volume filter: at least 20% of market average
     avg_volume = df['Volume'].mean()
     min_volume = avg_volume * 0.2
     filtered_df = filtered_df[filtered_df['Volume'] >= min_volume]
@@ -151,79 +151,79 @@ def normalize_and_score(df: pd.DataFrame, ratio_col: str, abs_col: str,
                         ratio_weight: float = 0.6, abs_weight: float = 0.4,
                         ascending: bool = False) -> pd.DataFrame:
     """
-    특정 컬럼에 대해 정규화 후 가중치를 적용한 복합 점수를 계산합니다.
+    Calculate composite score by normalizing columns and applying weights.
 
-    ratio_col: 상대적 비율 컬럼 (예: 거래량비율)
-    abs_col: 절대적 수치 컬럼 (예: 거래량)
-    ratio_weight: 상대적 비율의 가중치 (기본값: 0.6)
-    abs_weight:.절대적 수치의 가중치 (기본값: 0.4)
-    ascending: 정렬 방향 (기본값: False, 내림차순)
+    ratio_col: Relative ratio column (e.g., volume ratio)
+    abs_col: Absolute value column (e.g., volume)
+    ratio_weight: Weight for relative ratio (default: 0.6)
+    abs_weight: Weight for absolute value (default: 0.4)
+    ascending: Sort direction (default: False, descending)
     """
     if df.empty:
         return df
 
-    # 정규화를 위한 최대/최소값 계산
+    # Calculate max/min values for normalization
     ratio_max = df[ratio_col].max()
     ratio_min = df[ratio_col].min()
     abs_max = df[abs_col].max()
     abs_min = df[abs_col].min()
 
-    # 0으로 나누기 방지
+    # Prevent division by zero
     ratio_range = ratio_max - ratio_min if ratio_max > ratio_min else 1
     abs_range = abs_max - abs_min if abs_max > abs_min else 1
 
-    # 각 컬럼 정규화 (0-1 사이의 값으로)
+    # Normalize each column (to 0-1 range)
     df[f"{ratio_col}_norm"] = (df[ratio_col] - ratio_min) / ratio_range
     df[f"{abs_col}_norm"] = (df[abs_col] - abs_min) / abs_range
 
-    # 복합 점수 계산
-    df["복합점수"] = (df[f"{ratio_col}_norm"] * ratio_weight) + (df[f"{abs_col}_norm"] * abs_weight)
+    # Calculate composite score
+    df["composite_score"] = (df[f"{ratio_col}_norm"] * ratio_weight) + (df[f"{abs_col}_norm"] * abs_weight)
 
-    # 복합 점수 기준 정렬
-    return df.sort_values("복합점수", ascending=ascending)
+    # Sort by composite score
+    return df.sort_values("composite_score", ascending=ascending)
 
 def enhance_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """
-    종목명, 업종 등 추가 정보를 DataFrame에 추가합니다
+    Add additional information like stock name, sector to DataFrame
     """
     if not df.empty:
-        df = df.copy()  # 명시적으로 복사본 생성하여 SettingWithCopyWarning 방지
-        df["종목명"] = df.index.map(lambda ticker: stock_api.get_market_ticker_name(ticker))
+        df = df.copy()  # Explicitly create copy to prevent SettingWithCopyWarning
+        df["stock_name"] = df.index.map(lambda ticker: stock_api.get_market_ticker_name(ticker))
     return df
 
 
-# v1.16.6: 트리거 유형별 에이전트 기준 (trading_agents.py와 동기화)
+# v1.16.6: Agent criteria by trigger type (synchronized with trading_agents.py)
 TRIGGER_CRITERIA = {
-    "거래량 급증 상위주": {"rr_target": 1.2, "sl_max": 0.05},
-    "갭 상승 모멘텀 상위주": {"rr_target": 1.2, "sl_max": 0.05},
-    "일중 상승률 상위주": {"rr_target": 1.2, "sl_max": 0.05},
-    "마감 강도 상위주": {"rr_target": 1.3, "sl_max": 0.05},
-    "시총 대비 집중 자금 유입 상위주": {"rr_target": 1.3, "sl_max": 0.05},
-    "거래량 증가 상위 횡보주": {"rr_target": 1.5, "sl_max": 0.07},
+    "Volume Surge Top": {"rr_target": 1.2, "sl_max": 0.05},
+    "Gap Up Momentum Top": {"rr_target": 1.2, "sl_max": 0.05},
+    "Intraday Rise Top": {"rr_target": 1.2, "sl_max": 0.05},
+    "Closing Strength Top": {"rr_target": 1.3, "sl_max": 0.05},
+    "Concentrated Fund Inflow vs Market Cap Top": {"rr_target": 1.3, "sl_max": 0.05},
+    "Volume Increase Sideways Top": {"rr_target": 1.5, "sl_max": 0.07},
     "default": {"rr_target": 1.5, "sl_max": 0.07}
 }
 
 
 def calculate_agent_fit_metrics(ticker: str, current_price: float, trade_date: str, lookback_days: int = 10, trigger_type: str = None) -> dict:
     """
-    매수/매도 에이전트 기준에 맞는 지표를 계산합니다.
+    Calculate metrics that fit buy/sell agent criteria.
 
-    v1.16.6: 고정 손절폭 방식으로 변경 (연 15% 수익 시스템)
-    - 핵심 변경: 10일 지지선 기반 → 현재가 기준 고정 손절폭
-    - 이유: 급등주도 에이전트 기준 충족 가능하도록 개선
-    - 손익비: 저항선 기준 유지, 최소 +15% 보장
+    v1.16.6: Changed to fixed stop-loss method (15% annual return system)
+    - Core change: 10-day support level based → current price based fixed stop-loss
+    - Reason: Improved to allow surge stocks to meet agent criteria
+    - Risk-reward ratio: Maintain resistance level based, guarantee minimum +15%
 
-    트리거 유형별 기준 (trading_agents.py와 동기화):
-    - 거래량 급증/갭 상승/일중 상승률: 손익비 1.2+, 손절폭 5%
-    - 마감 강도/자금 유입: 손익비 1.3+, 손절폭 5%
-    - 횡보주: 손익비 1.5+, 손절폭 7%
+    Criteria by trigger type (synchronized with trading_agents.py):
+    - Volume surge/Gap up/Intraday rise: Risk-reward 1.2+, Stop-loss 5%
+    - Closing strength/Fund inflow: Risk-reward 1.3+, Stop-loss 5%
+    - Sideways: Risk-reward 1.5+, Stop-loss 7%
 
     Args:
-        ticker: 종목 코드
-        current_price: 현재가
-        trade_date: 기준 거래일
-        lookback_days: 조회할 과거 영업일 수
-        trigger_type: 트리거 유형 (기준 차별화에 사용)
+        ticker: Stock code
+        current_price: Current price
+        trade_date: Reference trading date
+        lookback_days: Number of past business days to query
+        trigger_type: Trigger type (used for differentiated criteria)
 
     Returns:
         dict with keys: stop_loss_price, target_price, stop_loss_pct, risk_reward_ratio, agent_fit_score
@@ -231,7 +231,7 @@ def calculate_agent_fit_metrics(ticker: str, current_price: float, trade_date: s
     result = {
         "stop_loss_price": 0,
         "target_price": 0,
-        "stop_loss_pct": 1.0,  # 기본값: 불리한 값
+        "stop_loss_pct": 1.0,  # Default: unfavorable value
         "risk_reward_ratio": 0,
         "agent_fit_score": 0,
     }
@@ -239,50 +239,50 @@ def calculate_agent_fit_metrics(ticker: str, current_price: float, trade_date: s
     if current_price <= 0:
         return result
 
-    # v1.16.6: 트리거 유형별 기준 조회 (먼저 조회)
+    # v1.16.6: Query criteria by trigger type (query first)
     criteria = TRIGGER_CRITERIA.get(trigger_type, TRIGGER_CRITERIA["default"])
     sl_max = criteria["sl_max"]
     rr_target = criteria["rr_target"]
 
-    # v1.16.6 핵심 변경: 고정 손절폭 방식 적용
-    # 이전: 10일 저가 기반 → 급등주에서 48%+ 손절폭 발생 → 에이전트 거부
-    # 변경: 현재가 기준 고정 비율 → 항상 에이전트 기준 충족
+    # v1.16.6 Core change: Apply fixed stop-loss method
+    # Before: 10-day low based → 48%+ stop-loss on surge stocks → agent rejection
+    # After: Current price based fixed ratio → always meets agent criteria
     stop_loss_price = current_price * (1 - sl_max)
-    stop_loss_pct = sl_max  # 고정값 (5% or 7%)
+    stop_loss_pct = sl_max  # Fixed value (5% or 7%)
 
-    # 목표가 계산: 기존 저항선 방식 유지
+    # Target price calculation: Maintain existing resistance level method
     multi_day_df = get_multi_day_ohlcv(ticker, trade_date, lookback_days)
     if multi_day_df.empty or len(multi_day_df) < 3:
-        # 데이터 부족 시 현재가 + 15% 기본값
+        # Default to current price + 15% when data is insufficient
         target_price = current_price * 1.15
-        logger.debug(f"{ticker}: 데이터 부족, 목표가 기본값 적용 ({target_price:.0f})")
+        logger.debug(f"{ticker}: Insufficient data, applying default target price ({target_price:.0f})")
     else:
-        # 컬럼명 확인 (영문/한글 호환)
+        # Check column name (English/Korean compatibility)
         high_col = "High" if "High" in multi_day_df.columns else "고가"
 
         if high_col not in multi_day_df.columns:
             target_price = current_price * 1.15
-            logger.debug(f"{ticker}: 고가 컬럼 없음, 목표가 기본값 적용")
+            logger.debug(f"{ticker}: No high column, applying default target price")
         else:
-            # 0 값 필터링 (휴장일 또는 데이터 오류)
+            # Filter out 0 values (market holidays or data errors)
             valid_highs = multi_day_df[high_col][multi_day_df[high_col] > 0]
             if valid_highs.empty:
                 target_price = current_price * 1.15
             else:
-                # 저항선 (최근 N일 고가 중 최고점)
+                # Resistance level (highest among recent N-day highs)
                 target_price = valid_highs.max()
 
-    # v1.16.6 잔여 리스크 완화: 목표가 최소 +15% 보장
+    # v1.16.6 Residual risk mitigation: Guarantee minimum +15% target
     min_target = current_price * 1.15
     if target_price <= current_price:
         target_price = min_target
-        logger.debug(f"{ticker}: 목표가가 현재가 이하, 최소값 적용 ({target_price:.0f})")
+        logger.debug(f"{ticker}: Target price below current price, applying minimum ({target_price:.0f})")
     elif target_price < min_target:
-        # 저항선이 +15% 미만이면 최소값으로 상향
-        logger.debug(f"{ticker}: 목표가 {target_price:.0f} → 최소값 {min_target:.0f}으로 상향")
+        # Raise to minimum if resistance is below +15%
+        logger.debug(f"{ticker}: Target price {target_price:.0f} → raised to minimum {min_target:.0f}")
         target_price = min_target
 
-    # 손익비 계산
+    # Calculate risk-reward ratio
     potential_gain = target_price - current_price
     potential_loss = current_price - stop_loss_price
 
@@ -291,12 +291,12 @@ def calculate_agent_fit_metrics(ticker: str, current_price: float, trade_date: s
     else:
         risk_reward_ratio = 0
 
-    # v1.16.6: 에이전트 적합도 점수 계산 (간소화)
-    # 손절폭이 항상 기준 이내이므로 sl_score = 1.0
+    # v1.16.6: Calculate agent fit score (simplified)
+    # sl_score = 1.0 since stop-loss is always within criteria
     rr_score = min(risk_reward_ratio / rr_target, 1.0) if risk_reward_ratio > 0 else 0
-    sl_score = 1.0  # 고정 손절폭이므로 항상 만점
+    sl_score = 1.0  # Always perfect score since stop-loss is fixed
 
-    # 최종 점수 (손익비 60%, 손절폭 40%)
+    # Final score (risk-reward 60%, stop-loss 40%)
     agent_fit_score = rr_score * 0.6 + sl_score * 0.4
 
     result = {
@@ -307,623 +307,623 @@ def calculate_agent_fit_metrics(ticker: str, current_price: float, trade_date: s
         "agent_fit_score": agent_fit_score,
     }
 
-    logger.debug(f"{ticker}: 손절가={stop_loss_price:.0f}, 목표가={target_price:.0f}, "
-                 f"손절폭={stop_loss_pct*100:.1f}% (고정), 손익비={risk_reward_ratio:.2f}, "
-                 f"에이전트점수={agent_fit_score:.3f}")
+    logger.debug(f"{ticker}: Stop-loss={stop_loss_price:.0f}, Target={target_price:.0f}, "
+                 f"Stop-loss%={stop_loss_pct*100:.1f}% (fixed), Risk-reward={risk_reward_ratio:.2f}, "
+                 f"Agent score={agent_fit_score:.3f}")
 
     return result
 
 
 def score_candidates_by_agent_criteria(candidates_df: pd.DataFrame, trade_date: str, lookback_days: int = 10, trigger_type: str = None) -> pd.DataFrame:
     """
-    후보 종목들에 대해 에이전트 기준 점수를 계산하여 DataFrame에 추가합니다.
+    Calculate agent criteria scores for candidate stocks and add to DataFrame.
 
-    v1.16.6: 트리거 유형별 차별화된 기준 적용
+    v1.16.6: Apply differentiated criteria by trigger type
 
     Args:
-        candidates_df: 후보 종목 DataFrame (index: 종목코드, Close 컬럼 필수)
-        trade_date: 기준 거래일
-        lookback_days: 조회할 과거 영업일 수
-        trigger_type: 트리거 유형 (기준 차별화에 사용)
+        candidates_df: Candidate stocks DataFrame (index: stock code, Close column required)
+        trade_date: Reference trading date
+        lookback_days: Number of past business days to query
+        trigger_type: Trigger type (used for differentiated criteria)
 
     Returns:
-        에이전트 기준 점수가 추가된 DataFrame
+        DataFrame with agent criteria scores added
     """
     if candidates_df.empty:
         return candidates_df
 
     result_df = candidates_df.copy()
 
-    # 에이전트 관련 컬럼 초기화
-    result_df["손절가"] = 0.0
-    result_df["목표가"] = 0.0
-    result_df["손절폭"] = 0.0
-    result_df["손익비"] = 0.0
-    result_df["에이전트점수"] = 0.0
+    # Initialize agent-related columns
+    result_df["stop_loss_price"] = 0.0
+    result_df["target_price"] = 0.0
+    result_df["stop_loss_pct"] = 0.0
+    result_df["risk_reward_ratio"] = 0.0
+    result_df["agent_fit_score"] = 0.0
 
     for ticker in result_df.index:
         current_price = result_df.loc[ticker, "Close"]
         metrics = calculate_agent_fit_metrics(ticker, current_price, trade_date, lookback_days, trigger_type)
 
-        result_df.loc[ticker, "손절가"] = metrics["stop_loss_price"]
-        result_df.loc[ticker, "목표가"] = metrics["target_price"]
-        result_df.loc[ticker, "손절폭"] = metrics["stop_loss_pct"]
-        result_df.loc[ticker, "손익비"] = metrics["risk_reward_ratio"]
-        result_df.loc[ticker, "에이전트점수"] = metrics["agent_fit_score"]
+        result_df.loc[ticker, "stop_loss_price"] = metrics["stop_loss_price"]
+        result_df.loc[ticker, "target_price"] = metrics["target_price"]
+        result_df.loc[ticker, "stop_loss_pct"] = metrics["stop_loss_pct"]
+        result_df.loc[ticker, "risk_reward_ratio"] = metrics["risk_reward_ratio"]
+        result_df.loc[ticker, "agent_fit_score"] = metrics["agent_fit_score"]
 
     return result_df
 
 
-# --- 오전 트리거 함수 (장 시작 스냅샷 기준) ---
+# --- Morning trigger functions (based on market open snapshot) ---
 def trigger_morning_volume_surge(trade_date: str, snapshot: pd.DataFrame, prev_snapshot: pd.DataFrame, cap_df: pd.DataFrame = None, top_n: int = 10) -> pd.DataFrame:
     """
-    [오전 트리거1] 당일 거래량 급증 상위주
-    - 절대적 기준: 최소 거래대금 5억원 이상 + 시장 평균 거래량의 20% 이상
-    - 추가 필터: 거래량 30% 이상 증가
-    - 복합 점수: 거래량 증가율(60%) + 절대 거래량(40%)
-    - 2차 필터링: 상승세 종목만 선별 (시가 대비 현재가 상승)
-    - 동전주 필터: 시가총액 500억원 이상
+    [Morning Trigger 1] Top stocks with intraday volume surge
+    - Absolute criteria: Minimum trade value 500M KRW + at least 20% of market average volume
+    - Additional filter: Volume increase of 30% or more
+    - Composite score: Volume increase rate (60%) + Absolute volume (40%)
+    - Secondary filtering: Select only rising stocks (current price > opening price)
+    - Penny stock filter: Market cap 50B KRW or more
     """
-    logger.debug("trigger_morning_volume_surge 시작")
+    logger.debug("trigger_morning_volume_surge started")
     common = snapshot.index.intersection(prev_snapshot.index)
     snap = snapshot.loc[common].copy()
     prev = prev_snapshot.loc[common].copy()
-    
-    # 시가총액 데이터 병합 및 필터링 (v1.16.6: 5000억 이상으로 조정)
+
+    # Merge and filter market cap data (v1.16.6: adjusted to 500B or more)
     if cap_df is not None and not cap_df.empty:
         snap = snap.merge(cap_df[["시가총액"]], left_index=True, right_index=True, how="inner")
-        # 시가총액 5000억원 이상만 선별 (v1.16.6: 기회 풀 확대, 518개 종목)
+        # Select stocks with market cap 500B KRW or more (v1.16.6: expanded opportunity pool, 518 stocks)
         snap = snap[snap["시가총액"] >= 500000000000]
-        logger.debug(f"시가총액 필터링 후 종목 수: {len(snap)}")
+        logger.debug(f"Stock count after market cap filtering: {len(snap)}")
         if snap.empty:
-            logger.warning("시가총액 필터링 후 종목이 없습니다")
+            logger.warning("No stocks after market cap filtering")
             return pd.DataFrame()
 
-    # 디버깅 정보
-    logger.debug(f"전일 종가 데이터 샘플: {prev['Close'].head()}")
-    logger.debug(f"당일 종가 데이터 샘플: {snap['Close'].head()}")
+    # Debug information
+    logger.debug(f"Previous day close data sample: {prev['Close'].head()}")
+    logger.debug(f"Current day close data sample: {snap['Close'].head()}")
 
-    # 절대적 기준 적용 (거래대금 100억 이상으로 상향)
+    # Apply absolute criteria (raised to 10B KRW trade value)
     snap = apply_absolute_filters(snap, min_value=10000000000)
 
-    # 거래량 비율 계산
-    snap["거래량비율"] = snap["Volume"] / prev["Volume"].replace(0, np.nan)
-    # 거래량 증가율 계산 (백분율)
-    snap["거래량증가율"] = (snap["거래량비율"] - 1) * 100
+    # Calculate volume ratio
+    snap["volume_ratio"] = snap["Volume"] / prev["Volume"].replace(0, np.nan)
+    # Calculate volume increase rate (percentage)
+    snap["volume_increase_rate"] = (snap["volume_ratio"] - 1) * 100
 
-    # 두 가지 등락률 계산
-    snap["장중등락률"] = (snap["Close"] / snap["Open"] - 1) * 100  # 시가 대비 현재가
+    # Calculate two types of change rates
+    snap["intraday_change_rate"] = (snap["Close"] / snap["Open"] - 1) * 100  # Current vs opening price
 
-    # 전일대비등락률 계산 - 변경된 방식으로
-    snap["전일대비등락률"] = ((snap["Close"] - prev["Close"]) / prev["Close"]) * 100
+    # Calculate change rate vs previous day - modified method
+    snap["prev_day_change_rate"] = ((snap["Close"] - prev["Close"]) / prev["Close"]) * 100
 
-    # v1.16.6: 등락률 상한선 (20% 이하, 고정 손절폭으로 급등주도 진입 가능)
-    snap = snap[snap["전일대비등락률"] <= 20.0]
+    # v1.16.6: Change rate upper limit (20% or less, surge stocks can enter with fixed stop-loss)
+    snap = snap[snap["prev_day_change_rate"] <= 20.0]
 
-    # 첫 10개 종목의 전일대비등락률 계산 과정 디버깅
+    # Debug calculation process for first 5 stocks' change rate vs previous day
     for ticker in snap.index[:5]:
         try:
             today_close = snap.loc[ticker, "Close"]
             yesterday_close = prev.loc[ticker, "Close"]
             change_rate = ((today_close - yesterday_close) / yesterday_close) * 100
-            logger.debug(f"종목 {ticker} - 오늘종가: {today_close}, 전일종가: {yesterday_close}, 전일대비등락률: {change_rate:.2f}%")
+            logger.debug(f"Stock {ticker} - Today close: {today_close}, Yesterday close: {yesterday_close}, Change rate: {change_rate:.2f}%")
         except Exception as e:
-            logger.debug(f"디버깅 중 오류: {e}")
+            logger.debug(f"Error during debugging: {e}")
 
-    snap["상승여부"] = snap["Close"] > snap["Open"]
+    snap["is_rising"] = snap["Close"] > snap["Open"]
 
-    # 거래량 증가율 30% 이상 필터링
-    snap = snap[snap["거래량증가율"] >= 30.0]
+    # Filter for volume increase rate 30% or more
+    snap = snap[snap["volume_increase_rate"] >= 30.0]
 
     if snap.empty:
-        logger.debug("trigger_morning_volume_surge: 거래량 증가 종목 없음")
+        logger.debug("trigger_morning_volume_surge: No stocks with volume increase")
         return pd.DataFrame()
 
-    # 1차 필터링: 복합 점수 기준 상위 종목 선정
-    scored = normalize_and_score(snap, "거래량증가율", "Volume", 0.6, 0.4)
+    # Primary filtering: Select top stocks by composite score
+    scored = normalize_and_score(snap, "volume_increase_rate", "Volume", 0.6, 0.4)
     candidates = scored.head(top_n)
 
-    # 2차 필터링: 상승세 종목만 선별
-    result = candidates[candidates["상승여부"] == True].copy()
+    # Secondary filtering: Select only rising stocks
+    result = candidates[candidates["is_rising"] == True].copy()
 
     if result.empty:
-        logger.debug("trigger_morning_volume_surge: 조건 충족 종목 없음")
+        logger.debug("trigger_morning_volume_surge: No stocks meeting criteria")
         return pd.DataFrame()
 
-    logger.debug(f"거래량 급증 포착 종목 수: {len(result)}")
-    return enhance_dataframe(result.sort_values("복합점수", ascending=False).head(10))
+    logger.debug(f"Volume surge stocks detected: {len(result)}")
+    return enhance_dataframe(result.sort_values("composite_score", ascending=False).head(10))
 
 def trigger_morning_gap_up_momentum(trade_date: str, snapshot: pd.DataFrame, prev_snapshot: pd.DataFrame, cap_df: pd.DataFrame = None, top_n: int = 15) -> pd.DataFrame:
     """
-    [오전 트리거2] 갭 상승 모멘텀 상위주
-    - 절대적 기준: 최소 거래대금 5억원 이상
-    - 복합 점수: 갭상승률(50%) + 당일상승률(30%) + 거래대금(20%)
-    - 2차 필터링: 현재가가 시가보다 높은 종목만 선별 (상승 지속)
-    - 동전주 필터: 시가총액 500억원 이상
+    [Morning Trigger 2] Top gap-up momentum stocks
+    - Absolute criteria: Minimum trade value 500M KRW or more
+    - Composite score: Gap rate (50%) + Intraday rise (30%) + Trade value (20%)
+    - Secondary filtering: Select only stocks with current price > opening price (sustained rise)
+    - Penny stock filter: Market cap 50B KRW or more
     """
-    logger.debug("trigger_morning_gap_up_momentum 시작")
+    logger.debug("trigger_morning_gap_up_momentum started")
     common = snapshot.index.intersection(prev_snapshot.index)
     snap = snapshot.loc[common].copy()
     prev = prev_snapshot.loc[common].copy()
-    
-    # 시가총액 데이터 병합 및 필터링 (v1.16.6: 5000억 이상으로 조정)
+
+    # Merge and filter market cap data (v1.16.6: adjusted to 500B or more)
     if cap_df is not None and not cap_df.empty:
         snap = snap.merge(cap_df[["시가총액"]], left_index=True, right_index=True, how="inner")
-        # 시가총액 5000억원 이상만 선별 (v1.16.6: 기회 풀 확대, 518개 종목)
+        # Select stocks with market cap 500B KRW or more (v1.16.6: expanded opportunity pool, 518 stocks)
         snap = snap[snap["시가총액"] >= 500000000000]
-        logger.debug(f"시가총액 필터링 후 종목 수: {len(snap)}")
+        logger.debug(f"Stock count after market cap filtering: {len(snap)}")
         if snap.empty:
-            logger.warning("시가총액 필터링 후 종목이 없습니다")
+            logger.warning("No stocks after market cap filtering")
             return pd.DataFrame()
 
-    # 절대적 기준 적용 (거래대금 100억 이상으로 상향)
+    # Apply absolute criteria (raised to 10B KRW trade value)
     snap = apply_absolute_filters(snap, min_value=10000000000)
 
-    # 갭 상승률 계산
-    snap["갭상승률"] = (snap["Open"] / prev["Close"] - 1) * 100
-    snap["장중등락률"] = (snap["Close"] / snap["Open"] - 1) * 100  # 당일 시가 대비 등락률
-    snap["전일대비등락률"] = ((snap["Close"] - prev["Close"]) / prev["Close"]) * 100  # 전일 종가 대비 등락률
-    snap["상승지속"] = snap["Close"] > snap["Open"]
+    # Calculate gap rate
+    snap["gap_up_rate"] = (snap["Open"] / prev["Close"] - 1) * 100
+    snap["intraday_change_rate"] = (snap["Close"] / snap["Open"] - 1) * 100  # Intraday change rate vs opening
+    snap["prev_day_change_rate"] = ((snap["Close"] - prev["Close"]) / prev["Close"]) * 100  # Change rate vs previous close
+    snap["sustained_rise"] = snap["Close"] > snap["Open"]
 
-    # 1차 필터링: 갭상승률 1% 이상, 등락률 20% 이하 (v1.16.6: 급등주 진입 가능)
-    snap = snap[(snap["갭상승률"] >= 1.0) & (snap["전일대비등락률"] <= 15.0)]
+    # Primary filtering: Gap rate 1% or more, change rate 20% or less (v1.16.6: surge stocks can enter)
+    snap = snap[(snap["gap_up_rate"] >= 1.0) & (snap["prev_day_change_rate"] <= 15.0)]
 
-    # 점수 계산 (커스텀 복합 점수)
+    # Score calculation (custom composite score)
     if not snap.empty:
-        # 각 지표별 정규화
-        for col in ["갭상승률", "장중등락률", "Amount"]:
+        # Normalize each indicator
+        for col in ["gap_up_rate", "intraday_change_rate", "Amount"]:
             col_max = snap[col].max()
             col_min = snap[col].min()
             col_range = col_max - col_min if col_max > col_min else 1
             snap[f"{col}_norm"] = (snap[col] - col_min) / col_range
 
-        # 복합 점수 계산 (가중치 적용)
-        snap["복합점수"] = (
-                snap["갭상승률_norm"] * 0.5 +
-                snap["장중등락률_norm"] * 0.3 +
+        # Calculate composite score (apply weights)
+        snap["composite_score"] = (
+                snap["gap_up_rate_norm"] * 0.5 +
+                snap["intraday_change_rate_norm"] * 0.3 +
                 snap["Amount_norm"] * 0.2
         )
 
-        # 점수 기준 상위 종목 선정
-        candidates = snap.sort_values("복합점수", ascending=False).head(top_n)
+        # Select top stocks by score
+        candidates = snap.sort_values("composite_score", ascending=False).head(top_n)
     else:
         candidates = snap
 
-    # 2차 필터링: 상승 지속 종목만 선별
-    result = candidates[candidates["상승지속"] == True].copy()
+    # Secondary filtering: Select only stocks with sustained rise
+    result = candidates[candidates["sustained_rise"] == True].copy()
 
     if result.empty:
-        logger.debug("trigger_morning_gap_up_momentum: 조건 충족 종목 없음")
+        logger.debug("trigger_morning_gap_up_momentum: No stocks meeting criteria")
         return pd.DataFrame()
 
-    # 추가 정보 계산
-    result["종합모멘텀"] = result["갭상승률"] + result["장중등락률"]
+    # Calculate additional information
+    result["total_momentum"] = result["gap_up_rate"] + result["intraday_change_rate"]
 
-    logger.debug(f"갭 상승 모멘텀 포착 종목 수: {len(result)}")
-    return enhance_dataframe(result.sort_values("복합점수", ascending=False).head(10))
+    logger.debug(f"Gap-up momentum stocks detected: {len(result)}")
+    return enhance_dataframe(result.sort_values("composite_score", ascending=False).head(10))
 
 
 def trigger_morning_value_to_cap_ratio(trade_date: str, snapshot: pd.DataFrame, prev_snapshot: pd.DataFrame, cap_df: pd.DataFrame, top_n: int = 10) -> pd.DataFrame:
     """
-    [오전 트리거3] 시총 대비 집중 자금 유입 상위주
-    - 절대적 기준: 최소 거래대금 5억원 이상
-    - 복합 점수: 거래대금비율(50%) + 절대거래대금(30%) + 당일등락률(20%)
-    - 2차 필터링: 상승세 종목만 선별 (시가 대비 현재가 상승)
+    [Morning Trigger 3] Top stocks with concentrated fund inflow vs market cap
+    - Absolute criteria: Minimum trade value 500M KRW or more
+    - Composite score: Trade value ratio (50%) + Absolute trade value (30%) + Intraday change (20%)
+    - Secondary filtering: Select only rising stocks (current price > opening price)
     """
-    logger.info("시총 대비 집중 자금 유입 상위주 분석 시작")
+    logger.info("Starting analysis of top stocks with concentrated fund inflow vs market cap")
 
-    # 방어 코드 1: 입력 데이터 유효성 검사
+    # Defense code 1: Input data validation
     if snapshot.empty:
-        logger.error("snapshot 데이터가 비어있습니다")
+        logger.error("snapshot data is empty")
         return pd.DataFrame()
 
     if prev_snapshot.empty:
-        logger.error("prev_snapshot 데이터가 비어있습니다")
+        logger.error("prev_snapshot data is empty")
         return pd.DataFrame()
 
     if cap_df.empty:
-        logger.error("cap_df 데이터가 비어있습니다")
+        logger.error("cap_df data is empty")
         return pd.DataFrame()
 
-    # 방어 코드 2: 시가총액 컬럼 존재 확인
+    # Defense code 2: Check market cap column exists
     if '시가총액' not in cap_df.columns:
-        logger.error(f"cap_df에 '시가총액' 컬럼이 없습니다. 실제 컬럼: {list(cap_df.columns)}")
+        logger.error(f"'market cap' column not found in cap_df. Actual columns: {list(cap_df.columns)}")
         return pd.DataFrame()
 
-    logger.info(f"입력 데이터 검증 완료 - snapshot: {len(snapshot)}개, cap_df: {len(cap_df)}개")
+    logger.info(f"Input data validation complete - snapshot: {len(snapshot)} items, cap_df: {len(cap_df)} items")
 
     try:
-        # 시가총액 데이터와 OHLCV 데이터 병합
-        logger.debug("시가총액 데이터 병합 시작")
+        # Merge market cap and OHLCV data
+        logger.debug("Starting market cap data merge")
         merged = snapshot.merge(cap_df[["시가총액"]], left_index=True, right_index=True, how="inner").copy()
-        logger.info(f"데이터 병합 완료: {len(merged)}개 종목")
+        logger.info(f"Data merge complete: {len(merged)} stocks")
 
-        # 방어 코드 3: 병합 후 시가총액 컬럼 재확인
+        # Defense code 3: Recheck market cap column after merge
         if '시가총액' not in merged.columns:
-            logger.error(f"병합 후 '시가총액' 컬럼이 없습니다. 병합 후 컬럼: {list(merged.columns)}")
+            logger.error(f"'market cap' column not found after merge. Post-merge columns: {list(merged.columns)}")
             return pd.DataFrame()
 
-        # 이전 거래일 데이터와 병합
+        # Merge with previous trading day data
         common = merged.index.intersection(prev_snapshot.index)
         if len(common) == 0:
-            logger.error("공통 종목이 없습니다")
+            logger.error("No common stocks")
             return pd.DataFrame()
 
         if len(common) < 50:
-            logger.warning(f"공통 종목이 {len(common)}개로 적습니다. 결과 품질이 낮을 수 있습니다")
+            logger.warning(f"Low number of common stocks ({len(common)}). Result quality may be poor")
 
         merged = merged.loc[common].copy()
         prev = prev_snapshot.loc[common].copy()
-        logger.debug(f"전일 데이터 병합 완료 - 공통 종목: {len(common)}개")
+        logger.debug(f"Previous day data merge complete - Common stocks: {len(common)}")
 
-        # 절대적 기준 적용 (거래대금 100억 이상으로 상향)
-        logger.debug("절대적 기준 필터링 시작")
+        # Apply absolute criteria (raised to 10B KRW trade value)
+        logger.debug("Starting absolute criteria filtering")
         merged = apply_absolute_filters(merged, min_value=10000000000)
         if merged.empty:
-            logger.warning("절대적 기준 필터링 후 종목이 없습니다")
+            logger.warning("No stocks after absolute criteria filtering")
             return pd.DataFrame()
 
-        logger.info(f"필터링 완료: {len(merged)}개 종목")
+        logger.info(f"Filtering complete: {len(merged)} stocks")
 
-        # 방어 코드 4: 필수 컬럼 재확인
+        # Defense code 4: Recheck required columns
         required_columns = ['Amount', '시가총액', 'Close', 'Open']
         missing_columns = [col for col in required_columns if col not in merged.columns]
         if missing_columns:
-            logger.error(f"필수 컬럼이 없습니다: {missing_columns}")
+            logger.error(f"Missing required columns: {missing_columns}")
             return pd.DataFrame()
 
-        # 거래대금/시가총액 비율 계산
-        logger.debug("거래대금비율 계산 시작")
-        merged["거래대금비율"] = (merged["Amount"] / merged["시가총액"]) * 100
+        # Calculate trade value / market cap ratio
+        logger.debug("Starting trade value ratio calculation")
+        merged["trade_value_ratio"] = (merged["Amount"] / merged["시가총액"]) * 100
 
-        # 두 가지 등락률 계산
-        merged["장중등락률"] = (merged["Close"] / merged["Open"] - 1) * 100  # 시가 대비 현재가
-        merged["전일대비등락률"] = ((merged["Close"] - prev["Close"]) / prev["Close"]) * 100  # 증권사 앱과 동일
-        merged["상승여부"] = merged["Close"] > merged["Open"]
+        # Calculate two types of change rates
+        merged["intraday_change_rate"] = (merged["Close"] / merged["Open"] - 1) * 100  # Current vs opening price
+        merged["prev_day_change_rate"] = ((merged["Close"] - prev["Close"]) / prev["Close"]) * 100  # Same as brokerage app
+        merged["is_rising"] = merged["Close"] > merged["Open"]
 
-        # v1.16.6: 등락률 상한선 (20% 이하, 고정 손절폭으로 급등주도 진입 가능)
-        merged = merged[merged["전일대비등락률"] <= 20.0]
+        # v1.16.6: Change rate upper limit (20% or less, surge stocks can enter with fixed stop-loss)
+        merged = merged[merged["prev_day_change_rate"] <= 20.0]
         if merged.empty:
-            logger.warning("등락률 상한선 필터링 후 종목이 없습니다")
+            logger.warning("No stocks after change rate upper limit filtering")
             return pd.DataFrame()
 
-        # 시총 필터링 - 최소 5000억원 이상 종목 (v1.16.6: 기회 풀 확대)
+        # Market cap filtering - minimum 500B KRW (v1.16.6: expanded opportunity pool)
         merged = merged[merged["시가총액"] >= 500000000000]
         if merged.empty:
-            logger.warning("시총 필터링 후 종목이 없습니다")
+            logger.warning("No stocks after market cap filtering")
             return pd.DataFrame()
 
-        logger.debug(f"시총 필터링 완료 - 남은 종목: {len(merged)}개")
+        logger.debug(f"Market cap filtering complete - Remaining stocks: {len(merged)}")
 
-        # 복합 점수 계산
+        # Calculate composite score
         if not merged.empty:
-            # 각 지표별 정규화
-            for col in ["거래대금비율", "Amount", "장중등락률"]:
+            # Normalize each indicator
+            for col in ["trade_value_ratio", "Amount", "intraday_change_rate"]:
                 col_max = merged[col].max()
                 col_min = merged[col].min()
                 col_range = col_max - col_min if col_max > col_min else 1
                 merged[f"{col}_norm"] = (merged[col] - col_min) / col_range
 
-            # 복합 점수 계산
-            merged["복합점수"] = (
-                    merged["거래대금비율_norm"] * 0.5 +
+            # Calculate composite score
+            merged["composite_score"] = (
+                    merged["trade_value_ratio_norm"] * 0.5 +
                     merged["Amount_norm"] * 0.3 +
-                    merged["장중등락률_norm"] * 0.2
+                    merged["intraday_change_rate_norm"] * 0.2
             )
 
-            # 상위 종목 선별
-            candidates = merged.sort_values("복합점수", ascending=False).head(top_n)
+            # Select top stocks
+            candidates = merged.sort_values("composite_score", ascending=False).head(top_n)
         else:
             candidates = merged
 
-        # 2차 필터링: 상승세 종목만 선별
-        result = candidates[candidates["상승여부"] == True].copy()
+        # Secondary filtering: Select only rising stocks
+        result = candidates[candidates["is_rising"] == True].copy()
 
         if result.empty:
-            logger.info("조건 충족 종목 없음")
+            logger.info("No stocks meeting criteria")
             return pd.DataFrame()
 
-        logger.info(f"분석 완료: {len(result)}개 종목 선별")
-        return enhance_dataframe(result.sort_values("복합점수", ascending=False).head(10))
+        logger.info(f"Analysis complete: {len(result)} stocks selected")
+        return enhance_dataframe(result.sort_values("composite_score", ascending=False).head(10))
 
     except Exception as e:
-        logger.error(f"함수 실행 중 예외 발생: {e}")
+        logger.error(f"Exception occurred during function execution: {e}")
         import traceback
-        logger.debug(f"상세 에러:\n{traceback.format_exc()}")
+        logger.debug(f"Detailed error:\n{traceback.format_exc()}")
         return pd.DataFrame()
 
-# --- 오후 트리거 함수 (장 마감 스냅샷 기준) ---
+# --- Afternoon trigger functions (based on market close snapshot) ---
 def trigger_afternoon_daily_rise_top(trade_date: str, snapshot: pd.DataFrame, prev_snapshot: pd.DataFrame, cap_df: pd.DataFrame = None, top_n: int = 15) -> pd.DataFrame:
     """
-    [오후 트리거1] 일중 상승률 상위주
-    - 절대적 기준: 최소 거래대금 10억원 이상
-    - 복합 점수: 일중상승률(60%) + 거래대금(40%)
-    - 추가 필터: 등락률 3% 이상
-    - 동전주 필터: 시가총액 500억원 이상
+    [Afternoon Trigger 1] Top intraday rise stocks
+    - Absolute criteria: Minimum trade value 1B KRW or more
+    - Composite score: Intraday rise (60%) + Trade value (40%)
+    - Additional filter: Change rate 3% or more
+    - Penny stock filter: Market cap 50B KRW or more
     """
-    logger.debug("trigger_afternoon_daily_rise_top 시작")
+    logger.debug("trigger_afternoon_daily_rise_top started")
 
-    # 이전 거래일 데이터 연결
+    # Connect previous trading day data
     common = snapshot.index.intersection(prev_snapshot.index)
     snap = snapshot.loc[common].copy()
     prev = prev_snapshot.loc[common].copy()
-    
-    # 시가총액 데이터 병합 및 필터링 (v1.16.6: 5000억 이상으로 조정)
+
+    # Merge and filter market cap data (v1.16.6: adjusted to 500B or more)
     if cap_df is not None and not cap_df.empty:
         snap = snap.merge(cap_df[["시가총액"]], left_index=True, right_index=True, how="inner")
-        # 시가총액 5000억원 이상만 선별 (v1.16.6: 기회 풀 확대, 518개 종목)
+        # Select stocks with market cap 500B KRW or more (v1.16.6: expanded opportunity pool, 518 stocks)
         snap = snap[snap["시가총액"] >= 500000000000]
-        logger.debug(f"시가총액 필터링 후 종목 수: {len(snap)}")
+        logger.debug(f"Stock count after market cap filtering: {len(snap)}")
         if snap.empty:
-            logger.warning("시가총액 필터링 후 종목이 없습니다")
+            logger.warning("No stocks after market cap filtering")
             return pd.DataFrame()
 
-    # 절대적 기준 적용 (거래대금 100억 이상으로 상향)
+    # Apply absolute criteria (raised to 10B KRW trade value)
     snap = apply_absolute_filters(snap.copy(), min_value=10000000000)
 
-    # 두 가지 등락률 계산
-    snap["장중등락률"] = (snap["Close"] / snap["Open"] - 1) * 100  # 시가 대비 현재가
-    snap["전일대비등락률"] = ((snap["Close"] - prev["Close"]) / prev["Close"]) * 100  # 증권사 앱과 동일
+    # Calculate two types of change rates
+    snap["intraday_change_rate"] = (snap["Close"] / snap["Open"] - 1) * 100  # Current vs opening price
+    snap["prev_day_change_rate"] = ((snap["Close"] - prev["Close"]) / prev["Close"]) * 100  # Same as brokerage app
 
-    # 등락률 필터: 3% 이상 20% 이하 (v1.16.6: 급등주 진입 가능)
-    snap = snap[(snap["전일대비등락률"] >= 3.0) & (snap["전일대비등락률"] <= 15.0)]
+    # Change rate filter: 3% or more, 20% or less (v1.16.6: surge stocks can enter)
+    snap = snap[(snap["prev_day_change_rate"] >= 3.0) & (snap["prev_day_change_rate"] <= 15.0)]
 
     if snap.empty:
-        logger.debug("trigger_afternoon_daily_rise_top: 조건 충족 종목 없음")
+        logger.debug("trigger_afternoon_daily_rise_top: No stocks meeting criteria")
         return pd.DataFrame()
 
-    # 복합 점수 계산
-    scored = normalize_and_score(snap, "장중등락률", "Amount", 0.6, 0.4)
+    # Calculate composite score
+    scored = normalize_and_score(snap, "intraday_change_rate", "Amount", 0.6, 0.4)
 
-    # 상위 종목 선별
+    # Select top stocks
     result = scored.head(top_n).copy()
 
-    logger.debug(f"일중 상승률 상위 포착 종목 수: {len(result)}")
+    logger.debug(f"Intraday rise top stocks detected: {len(result)}")
     return enhance_dataframe(result.head(10))
 
 def trigger_afternoon_closing_strength(trade_date: str, snapshot: pd.DataFrame, prev_snapshot: pd.DataFrame, cap_df: pd.DataFrame = None, top_n: int = 15) -> pd.DataFrame:
     """
-    [오후 트리거2] 마감 강도 상위주
-    - 절대적 기준: 최소 거래대금 5억원 이상 + 전일 대비 거래량 증가
-    - 복합 점수: 마감강도(50%) + 거래량증가율(30%) + 거래대금(20%)
-    - 2차 필터링: 상승세 종목만 선별 (시가 대비 종가 상승)
-    - 동전주 필터: 시가총액 500억원 이상
+    [Afternoon Trigger 2] Top closing strength stocks
+    - Absolute criteria: Minimum trade value 500M KRW + volume increase vs previous day
+    - Composite score: Closing strength (50%) + Volume increase rate (30%) + Trade value (20%)
+    - Secondary filtering: Select only rising stocks (close > open)
+    - Penny stock filter: Market cap 50B KRW or more
     """
-    logger.debug("trigger_afternoon_closing_strength 시작")
+    logger.debug("trigger_afternoon_closing_strength started")
     common = snapshot.index.intersection(prev_snapshot.index)
     snap = snapshot.loc[common].copy()
     prev = prev_snapshot.loc[common].copy()
-    
-    # 시가총액 데이터 병합 및 필터링 (v1.16.6: 5000억 이상으로 조정)
+
+    # Merge and filter market cap data (v1.16.6: adjusted to 500B or more)
     if cap_df is not None and not cap_df.empty:
         snap = snap.merge(cap_df[["시가총액"]], left_index=True, right_index=True, how="inner")
-        # 시가총액 5000억원 이상만 선별 (v1.16.6: 기회 풀 확대, 518개 종목)
+        # Select stocks with market cap 500B KRW or more (v1.16.6: expanded opportunity pool, 518 stocks)
         snap = snap[snap["시가총액"] >= 500000000000]
-        logger.debug(f"시가총액 필터링 후 종목 수: {len(snap)}")
+        logger.debug(f"Stock count after market cap filtering: {len(snap)}")
         if snap.empty:
-            logger.warning("시가총액 필터링 후 종목이 없습니다")
+            logger.warning("No stocks after market cap filtering")
             return pd.DataFrame()
 
-    # 절대적 기준 적용 (거래대금 100억 이상으로 상향)
+    # Apply absolute criteria (raised to 10B KRW trade value)
     snap = apply_absolute_filters(snap, min_value=10000000000)
 
-    # 마감 강도 계산 (종가가 고가에 가까울수록 1에 가까움)
-    snap["마감강도"] = 0.0  # 기본값 설정
-    valid_range = (snap["High"] != snap["Low"])  # 0으로 나누기 방지
-    snap.loc[valid_range, "마감강도"] = (snap.loc[valid_range, "Close"] - snap.loc[valid_range, "Low"]) / (snap.loc[valid_range, "High"] - snap.loc[valid_range, "Low"])
+    # Calculate closing strength (closer to high = closer to 1)
+    snap["closing_strength"] = 0.0  # Set default value
+    valid_range = (snap["High"] != snap["Low"])  # Prevent division by zero
+    snap.loc[valid_range, "closing_strength"] = (snap.loc[valid_range, "Close"] - snap.loc[valid_range, "Low"]) / (snap.loc[valid_range, "High"] - snap.loc[valid_range, "Low"])
 
-    # 거래량 증가 여부 계산
-    snap["거래량증가율"] = (snap["Volume"] / prev["Volume"].replace(0, np.nan) - 1) * 100
+    # Calculate volume increase
+    snap["volume_increase_rate"] = (snap["Volume"] / prev["Volume"].replace(0, np.nan) - 1) * 100
 
-    # 두 가지 등락률 계산
-    snap["장중등락률"] = (snap["Close"] / snap["Open"] - 1) * 100  # 시가 대비 현재가
-    snap["전일대비등락률"] = ((snap["Close"] - prev["Close"]) / prev["Close"]) * 100  # 증권사 앱과 동일
+    # Calculate two types of change rates
+    snap["intraday_change_rate"] = (snap["Close"] / snap["Open"] - 1) * 100  # Current vs opening price
+    snap["prev_day_change_rate"] = ((snap["Close"] - prev["Close"]) / prev["Close"]) * 100  # Same as brokerage app
 
-    # v1.16.7: 등락률 상한선 (20% 이하, 상한가 종목 제외)
-    snap = snap[snap["전일대비등락률"] <= 20.0]
+    # v1.16.7: Change rate upper limit (20% or less, exclude limit-up stocks)
+    snap = snap[snap["prev_day_change_rate"] <= 20.0]
     if snap.empty:
-        logger.debug("trigger_afternoon_closing_strength: 등락률 필터링 후 종목 없음")
+        logger.debug("trigger_afternoon_closing_strength: No stocks after change rate filtering")
         return pd.DataFrame()
 
-    snap["거래량증가"] = (snap["Volume"] - prev["Volume"].replace(0, np.nan)) > 0
-    snap["상승여부"] = snap["Close"] > snap["Open"]
+    snap["volume_increased"] = (snap["Volume"] - prev["Volume"].replace(0, np.nan)) > 0
+    snap["is_rising"] = snap["Close"] > snap["Open"]
 
-    # 1차 필터링: 거래량 증가 종목만 선별
-    candidates = snap[snap["거래량증가"] == True].copy()
+    # Primary filtering: Select only stocks with volume increase
+    candidates = snap[snap["volume_increased"] == True].copy()
 
-    # 복합 점수 계산
+    # Calculate composite score
     if not candidates.empty:
-        # 각 지표별 정규화
-        for col in ["마감강도", "거래량증가율", "Amount"]:
+        # Normalize each indicator
+        for col in ["closing_strength", "volume_increase_rate", "Amount"]:
             col_max = candidates[col].max()
             col_min = candidates[col].min()
             col_range = col_max - col_min if col_max > col_min else 1
             candidates[f"{col}_norm"] = (candidates[col] - col_min) / col_range
 
-        # 복합 점수 계산
-        candidates["복합점수"] = (
-                candidates["마감강도_norm"] * 0.5 +
-                candidates["거래량증가율_norm"] * 0.3 +
+        # Calculate composite score
+        candidates["composite_score"] = (
+                candidates["closing_strength_norm"] * 0.5 +
+                candidates["volume_increase_rate_norm"] * 0.3 +
                 candidates["Amount_norm"] * 0.2
         )
 
-        # 점수 기준 상위 종목 선정
-        candidates = candidates.sort_values("복합점수", ascending=False).head(top_n)
+        # Select top stocks by score
+        candidates = candidates.sort_values("composite_score", ascending=False).head(top_n)
 
-    # 2차 필터링: 상승세 종목만 선별
-    result = candidates[candidates["상승여부"] == True].copy()
+    # Secondary filtering: Select only rising stocks
+    result = candidates[candidates["is_rising"] == True].copy()
 
     if result.empty:
-        logger.debug("trigger_afternoon_closing_strength: 조건 충족 종목 없음")
+        logger.debug("trigger_afternoon_closing_strength: No stocks meeting criteria")
         return pd.DataFrame()
 
-    logger.debug(f"마감 강도 상위 포착 종목 수: {len(result)}")
-    return enhance_dataframe(result.sort_values("복합점수", ascending=False).head(10))
+    logger.debug(f"Closing strength top stocks detected: {len(result)}")
+    return enhance_dataframe(result.sort_values("composite_score", ascending=False).head(10))
 
 def trigger_afternoon_volume_surge_flat(trade_date: str, snapshot: pd.DataFrame, prev_snapshot: pd.DataFrame, cap_df: pd.DataFrame = None, top_n: int = 20) -> pd.DataFrame:
     """
-    [오후 트리거3] 거래량 증가 상위 횡보주
-    - 절대적 기준: 최소 거래대금 5억원 이상 + 시장 평균 대비 거래량
-    - 복합 점수: 거래량증가율(60%) + 거래대금(40%)
-    - 2차 필터링: 등락률이 ±5% 이내인 횡보 종목만 선별
-    - 동전주 필터: 시가총액 500억원 이상
+    [Afternoon Trigger 3] Top volume increase sideways stocks
+    - Absolute criteria: Minimum trade value 500M KRW + volume vs market average
+    - Composite score: Volume increase rate (60%) + Trade value (40%)
+    - Secondary filtering: Select only sideways stocks with change rate within ±5%
+    - Penny stock filter: Market cap 50B KRW or more
     """
-    logger.debug("trigger_afternoon_volume_surge_flat 시작")
+    logger.debug("trigger_afternoon_volume_surge_flat started")
     common = snapshot.index.intersection(prev_snapshot.index)
     snap = snapshot.loc[common].copy()
     prev = prev_snapshot.loc[common].copy()
-    
-    # 시가총액 데이터 병합 및 필터링 (v1.16.6: 5000억 이상으로 조정)
+
+    # Merge and filter market cap data (v1.16.6: adjusted to 500B or more)
     if cap_df is not None and not cap_df.empty:
         snap = snap.merge(cap_df[["시가총액"]], left_index=True, right_index=True, how="inner")
-        # 시가총액 5000억원 이상만 선별 (v1.16.6: 기회 풀 확대, 518개 종목)
+        # Select stocks with market cap 500B KRW or more (v1.16.6: expanded opportunity pool, 518 stocks)
         snap = snap[snap["시가총액"] >= 500000000000]
-        logger.debug(f"시가총액 필터링 후 종목 수: {len(snap)}")
+        logger.debug(f"Stock count after market cap filtering: {len(snap)}")
         if snap.empty:
-            logger.warning("시가총액 필터링 후 종목이 없습니다")
+            logger.warning("No stocks after market cap filtering")
             return pd.DataFrame()
 
-    # 절대적 기준 적용 (거래대금 100억 이상으로 상향)
+    # Apply absolute criteria (raised to 10B KRW trade value)
     snap = apply_absolute_filters(snap, min_value=10000000000)
 
-    # 거래량 증가율 계산
-    snap["거래량증가율"] = (snap["Volume"] / prev["Volume"].replace(0, np.nan) - 1) * 100
+    # Calculate volume increase rate
+    snap["volume_increase_rate"] = (snap["Volume"] / prev["Volume"].replace(0, np.nan) - 1) * 100
 
-    # 두 가지 등락률 계산
-    snap["장중등락률"] = (snap["Close"] / snap["Open"] - 1) * 100  # 시가 대비 현재가
-    snap["전일대비등락률"] = ((snap["Close"] - prev["Close"]) / prev["Close"]) * 100  # 증권사 앱과 동일
+    # Calculate two types of change rates
+    snap["intraday_change_rate"] = (snap["Close"] / snap["Open"] - 1) * 100  # Current vs opening price
+    snap["prev_day_change_rate"] = ((snap["Close"] - prev["Close"]) / prev["Close"]) * 100  # Same as brokerage app
 
-    # 횡보주 여부 판단 (등락률 ±5% 이내) - v1.16.6: 전일대비등락률 기준으로 변경
-    snap["횡보여부"] = (snap["전일대비등락률"].abs() <= 5)
+    # Determine sideways stocks (change rate within ±5%) - v1.16.6: Changed to previous day change rate basis
+    snap["is_sideways"] = (snap["prev_day_change_rate"].abs() <= 5)
 
-    # 추가 필터: 전일 대비 거래량 50% 이상 증가한 종목만
-    snap = snap[snap["거래량증가율"] >= 50]
+    # Additional filter: Only stocks with 50% or more volume increase vs previous day
+    snap = snap[snap["volume_increase_rate"] >= 50]
 
     if snap.empty:
-        logger.debug("trigger_afternoon_volume_surge_flat: 조건 충족 종목 없음")
+        logger.debug("trigger_afternoon_volume_surge_flat: No stocks meeting criteria")
         return pd.DataFrame()
 
-    # 복합 점수 계산
-    scored = normalize_and_score(snap, "거래량증가율", "Amount", 0.6, 0.4)
+    # Calculate composite score
+    scored = normalize_and_score(snap, "volume_increase_rate", "Amount", 0.6, 0.4)
 
-    # 1차 필터링: 복합 점수 기준 상위 종목
+    # Primary filtering: Top stocks by composite score
     candidates = scored.head(top_n)
 
-    # 2차 필터링: 횡보 종목만 선별
-    result = candidates[candidates["횡보여부"] == True].copy()
+    # Secondary filtering: Select only sideways stocks
+    result = candidates[candidates["is_sideways"] == True].copy()
 
     if result.empty:
-        logger.debug("trigger_afternoon_volume_surge_flat: 조건 충족 종목 없음")
+        logger.debug("trigger_afternoon_volume_surge_flat: No stocks meeting criteria")
         return pd.DataFrame()
 
-    # 디버깅용 로그 추가
+    # Add debugging logs
     for ticker in result.index[:3]:
-        logger.debug(f"횡보주 디버깅 - {ticker}: 거래량증가율 {result.loc[ticker, '거래량증가율']:.2f}%, "
-                     f"장중등락률 {result.loc[ticker, '장중등락률']:.2f}%, 전일대비등락률 {result.loc[ticker, '전일대비등락률']:.2f}%, "
-                     f"거래량 {result.loc[ticker, 'Volume']:,}주, 전일거래량 {prev.loc[ticker, 'Volume']:,}주")
+        logger.debug(f"Sideways stock debug - {ticker}: Volume increase {result.loc[ticker, 'volume_increase_rate']:.2f}%, "
+                     f"Intraday change {result.loc[ticker, 'intraday_change_rate']:.2f}%, Previous day change {result.loc[ticker, 'prev_day_change_rate']:.2f}%, "
+                     f"Volume {result.loc[ticker, 'Volume']:,} shares, Previous volume {prev.loc[ticker, 'Volume']:,} shares")
 
-    logger.debug(f"거래량 증가 횡보 포착 종목 수: {len(result)}")
-    return enhance_dataframe(result.sort_values("복합점수", ascending=False).head(10))
+    logger.debug(f"Volume increase sideways stocks detected: {len(result)}")
+    return enhance_dataframe(result.sort_values("composite_score", ascending=False).head(10))
 
-# --- 종합 선별 함수 ---
+# --- Comprehensive selection function ---
 def select_final_tickers(triggers: dict, trade_date: str = None, use_hybrid: bool = True, lookback_days: int = 10) -> dict:
     """
-    각 트리거에서 선별된 종목들을 종합하여 최종 종목을 선택합니다.
+    Consolidate stocks selected from each trigger and choose final stocks.
 
-    하이브리드 방식 (use_hybrid=True):
-    1. 각 트리거에서 상위 10개 후보 수집
-    2. 모든 후보에 대해 에이전트 기준 점수 계산 (10~20일 데이터 분석)
-    3. 복합점수(40%) + 에이전트점수(60%)로 최종 점수 계산
-    4. 각 트리거에서 최종 점수 1위 선택
+    Hybrid method (use_hybrid=True):
+    1. Collect top 10 candidates from each trigger
+    2. Calculate agent criteria scores for all candidates (analyze 10-20 day data)
+    3. Calculate final score with composite score (40%) + agent score (60%)
+    4. Select rank 1 by final score from each trigger
 
     Args:
-        triggers: 트리거별 결과 DataFrame 딕셔너리
-        trade_date: 기준 거래일 (하이브리드 모드에서 필수)
-        use_hybrid: 하이브리드 선별 사용 여부 (기본값: True)
-        lookback_days: 에이전트 점수 계산에 사용할 과거 영업일 수 (기본값: 10)
+        triggers: Dictionary of DataFrame results by trigger
+        trade_date: Reference trading date (required in hybrid mode)
+        use_hybrid: Whether to use hybrid selection (default: True)
+        lookback_days: Number of past business days for agent score calculation (default: 10)
 
     Returns:
-        최종 선별된 종목 딕셔너리
+        Dictionary of finally selected stocks
     """
     final_result = {}
 
-    # 1. 각 트리거에서 후보 수집
-    trigger_candidates = {}  # 트리거명 -> DataFrame
-    all_tickers = set()  # 중복 체크용
+    # 1. Collect candidates from each trigger
+    trigger_candidates = {}  # Trigger name -> DataFrame
+    all_tickers = set()  # For duplicate checking
 
     for name, df in triggers.items():
         if not df.empty:
-            # 각 트리거에서 최대 10개 후보 (이미 head(10)으로 반환됨)
+            # Max 10 candidates from each trigger (already returned with head(10))
             candidates = df.copy()
             trigger_candidates[name] = candidates
             all_tickers.update(candidates.index.tolist())
 
     if not trigger_candidates:
-        logger.warning("모든 트리거에서 후보가 없습니다.")
+        logger.warning("No candidates from all triggers.")
         return final_result
 
-    # 2. 하이브리드 모드: 에이전트 점수 계산
+    # 2. Hybrid mode: Calculate agent scores
     if use_hybrid and trade_date:
-        logger.info(f"하이브리드 선별 모드 - {lookback_days}일 데이터로 에이전트 점수 계산")
+        logger.info(f"Hybrid selection mode - Calculate agent scores with {lookback_days}-day data")
 
         for name, candidates_df in trigger_candidates.items():
-            # v1.16.6: 트리거 유형별 에이전트 점수 계산
+            # v1.16.6: Calculate agent scores by trigger type
             scored_df = score_candidates_by_agent_criteria(candidates_df, trade_date, lookback_days, trigger_type=name)
 
-            # v1.16.6: 최종 점수 계산: 복합점수(30%) + 에이전트점수(70%)
-            # 에이전트 점수 비중 상향으로 에이전트가 실제 승인할 가능성이 높은 종목 우선 선별
-            if "복합점수" in scored_df.columns and "에이전트점수" in scored_df.columns:
-                # 복합점수 정규화 (0~1)
-                cp_max = scored_df["복합점수"].max()
-                cp_min = scored_df["복합점수"].min()
+            # v1.16.6: Calculate final score: composite score (30%) + agent score (70%)
+            # Increase agent score weight to prioritize stocks likely to be approved by agents
+            if "composite_score" in scored_df.columns and "agent_fit_score" in scored_df.columns:
+                # Normalize composite score (0~1)
+                cp_max = scored_df["composite_score"].max()
+                cp_min = scored_df["composite_score"].min()
                 cp_range = cp_max - cp_min if cp_max > cp_min else 1
-                scored_df["복합점수_norm"] = (scored_df["복합점수"] - cp_min) / cp_range
+                scored_df["composite_score_norm"] = (scored_df["composite_score"] - cp_min) / cp_range
 
-                # 최종 점수 계산 (v1.16.6: 가중치 조정)
-                scored_df["최종점수"] = (
-                    scored_df["복합점수_norm"] * 0.3 +
-                    scored_df["에이전트점수"] * 0.7
+                # Calculate final score (v1.16.6: adjusted weights)
+                scored_df["final_score"] = (
+                    scored_df["composite_score_norm"] * 0.3 +
+                    scored_df["agent_fit_score"] * 0.7
                 )
 
-                # 최종 점수 기준 정렬
-                scored_df = scored_df.sort_values("최종점수", ascending=False)
+                # Sort by final score
+                scored_df = scored_df.sort_values("final_score", ascending=False)
 
-                # 로깅
-                logger.info(f"[{name}] 하이브리드 점수 계산 완료:")
+                # Logging
+                logger.info(f"[{name}] Hybrid score calculation complete:")
                 for ticker in scored_df.index[:3]:
-                    logger.info(f"  - {ticker} ({scored_df.loc[ticker, '종목명'] if '종목명' in scored_df.columns else ''}): "
-                               f"복합={scored_df.loc[ticker, '복합점수']:.3f}, "
-                               f"에이전트={scored_df.loc[ticker, '에이전트점수']:.3f}, "
-                               f"최종={scored_df.loc[ticker, '최종점수']:.3f}, "
-                               f"손익비={scored_df.loc[ticker, '손익비']:.2f}, "
-                               f"손절폭={scored_df.loc[ticker, '손절폭']*100:.1f}%")
+                    logger.info(f"  - {ticker} ({scored_df.loc[ticker, 'stock_name'] if 'stock_name' in scored_df.columns else ''}): "
+                               f"Composite={scored_df.loc[ticker, 'composite_score']:.3f}, "
+                               f"Agent={scored_df.loc[ticker, 'agent_fit_score']:.3f}, "
+                               f"Final={scored_df.loc[ticker, 'final_score']:.3f}, "
+                               f"Risk-reward={scored_df.loc[ticker, 'risk_reward_ratio']:.2f}, "
+                               f"Stop-loss={scored_df.loc[ticker, 'stop_loss_pct']*100:.1f}%")
 
             trigger_candidates[name] = scored_df
 
-    # 3. 최종 종목 선택
+    # 3. Final stock selection
     selected_tickers = set()
-    score_column = "최종점수" if use_hybrid and trade_date else "복합점수"
+    score_column = "final_score" if use_hybrid and trade_date else "composite_score"
 
-    # 각 트리거에서 최상위 종목 1개씩 선택
+    # Select top 1 stock from each trigger
     for name, df in trigger_candidates.items():
         if not df.empty and len(selected_tickers) < 3:
-            # 정렬 컬럼 확인
+            # Check sort column
             if score_column in df.columns:
                 sorted_df = df.sort_values(score_column, ascending=False)
             else:
                 sorted_df = df
 
-            # 중복 제외하고 1위 선택
+            # Select rank 1 excluding duplicates
             for ticker in sorted_df.index:
                 if ticker not in selected_tickers:
                     final_result[name] = sorted_df.loc[[ticker]]
                     selected_tickers.add(ticker)
-                    logger.info(f"[{name}] 최종 선택: {ticker}")
+                    logger.info(f"[{name}] Final selection: {ticker}")
                     break
 
-    # 4. 3개 미만이면 전체 점수 순으로 추가
+    # 4. Add more by overall score if less than 3
     if len(selected_tickers) < 3:
-        # 모든 후보를 점수 순으로 정렬
+        # Sort all candidates by score
         all_candidates = []
         for name, df in trigger_candidates.items():
             for ticker in df.index:
@@ -940,82 +940,82 @@ def select_final_tickers(triggers: dict, trade_date: str = None, use_hybrid: boo
                 else:
                     final_result[trigger_name] = ticker_df
                 selected_tickers.add(ticker)
-                logger.info(f"[{trigger_name}] 추가 선택: {ticker}")
+                logger.info(f"[{trigger_name}] Additional selection: {ticker}")
 
     return final_result
 
-# --- 배치 실행 함수 ---
+# --- Batch execution function ---
 def run_batch(trigger_time: str, log_level: str = "INFO", output_file: str = None):
     """
-    trigger_time: "morning" 또는 "afternoon"
-    log_level: "DEBUG", "INFO", "WARNING", 등 (운영 환경에서는 INFO 추천)
-    output_file: 결과를 저장할 JSON 파일 경로 (선택 사항)
+    trigger_time: "morning" or "afternoon"
+    log_level: "DEBUG", "INFO", "WARNING", etc. (INFO recommended for production)
+    output_file: JSON file path to save results (optional)
     """
     numeric_level = getattr(logging, log_level.upper(), logging.INFO)
     logger.setLevel(numeric_level)
     ch.setLevel(numeric_level)
-    logger.info(f"로그 레벨: {log_level.upper()}")
+    logger.info(f"Log level: {log_level.upper()}")
 
     today_str = datetime.datetime.today().strftime("%Y%m%d")
     trade_date = stock_api.get_nearest_business_day_in_a_week(today_str, prev=True)
-    logger.info(f"배치 기준 거래일: {trade_date}")
+    logger.info(f"Batch reference trading date: {trade_date}")
 
     try:
         snapshot = get_snapshot(trade_date)
     except ValueError as e:
-        logger.error(f"스냅샷 조회 실패: {e}")
+        logger.error(f"Snapshot query failed: {e}")
         trade_date = stock_api.get_nearest_business_day_in_a_week(trade_date, prev=True)
-        logger.info(f"재시도 배치 기준 거래일: {trade_date}")
+        logger.info(f"Retry batch reference trading date: {trade_date}")
         snapshot = get_snapshot(trade_date)
 
     prev_snapshot, prev_date = get_previous_snapshot(trade_date)
-    logger.debug(f"전 거래일: {prev_date}")
+    logger.debug(f"Previous trading date: {prev_date}")
 
     cap_df = get_market_cap_df(trade_date, market="ALL")
-    logger.debug(f"시가총액 데이터 종목 수: {len(cap_df)}")
+    logger.debug(f"Market cap data stock count: {len(cap_df)}")
 
     if trigger_time == "morning":
-        logger.info("=== 오전 배치 실행 ===")
-        # 오전 트리거 실행 - cap_df 전달
+        logger.info("=== Morning batch execution ===")
+        # Execute morning triggers - pass cap_df
         res1 = trigger_morning_volume_surge(trade_date, snapshot, prev_snapshot, cap_df)
         res2 = trigger_morning_gap_up_momentum(trade_date, snapshot, prev_snapshot, cap_df)
         res3 = trigger_morning_value_to_cap_ratio(trade_date, snapshot, prev_snapshot, cap_df)
-        triggers = {"거래량 급증 상위주": res1, "갭 상승 모멘텀 상위주": res2, "시총 대비 집중 자금 유입 상위주": res3}
+        triggers = {"Volume Surge Top": res1, "Gap Up Momentum Top": res2, "Concentrated Fund Inflow vs Market Cap Top": res3}
     elif trigger_time == "afternoon":
-        logger.info("=== 오후 배치 실행 ===")
-        # 오후 트리거 실행 - cap_df 전달
+        logger.info("=== Afternoon batch execution ===")
+        # Execute afternoon triggers - pass cap_df
         res1 = trigger_afternoon_daily_rise_top(trade_date, snapshot, prev_snapshot, cap_df)
         res2 = trigger_afternoon_closing_strength(trade_date, snapshot, prev_snapshot, cap_df)
         res3 = trigger_afternoon_volume_surge_flat(trade_date, snapshot, prev_snapshot, cap_df)
-        triggers = {"일중 상승률 상위주": res1, "마감 강도 상위주": res2, "거래량 증가 상위 횡보주": res3}
+        triggers = {"Intraday Rise Top": res1, "Closing Strength Top": res2, "Volume Increase Sideways Top": res3}
     else:
-        logger.error("잘못된 trigger_time 값입니다. 'morning' 또는 'afternoon'를 입력하세요.")
+        logger.error("Invalid trigger_time value. Please enter 'morning' or 'afternoon'.")
         return
 
-    # 각 트리거별 결과 로깅
+    # Log results by trigger
     for name, df in triggers.items():
         if df.empty:
-            logger.info(f"{name}: 조건에 부합하는 종목이 없습니다.")
+            logger.info(f"{name}: No stocks meet the criteria.")
         else:
-            logger.info(f"{name} 포착 종목 ({len(df)}개):")
+            logger.info(f"{name} detected stocks ({len(df)} stocks):")
             for ticker in df.index:
-                종목명 = df.loc[ticker, "종목명"] if "종목명" in df.columns else ""
-                logger.info(f"- {ticker} ({종목명})")
+                stock_name = df.loc[ticker, "stock_name"] if "stock_name" in df.columns else ""
+                logger.info(f"- {ticker} ({stock_name})")
 
-            # 상세 정보는 디버그 레벨에서만 출력
-            logger.debug(f"상세 정보:\n{df}\n{'-'*40}")
+            # Output detailed information only at debug level
+            logger.debug(f"Detailed information:\n{df}\n{'-'*40}")
 
-    # 최종 선별 결과
+    # Final selection results
     final_results = select_final_tickers(triggers, trade_date=trade_date)
 
-    # 결과를 JSON으로 저장 (요청된 경우)
+    # Save results as JSON (if requested)
     if output_file:
         import json
 
-        # 선별된 종목 상세 정보 포함
+        # Include detailed information of selected stocks
         output_data = {}
 
-        # 트리거 타입별 처리
+        # Process by trigger type
         for trigger_type, stocks_df in final_results.items():
             if not stocks_df.empty:
                 if trigger_type not in output_data:
@@ -1024,37 +1024,37 @@ def run_batch(trigger_time: str, log_level: str = "INFO", output_file: str = Non
                 for ticker in stocks_df.index:
                     stock_info = {
                         "code": ticker,
-                        "name": stocks_df.loc[ticker, "종목명"] if "종목명" in stocks_df.columns else "",
+                        "name": stocks_df.loc[ticker, "stock_name"] if "stock_name" in stocks_df.columns else "",
                         "current_price": float(stocks_df.loc[ticker, "Close"]) if "Close" in stocks_df.columns else 0,
-                        "change_rate": float(stocks_df.loc[ticker, "전일대비등락률"]) if "전일대비등락률" in stocks_df.columns else 0,
+                        "change_rate": float(stocks_df.loc[ticker, "prev_day_change_rate"]) if "prev_day_change_rate" in stocks_df.columns else 0,
                         "volume": int(stocks_df.loc[ticker, "Volume"]) if "Volume" in stocks_df.columns else 0,
                         "trade_value": float(stocks_df.loc[ticker, "Amount"]) if "Amount" in stocks_df.columns else 0,
                     }
 
-                    # 트리거 타입별 특화 데이터 추가
-                    if "거래량증가율" in stocks_df.columns and trigger_type == "거래량 급증 상위주":
-                        stock_info["volume_increase"] = float(stocks_df.loc[ticker, "거래량증가율"])
-                    elif "갭상승률" in stocks_df.columns:
-                        stock_info["gap_rate"] = float(stocks_df.loc[ticker, "갭상승률"])
-                    elif "거래대금비율" in stocks_df.columns:
-                        stock_info["trade_value_ratio"] = float(stocks_df.loc[ticker, "거래대금비율"])
+                    # Add trigger type specific data
+                    if "volume_increase_rate" in stocks_df.columns and trigger_type == "Volume Surge Top":
+                        stock_info["volume_increase"] = float(stocks_df.loc[ticker, "volume_increase_rate"])
+                    elif "gap_up_rate" in stocks_df.columns:
+                        stock_info["gap_rate"] = float(stocks_df.loc[ticker, "gap_up_rate"])
+                    elif "trade_value_ratio" in stocks_df.columns:
+                        stock_info["trade_value_ratio"] = float(stocks_df.loc[ticker, "trade_value_ratio"])
                         stock_info["market_cap"] = float(stocks_df.loc[ticker, "시가총액"])
-                    elif "마감강도" in stocks_df.columns:
-                        stock_info["closing_strength"] = float(stocks_df.loc[ticker, "마감강도"])
+                    elif "closing_strength" in stocks_df.columns:
+                        stock_info["closing_strength"] = float(stocks_df.loc[ticker, "closing_strength"])
 
-                    # 에이전트 점수 정보 추가 (하이브리드 모드)
-                    if "에이전트점수" in stocks_df.columns:
-                        stock_info["agent_fit_score"] = float(stocks_df.loc[ticker, "에이전트점수"])
-                        stock_info["risk_reward_ratio"] = float(stocks_df.loc[ticker, "손익비"]) if "손익비" in stocks_df.columns else 0
-                        stock_info["stop_loss_pct"] = float(stocks_df.loc[ticker, "손절폭"]) * 100 if "손절폭" in stocks_df.columns else 0
-                        stock_info["stop_loss_price"] = float(stocks_df.loc[ticker, "손절가"]) if "손절가" in stocks_df.columns else 0
-                        stock_info["target_price"] = float(stocks_df.loc[ticker, "목표가"]) if "목표가" in stocks_df.columns else 0
-                    if "최종점수" in stocks_df.columns:
-                        stock_info["final_score"] = float(stocks_df.loc[ticker, "최종점수"])
+                    # Add agent score information (hybrid mode)
+                    if "agent_fit_score" in stocks_df.columns:
+                        stock_info["agent_fit_score"] = float(stocks_df.loc[ticker, "agent_fit_score"])
+                        stock_info["risk_reward_ratio"] = float(stocks_df.loc[ticker, "risk_reward_ratio"]) if "risk_reward_ratio" in stocks_df.columns else 0
+                        stock_info["stop_loss_pct"] = float(stocks_df.loc[ticker, "stop_loss_pct"]) * 100 if "stop_loss_pct" in stocks_df.columns else 0
+                        stock_info["stop_loss_price"] = float(stocks_df.loc[ticker, "stop_loss_price"]) if "stop_loss_price" in stocks_df.columns else 0
+                        stock_info["target_price"] = float(stocks_df.loc[ticker, "target_price"]) if "target_price" in stocks_df.columns else 0
+                    if "final_score" in stocks_df.columns:
+                        stock_info["final_score"] = float(stocks_df.loc[ticker, "final_score"])
 
                     output_data[trigger_type].append(stock_info)
 
-        # 실행 시간 및 메타데이터 추가
+        # Add execution time and metadata
         output_data["metadata"] = {
             "run_time": datetime.datetime.now().isoformat(),
             "trigger_mode": trigger_time,
@@ -1063,22 +1063,22 @@ def run_batch(trigger_time: str, log_level: str = "INFO", output_file: str = Non
             "lookback_days": 10
         }
 
-        # JSON 파일 저장
+        # Save JSON file
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(output_data, f, ensure_ascii=False, indent=2)
 
-        logger.info(f"선별 결과가 {output_file}에 저장되었습니다.")
+        logger.info(f"Selection results saved to {output_file}.")
 
     return final_results
 
 if __name__ == "__main__":
-    # 사용법: python trigger_batch.py morning [DEBUG|INFO|...] [--output 파일경로]
+    # Usage: python trigger_batch.py morning [DEBUG|INFO|...] [--output filepath]
     import argparse
 
-    parser = argparse.ArgumentParser(description="트리거 배치 실행")
-    parser.add_argument("mode", help="실행 모드 (morning 또는 afternoon)")
-    parser.add_argument("log_level", nargs="?", default="INFO", help="로깅 레벨")
-    parser.add_argument("--output", help="결과 저장 JSON 파일 경로")
+    parser = argparse.ArgumentParser(description="Execute trigger batch")
+    parser.add_argument("mode", help="Execution mode (morning or afternoon)")
+    parser.add_argument("log_level", nargs="?", default="INFO", help="Logging level")
+    parser.add_argument("--output", help="JSON file path to save results")
 
     args = parser.parse_args()
 

@@ -127,32 +127,32 @@ class JournalManager:
         """Build prompt for retrospective analysis."""
         if self.language == "ko":
             return f"""
-다음 완료된 매매를 복기해주세요:
+Please review the following completed trade:
 
-## 매수 정보
-- 종목: {company_name}({ticker})
-- 매수가: {buy_price:,.0f}원
-- 매수일: {buy_date}
-- 매수 시나리오:
-  - 매수 점수: {scenario_data.get('buy_score', 'N/A')}
-  - 투자 근거: {scenario_data.get('rationale', 'N/A')}
-  - 목표가: {scenario_data.get('target_price', 'N/A')}원
-  - 손절가: {scenario_data.get('stop_loss', 'N/A')}원
-  - 투자 기간: {scenario_data.get('investment_period', 'N/A')}
-  - 섹터: {scenario_data.get('sector', 'N/A')}
-  - 시장 상황: {scenario_data.get('market_condition', 'N/A')}
+## Buy Information
+- Stock: {company_name}({ticker})
+- Buy Price: {buy_price:,.0f} KRW
+- Buy Date: {buy_date}
+- Buy Scenario:
+  - Buy Score: {scenario_data.get('buy_score', 'N/A')}
+  - Rationale: {scenario_data.get('rationale', 'N/A')}
+  - Target Price: {scenario_data.get('target_price', 'N/A')} KRW
+  - Stop Loss: {scenario_data.get('stop_loss', 'N/A')} KRW
+  - Investment Period: {scenario_data.get('investment_period', 'N/A')}
+  - Sector: {scenario_data.get('sector', 'N/A')}
+  - Market Condition: {scenario_data.get('market_condition', 'N/A')}
 
-## 매도 정보
-- 매도가: {sell_price:,.0f}원
-- 수익률: {profit_rate:.2f}%
-- 보유일수: {holding_days}일
-- 매도 사유: {sell_reason}
+## Sell Information
+- Sell Price: {sell_price:,.0f} KRW
+- Profit Rate: {profit_rate:.2f}%
+- Holding Days: {holding_days} days
+- Sell Reason: {sell_reason}
 
-## 분석 요청
-1. kospi_kosdaq 도구로 현재 시장 상황과 해당 종목의 최근 흐름을 확인하세요
-2. 매수 시점과 매도 시점의 상황을 비교 분석하세요
-3. 판단의 적절성을 평가하고 교훈을 추출하세요
-4. 패턴 태그를 부여하세요
+## Analysis Request
+1. Use kospi_kosdaq tools to check current market conditions and stock trends
+2. Compare and analyze buy-time vs sell-time situations
+3. Evaluate decision appropriateness and extract lessons
+4. Assign pattern tags
 """
         else:
             return f"""
@@ -212,7 +212,7 @@ Please review the following completed trade:
                 "judgment_evaluation": {},
                 "lessons": [],
                 "pattern_tags": [],
-                "one_line_summary": "분석 파싱 실패",
+                "one_line_summary": "Analysis parsing failed",
                 "confidence_score": 0.3
             }
 
@@ -223,7 +223,7 @@ Please review the following completed trade:
                 "judgment_evaluation": {},
                 "lessons": [],
                 "pattern_tags": [],
-                "one_line_summary": "분석 파싱 오류",
+                "one_line_summary": "Analysis parsing error",
                 "confidence_score": 0.2
             }
 
@@ -339,7 +339,7 @@ Please review the following completed trade:
             # Universal principles
             principles = self.get_universal_principles()
             if principles:
-                context_parts.append("#### 🎯 핵심 매매 원칙 (모든 거래에 적용)")
+                context_parts.append("#### 🎯 Core Trading Principles (Applied to All Trades)")
                 context_parts.extend(principles)
                 context_parts.append("")
 
@@ -352,14 +352,14 @@ Please review the following completed trade:
             """, (ticker,))
 
             for entry in self.cursor.fetchall():
-                if not context_parts or context_parts[-1] != "#### 동일 종목 과거 거래 이력":
-                    context_parts.append("#### 동일 종목 과거 거래 이력")
+                if not context_parts or context_parts[-1] != "#### Same Stock Trade History":
+                    context_parts.append("#### Same Stock Trade History")
 
                 lessons_str = ""
                 try:
                     lessons = json.loads(entry[5]) if entry[5] else []
                     if lessons:
-                        lessons_str = " / 교훈: " + ", ".join(
+                        lessons_str = " / Lessons: " + ", ".join(
                             [l.get('action', '') for l in lessons[:2] if isinstance(l, dict)]
                         )
                 except:
@@ -367,8 +367,8 @@ Please review the following completed trade:
 
                 profit_emoji = "✅" if entry[2] > 0 else "❌"
                 context_parts.append(
-                    f"- [{entry[7][:10]}] {profit_emoji} 수익률 {entry[2]:.1f}% "
-                    f"(보유 {entry[3]}일) - {entry[4]}{lessons_str}"
+                    f"- [{entry[7][:10]}] {profit_emoji} Return {entry[2]:.1f}% "
+                    f"(held {entry[3]} days) - {entry[4]}{lessons_str}"
                 )
 
             if context_parts and context_parts[-1].startswith("-"):
@@ -383,16 +383,16 @@ Please review the following completed trade:
 
             intuitions = self.cursor.fetchall()
             if intuitions:
-                context_parts.append("#### 축적된 매매 직관")
+                context_parts.append("#### Accumulated Trading Intuitions")
                 for i in intuitions:
                     confidence_bar = "●" * int(i[3] * 5) + "○" * (5 - int(i[3] * 5))
                     context_parts.append(
-                        f"- [{i[0]}] {i[1]} → {i[2]} (신뢰도: {confidence_bar})"
+                        f"- [{i[0]}] {i[1]} → {i[2]} (Confidence: {confidence_bar})"
                     )
                 context_parts.append("")
 
             if context_parts:
-                return "### 📚 과거 매매 경험 참조\n\n" + "\n".join(context_parts)
+                return "### 📚 Past Trading Experience Reference\n\n" + "\n".join(context_parts)
             return ""
 
         except Exception as e:
@@ -417,8 +417,8 @@ Please review the following completed trade:
 
                 text = f"{priority_emoji} **{p[0]}** → {p[1]}"
                 if p[2]:
-                    text += f" (이유: {p[2][:50]}...)" if len(p[2] or '') > 50 else f" (이유: {p[2]})"
-                text += f" [신뢰도: {confidence_bar}, 거래수: {p[5]}]"
+                    text += f" (Reason: {p[2][:50]}...)" if len(p[2] or '') > 50 else f" (Reason: {p[2]})"
+                text += f" [Confidence: {confidence_bar}, Trades: {p[5]}]"
                 result.append(f"- {text}")
 
             return result
@@ -444,13 +444,13 @@ Please review the following completed trade:
                 avg_profit = sum(s[0] for s in same_stock) / len(same_stock)
                 if avg_profit < -5:
                     adjustment -= 1
-                    reasons.append(f"동일 종목 과거 평균 손실 {avg_profit:.1f}%")
+                    reasons.append(f"Same stock historical avg loss {avg_profit:.1f}%")
                 elif avg_profit > 10:
                     adjustment += 1
-                    reasons.append(f"동일 종목 과거 평균 수익 {avg_profit:.1f}%")
+                    reasons.append(f"Same stock historical avg profit {avg_profit:.1f}%")
 
             # Sector performance
-            if sector and sector != "알 수 없음":
+            if sector and sector != "Unknown":
                 self.cursor.execute("""
                     SELECT AVG(profit_rate), COUNT(*)
                     FROM trading_journal WHERE buy_scenario LIKE ?
@@ -460,10 +460,10 @@ Please review the following completed trade:
                 if sector_stats and sector_stats[1] >= 3:
                     if sector_stats[0] < -3:
                         adjustment -= 1
-                        reasons.append(f"{sector} 섹터 평균 손실 {sector_stats[0]:.1f}%")
+                        reasons.append(f"{sector} sector avg loss {sector_stats[0]:.1f}%")
                     elif sector_stats[0] > 5:
                         adjustment += 1
-                        reasons.append(f"{sector} 섹터 평균 수익 {sector_stats[0]:.1f}%")
+                        reasons.append(f"{sector} sector avg profit {sector_stats[0]:.1f}%")
 
             return max(-2, min(2, adjustment)), reasons
 

@@ -1,16 +1,16 @@
 def get_agent_directory(company_name, company_code, reference_date, base_sections, language: str = "ko"):
     """
-    각 섹션별 에이전트 디렉토리를 반환
+    Return agent directory for each section
 
     Args:
-        company_name: 기업명
-        company_code: 종목 코드
-        reference_date: 분석 기준일 (YYYYMMDD)
-        base_sections: 생성할 에이전트 섹션 리스트
+        company_name: Company name
+        company_code: Stock code
+        reference_date: Analysis reference date (YYYYMMDD)
+        base_sections: List of agent sections to create
         language: Language code ("ko" or "en")
 
     Returns:
-        Dict[str, Agent]: 섹션명을 키로 하는 에이전트 딕셔너리
+        Dict[str, Agent]: Agent dictionary with section names as keys
     """
     from cores.agents.stock_price_agents import (
         create_price_volume_analysis_agent,
@@ -31,14 +31,14 @@ def get_agent_directory(company_name, company_code, reference_date, base_section
         create_sell_decision_agent
     )
     from cores.utils import get_wise_report_url
-    
-    # URL 매핑 생성
+
+    # Create URL mapping
     urls = {k: get_wise_report_url(k, company_code) for k in [
-        "기업현황", "기업개요", "재무분석", "투자지표", 
+        "기업현황", "기업개요", "재무분석", "투자지표",
         "컨센서스", "경쟁사분석", "지분현황", "업종분석", "최근리포트"
     ]}
-    
-    # 날짜 계산 (input token 절감을 위해 1년으로 제한 - 매매 분석에 충분)
+
+    # Date calculation (limited to 1 year to reduce input tokens - sufficient for trading analysis)
     from datetime import datetime, timedelta
     ref_date = datetime.strptime(reference_date, "%Y%m%d")
     max_years = 1

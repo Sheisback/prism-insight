@@ -1,5 +1,5 @@
 from dotenv import load_dotenv
-load_dotenv()  # .env 파일에서 환경변수 로드
+load_dotenv()  # Load environment variables from .env file
 
 import numpy as np
 from scipy import stats
@@ -256,7 +256,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
         return daily_volatility * 100  # Convert to percentage
 
     async def _get_stock_volatility(self, ticker):
-        """개별 종목의 변동성 계산"""
+        """Calculate individual stock volatility"""
         try:
             # Use cached volatility if available
             if ticker in self.volatility_table:
@@ -272,7 +272,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
             df = get_market_ohlcv_by_date(start_date, end_date, ticker)
 
             if df.empty:
-                logger.warning(f"{ticker} Cannot fetch price data")
+                logger.warning(f"{ticker} Cannot fetch price data - using default volatility")
                 return 15.0  # Default volatility (15%)
 
             # Calculate standard deviation of daily returns
@@ -289,7 +289,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
             return 15.0  # Return default volatility on error
 
     async def _dynamic_stop_loss(self, ticker, buy_price):
-        """종목별 변동성에 기반한 동적 손절 가격 계산"""
+        """Calculate dynamic stop-loss price based on individual stock volatility"""
         try:
             # Get stock volatility
             volatility = await self._get_stock_volatility(ticker)
@@ -313,7 +313,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
             # Calculate stop-loss price
             stop_loss = buy_price * (1 - adjusted_stop_loss_pct/100)
 
-            logger.info(f"{ticker} Dynamic stop-loss calculated: {stop_loss:,.0f} KRW (volatility: {volatility:.2f}%, stop-loss width: {adjusted_stop_loss_pct:.2f}%)")
+            logger.info(f"{ticker} Dynamic stop-loss calculated: {stop_loss:,.0f} KRW (volatility: {volatility:.2f}%, stop-loss range: {adjusted_stop_loss_pct:.2f}%)")
 
             return stop_loss
 
@@ -392,7 +392,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                     continue
 
                 # Skip if already holding this stock (no telegram message for already held stocks)
-                if analysis_result.get("decision") == "보유 중":
+                if analysis_result.get("decision") == "Currently Held":
                     logger.info(f"Skipping stock already in holdings: {analysis_result.get('ticker')} - {analysis_result.get('company_name')}")
                     continue
 
@@ -401,7 +401,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                 company_name = analysis_result.get("company_name")
                 current_price = analysis_result.get("current_price", 0)
                 scenario = analysis_result.get("scenario", {})
-                sector = analysis_result.get("sector", "알 수 없음")
+                sector = analysis_result.get("sector", "Unknown")
                 sector_diverse = analysis_result.get("sector_diverse", True)
                 rank_change_percentage = analysis_result.get("rank_change_percentage", 0)
                 rank_change_msg = analysis_result.get("rank_change_msg", "")
@@ -413,31 +413,31 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                 logger.info(f"Buy score check: {company_name}({ticker}) - Score: {buy_score}, Min required score: {min_score}")
 
                 # Generate message if not buying (watch/insufficient score/sector constraints)
-                if decision != "진입" or buy_score < min_score or not sector_diverse:
+                if decision != "Enter" or buy_score < min_score or not sector_diverse:
                     # Determine reason for not buying
                     reason = ""
                     if not sector_diverse:
-                        reason = f"산업군 '{sector}' 과다 투자 방지"
+                        reason = f"Sector '{sector}' over-concentration prevention"
                     elif buy_score < min_score:
-                        if decision == "진입":
-                            decision = "미진입"  # "진입"에서 "미진입"으로 변경
-                            logger.info(f"Decision changed due to insufficient buy score: {company_name}({ticker}) - Enter → Wait (Score: {buy_score} < {min_score})")
-                        reason = f"매수 점수 부족 ({buy_score} < {min_score})"
-                    elif decision != "진입":
-                        reason = f"분석 결정이 '미진입'"
+                        if decision == "Enter":
+                            decision = "Skip"  # Change from "Enter" to "Skip"
+                            logger.info(f"Decision changed due to insufficient buy score: {company_name}({ticker}) - Enter → Skip (Score: {buy_score} < {min_score})")
+                        reason = f"Insufficient buy score ({buy_score} < {min_score})"
+                    elif decision != "Enter":
+                        reason = f"Analysis decision is 'Skip'"
 
-                    # 시장 상태 정보
+                    # Market condition info
                     market_condition_text = scenario.get("market_condition")
 
-                    # 미진입 메시지 생성
-                    skip_message = f"⚠️ 매수 보류: {company_name}({ticker})\n" \
-                                   f"현재가: {current_price:,.0f}원\n" \
-                                   f"매수 Score: {buy_score}/10\n" \
-                                   f"결정: {decision}\n" \
-                                   f"시장 상태: {market_condition_text}\n" \
-                                   f"산업군: {scenario.get('sector', '알 수 없음')}\n" \
-                                   f"보류 Reason: {reason}\n" \
-                                   f"분석 의견: {scenario.get('rationale', '정보 없음')}"
+                    # Generate skip message
+                    skip_message = f"⚠️ Purchase Deferred: {company_name}({ticker})\n" \
+                                   f"Current Price: {current_price:,.0f} KRW\n" \
+                                   f"Buy Score: {buy_score}/10\n" \
+                                   f"Decision: {decision}\n" \
+                                   f"Market Condition: {market_condition_text}\n" \
+                                   f"Sector: {scenario.get('sector', 'Unknown')}\n" \
+                                   f"Defer Reason: {reason}\n" \
+                                   f"Analysis Opinion: {scenario.get('rationale', 'No information')}"
 
                     self.message_queue.append(skip_message)
                     logger.info(f"Purchase deferred: {company_name}({ticker}) - {reason}")
@@ -458,7 +458,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                     continue
 
                 # Process buy if entry decision
-                if decision == "진입" and buy_score >= min_score and sector_diverse:
+                if decision == "Enter" and buy_score >= min_score and sector_diverse:
                     # Process buy
                     buy_success = await self.buy_stock(ticker, company_name, current_price, scenario, rank_change_msg)
 
@@ -483,7 +483,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                                 company_name=company_name,
                                 price=current_price,
                                 scenario=scenario,
-                                source="AI분석",
+                                source="AI Analysis",
                                 trade_result=trade_result
                             )
                         except Exception as signal_err:
@@ -498,7 +498,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                                 company_name=company_name,
                                 price=current_price,
                                 scenario=scenario,
-                                source="AI분석",
+                                source="AI Analysis",
                                 trade_result=trade_result
                             )
                         except Exception as signal_err:
@@ -510,7 +510,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                     else:
                         logger.warning(f"Purchase failed: {company_name}({ticker})")
 
-            logger.info(f"Report processing complete - Purchased: {buy_count}items, Sold: {sell_count} items")
+            logger.info(f"Report processing complete - Purchased: {buy_count} items, Sold: {sell_count} items")
             return buy_count, sell_count
 
         except Exception as e:
@@ -580,7 +580,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
             # Extract necessary information from scenario
             target_price = scenario.get('target_price', 0)
             stop_loss = scenario.get('stop_loss', 0)
-            investment_period = scenario.get('investment_period', '단기')
+            investment_period = scenario.get('investment_period', 'Short-term')
             portfolio_analysis = scenario.get('portfolio_analysis', '')
             valuation_analysis = scenario.get('valuation_analysis', '')
             sector_outlook = scenario.get('sector_outlook', '')
@@ -733,15 +733,15 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
 
             # Extract scenario information
             scenario_str = stock_data.get('scenario', '{}')
-            period = "중기"  # Default value
-            sector = "알 수 없음"
+            period = "Medium-term"  # Default value
+            sector = "Unknown"
             trading_scenarios = {}
 
             try:
                 if isinstance(scenario_str, str):
                     scenario_data = json.loads(scenario_str)
-                    period = scenario_data.get('investment_period', '중기')
-                    sector = scenario_data.get('sector', '알 수 없음')
+                    period = scenario_data.get('investment_period', 'Medium-term')
+                    sector = scenario_data.get('sector', 'Unknown')
                     trading_scenarios = scenario_data.get('trading_scenarios', {})
             except:
                 pass
@@ -755,7 +755,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
 
             # Analyze sector distribution
             sector_distribution = {}
-            investment_periods = {"단기": 0, "중기": 0, "장기": 0}
+            investment_periods = {"Short-term": 0, "Medium-term": 0, "Long-term": 0}
 
             for holding in holdings:
                 holding_scenario_str = holding.get('scenario', '{}')
@@ -765,21 +765,21 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                     else:
                         holding_scenario = holding_scenario_str
                     # Collect sector information from each holding's scenario
-                    holding_sector = holding_scenario.get('sector', '기타')
+                    holding_sector = holding_scenario.get('sector', 'Other')
                     sector_distribution[holding_sector] = sector_distribution.get(holding_sector, 0) + 1
                     # Collect investment period information from each holding's scenario
-                    holding_period = holding_scenario.get('investment_period', '중기')
+                    holding_period = holding_scenario.get('investment_period', 'Medium-term')
                     investment_periods[holding_period] = investment_periods.get(holding_period, 0) + 1
                 except:
                     # If parsing fails, use default values
-                    sector_distribution['기타'] = sector_distribution.get('기타', 0) + 1
-                    investment_periods['중기'] = investment_periods.get('중기', 0) + 1
+                    sector_distribution['Other'] = sector_distribution.get('Other', 0) + 1
+                    investment_periods['Medium-term'] = investment_periods.get('Medium-term', 0) + 1
 
             # Portfolio information string
             portfolio_info = f"""
-            현재 Hold 종목 수: {len(holdings)}/{self.max_slots}
-            산업군 분포: {json.dumps(sector_distribution, ensure_ascii=False)}
-            투자 기간 분포: {json.dumps(investment_periods, ensure_ascii=False)}
+            Current Holdings: {len(holdings)}/{self.max_slots}
+            Sector Distribution: {json.dumps(sector_distribution, ensure_ascii=False)}
+            Investment Period Distribution: {json.dumps(investment_periods, ensure_ascii=False)}
             """
 
             # Log portfolio_info for debugging sell decision agent's sector analysis
@@ -791,19 +791,19 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
             # LLM call to generate sell decision
             llm = await self.sell_decision_agent.attach_llm(OpenAIAugmentedLLM)
 
-            # Prepare prompt based on language
+            # Prepare prompt based on language (Korean text preserved for language == "ko" blocks)
             if self.language == "ko":
                 prompt_message = f"""
-                다음 Hold 종목에 대한 Sell 의사결정을 수행해주세요.
+                다음 보유 종목에 대한 매도 의사결정을 수행해주세요.
 
                 ### 종목 기본 정보:
                 - 종목명: {company_name}({ticker})
                 - 매수가: {buy_price:,.0f}원
                 - 현재가: {current_price:,.0f}원
-                - 목표가: {target_price:,.0f} 원
-                - 손절가: {stop_loss:,.0f}
+                - 목표가: {target_price:,.0f}원
+                - 손절가: {stop_loss:,.0f}원
                 - 수익률: {profit_rate:.2f}%
-                - Hold기간: {days_passed}일
+                - 보유기간: {days_passed}일
                 - 투자기간: {period}
                 - 섹터: {sector}
 
@@ -815,7 +815,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
 
                 ### 분석 요청:
                 위 정보를 바탕으로 kospi_kosdaq과 sqlite 도구를 활용하여 최신 데이터를 확인하고,
-                Sell할지 계속 Hold할지 결정해주세요.
+                매도할지 계속 보유할지 결정해주세요.
                 """
             else:  # English
                 prompt_message = f"""
@@ -851,104 +851,104 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                 )
             )
 
-            # JSON 파싱
+            # JSON parsing
             try:
-                # 응답이 비어있거나 None인 경우 조기 처리
+                # Early handling if response is empty or None
                 if not response or not response.strip():
                     logger.warning(f"{ticker} Empty response from LLM, falling back to legacy algorithm")
                     return await self._fallback_sell_decision(stock_data)
-                
+
                 decision_json = None
                 json_str = None
-                
-                # 1. 마크다운 코드 블록에서 JSON 추출 시도 (```json ... ``` 또는 ``` ... ```)
+
+                # 1. Try extracting JSON from markdown code block (```json ... ``` or ``` ... ```)
                 markdown_match = re.search(r'```(?:json)?\s*({[\s\S]*?})\s*```', response, re.DOTALL)
                 if markdown_match:
                     json_str = markdown_match.group(1)
                     logger.debug(f"Found JSON in markdown code block")
-                
-                # 2. 중첩된 중괄호를 포함한 완전한 JSON 객체 추출 시도
+
+                # 2. Try extracting complete JSON object with nested braces
                 if not json_str:
-                    # 더 정교한 JSON 객체 매칭 (중첩된 {} 지원)
+                    # More sophisticated JSON object matching (supports nested {})
                     json_match = re.search(r'(\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\})', response, re.DOTALL)
                     if json_match:
                         json_str = json_match.group(1)
                         logger.debug(f"Found JSON object in response")
-                
-                # 3. 전체 응답이 JSON인 경우
+
+                # 3. If entire response is JSON
                 if not json_str:
-                    # 앞뒤 공백 및 마크다운 제거 후 시도
+                    # Try after removing leading/trailing spaces and markdown
                     clean_response = response.strip()
                     if clean_response.startswith('{') and clean_response.endswith('}'):
                         json_str = clean_response
                         logger.debug(f"Using entire response as JSON")
-                
-                # JSON 문자열이 없으면 폴백
+
+                # Fallback if no JSON string found
                 if not json_str:
                     logger.warning(f"{ticker} No JSON found in response (length: {len(response)}), falling back to legacy algorithm")
                     logger.debug(f"Response preview: {response[:500]}...")
                     return await self._fallback_sell_decision(stock_data)
-                
-                # JSON 전처리: trailing comma 제거
+
+                # JSON preprocessing: remove trailing commas
                 json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
-                
-                # JSON 파싱 시도
+
+                # Try JSON parsing
                 try:
                     decision_json = json.loads(json_str)
                 except json.JSONDecodeError as e:
-                    # 추가 정리 시도: 제어 문자 제거
+                    # Additional cleanup attempt: remove control characters
                     json_str_cleaned = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', json_str)
                     decision_json = json.loads(json_str_cleaned)
-                
+
                 logger.info(f"Sell decision parse successful: {json.dumps(decision_json, ensure_ascii=False)[:500]}")
 
-                # 결과 추출 - 기존 단일 형식 사용
+                # Extract results - use existing single format
                 should_sell = decision_json.get("should_sell", False)
-                sell_reason = decision_json.get("sell_reason", "AI 분석 결과")
+                sell_reason = decision_json.get("sell_reason", "AI analysis result")
                 confidence = decision_json.get("confidence", 5)
                 analysis_summary = decision_json.get("analysis_summary", {})
                 portfolio_adjustment = decision_json.get("portfolio_adjustment", {})
-                
+
                 logger.info(f"{ticker}({company_name}) AI sell decision: {'Sell' if should_sell else 'Hold'} (Confidence: {confidence}/10)")
                 logger.info(f"Sell reason: {sell_reason}")
-                
-                # ===== 핵심: should_sell 분기에 따른 DB 처리 (에러가 나도 메인 플로우는 계속 진행) =====
+
+                # ===== Core: DB processing based on should_sell branch (main flow continues even if errors occur) =====
                 try:
                     if should_sell:
-                        # Sell 결정 시: holding_decisions 테이블에서 삭제
+                        # When sell decision: delete from holding_decisions table
                         await self._delete_holding_decision(ticker)
-                        
-                        # Sell 시 analysis_summary를 sell_reason에 추가
+
+                        # Add analysis_summary to sell_reason when selling
                         if analysis_summary:
                             detailed_reason = self._format_sell_reason_with_analysis(sell_reason, analysis_summary)
                             return should_sell, detailed_reason
                     else:
-                        # Hold 결정 시: holding_decisions 테이블에 저장/업데이트
+                        # When hold decision: save/update to holding_decisions table
                         await self._save_holding_decision(ticker, current_price, decision_json)
-                        
-                        # portfolio_adjustment 처리
+
+                        # Process portfolio_adjustment
                         if portfolio_adjustment.get("needed", False):
                             await self._process_portfolio_adjustment(ticker, company_name, portfolio_adjustment, analysis_summary)
                 except Exception as db_err:
-                    # DB 조작 실패해도 메인 플로우는 계속 진행
+                    # Main flow continues even if DB operation fails
                     logger.error(f"{ticker} Error processing holding_decisions DB (main flow continues): {str(db_err)}")
                     logger.error(traceback.format_exc())
-                
+
                 return should_sell, sell_reason
 
             except Exception as json_err:
                 logger.error(f"Sell decision JSON parse error: {json_err}")
                 logger.error(f"Original response: {response}")
-                
-                # 파싱 실패 시 기존 알고리즘으로 폴백
+
+                # Fallback to legacy algorithm when parsing fails
                 logger.warning(f"{ticker} AI analysis failed, falling back to legacy algorithm")
                 return await self._fallback_sell_decision(stock_data)
 
         except Exception as e:
             logger.error(f"{stock_data.get('ticker', '') if 'ticker' in locals() else 'Unknown stock'} Error in AI sell analysis: {str(e)}")
             logger.error(traceback.format_exc())
-            
-            # 오류 시 기존 알고리즘으로 폴백
+
+            # Fallback to legacy algorithm on error
             return await self._fallback_sell_decision(stock_data)
 
     async def _fallback_sell_decision(self, stock_data):
@@ -970,12 +970,12 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
 
             # Extract scenario information
             scenario_str = stock_data.get('scenario', '{}')
-            investment_period = "중기"  # Default value
+            investment_period = "Medium-term"  # Default value
 
             try:
                 if isinstance(scenario_str, str):
                     scenario_data = json.loads(scenario_str)
-                    investment_period = scenario_data.get('investment_period', '중기')
+                    investment_period = scenario_data.get('investment_period', 'Medium-term')
             except:
                 pass
 
@@ -988,63 +988,63 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
             if stop_loss > 0 and current_price <= stop_loss:
                 # Defer stop-loss in strong upward trend (exception case)
                 if trend >= 2 and profit_rate > -7:  # Strong upward trend & loss < 7%
-                    return False, "손절 유예 (강한 상승 추세)"
-                return True, f"손절매 조건 도달 (손절가: {stop_loss:,.0f} 원)"
+                    return False, "Stop-loss deferred (strong upward trend)"
+                return True, f"Stop-loss triggered (stop-loss: {stop_loss:,.0f} KRW)"
 
             # 2. Check target price reached
             if target_price > 0 and current_price >= target_price:
                 # Continue holding if strong upward trend (exception case)
                 if trend >= 2:
-                    return False, "목표가 달성했으나 강한 상승 추세로 Hold 유지"
-                return True, f"목표가 달성 (목표가: {target_price:,.0f} )"
+                    return False, "Target price reached but maintaining hold due to strong upward trend"
+                return True, f"Target price achieved (target: {target_price:,.0f} KRW)"
 
             # 3. Sell conditions based on market state and trend (market environment consideration)
             if self.simple_market_condition == -1 and trend < 0 and profit_rate > 3:
-                return True, f"약세장 + 하락 추세에서 수익 확보 (수익률: {profit_rate:.2f}%)"
+                return True, f"Securing profit in bear market + downtrend (return: {profit_rate:.2f}%)"
 
             # 4. Conditions by investment period (differentiation by investment type)
-            if investment_period == "단기":
+            if investment_period == "Short-term":
                 # Short-term investment profit target achieved
                 if days_passed >= 15 and profit_rate >= 5 and trend < 2:
-                    return True, f"단기 투자 목표 달성 (Hold일: {days_passed}일, 수익률: {profit_rate:.2f}%)"
+                    return True, f"Short-term investment goal achieved (holding: {days_passed} days, return: {profit_rate:.2f}%)"
 
                 # Short-term investment loss protection (but keep if strong upward trend)
                 if days_passed >= 10 and profit_rate <= -3 and trend < 2:
-                    return True, f"단기 투자 손실 방어 (Hold일: {days_passed}일, 수익률: {profit_rate:.2f}%)"
+                    return True, f"Short-term investment loss protection (holding: {days_passed} days, return: {profit_rate:.2f}%)"
 
             # 5. General profit target achieved (general investment not in specific period)
             if profit_rate >= 10 and trend < 2:
-                return True, f"수익률 10% 이상 달성 (현재 수익률: {profit_rate:.2f}%)"
+                return True, f"Return over 10% achieved (current return: {profit_rate:.2f}%)"
 
             # 6. Status check after long-term holding (decision based on time elapsed)
             # Case where above stop-loss but loss persists long-term
             if days_passed >= 30 and profit_rate < 0 and trend < 1:
-                return True, f"30일 이상 Hold 중이며 손실 상태 (Hold일: {days_passed}일, 수익률: {profit_rate:.2f}%)"
+                return True, f"Holding 30+ days with loss (holding: {days_passed} days, return: {profit_rate:.2f}%)"
 
             if days_passed >= 60 and profit_rate >= 3 and trend < 1:
-                return True, f"60일 이상 Hold 중이며 3% 이상 수익 (Hold일: {days_passed}일, 수익률: {profit_rate:.2f}%)"
+                return True, f"Holding 60+ days with 3%+ profit (holding: {days_passed} days, return: {profit_rate:.2f}%)"
 
             # 7. Long-term check by investment type (investment period specialization)
-            if investment_period == "장기" and days_passed >= 90 and profit_rate < 0 and trend < 1:
-                return True, f"장기 투자 손실 정리 (Hold일: {days_passed}일, 수익률: {profit_rate:.2f}%)"
+            if investment_period == "Long-term" and days_passed >= 90 and profit_rate < 0 and trend < 1:
+                return True, f"Long-term investment loss cleanup (holding: {days_passed} days, return: {profit_rate:.2f}%)"
 
             # 8. Not stop-loss but severe loss occurred (emergency response)
             # General loss sell condition applies only when not below stop-loss
             # Case where stop-loss not set (0) or current price above stop-loss with large loss (-5%+)
             if (stop_loss == 0 or current_price > stop_loss) and profit_rate <= -5 and trend < 1:
-                return True, f"심각한 손실 발생 (현재 수익률: {profit_rate:.2f}%)"
+                return True, f"Severe loss occurred (current return: {profit_rate:.2f}%)"
 
             # Continue holding by default
             trend_text = {
-                2: "강한 상승 추세", 1: "약한 상승 추세", 0: "중립 추세",
-                -1: "약한 하락 추세", -2: "강한 하락 추세"
-            }.get(trend, "알 수 없는 추세")
+                2: "Strong upward trend", 1: "Weak upward trend", 0: "Neutral trend",
+                -1: "Weak downward trend", -2: "Strong downward trend"
+            }.get(trend, "Unknown trend")
 
-            return False, f"계속 Hold (추세: {trend_text}, 수익률: {profit_rate:.2f}%)"
+            return False, f"Continue holding (trend: {trend_text}, return: {profit_rate:.2f}%)"
 
         except Exception as e:
             logger.error(f"Error in fallback sell analysis: {str(e)}")
-            return False, "분석 오류"
+            return False, "Analysis error"
 
     async def _process_portfolio_adjustment(self, ticker: str, company_name: str, portfolio_adjustment: Dict[str, Any], analysis_summary: Dict[str, Any]):
         """Process DB updates and Telegram notifications based on portfolio_adjustment"""
@@ -1061,7 +1061,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
 
             db_updated = False
             update_message = ""
-            adjustment_reason = portfolio_adjustment.get("reason", "AI 분석 결과")
+            adjustment_reason = portfolio_adjustment.get("reason", "AI analysis result")
 
             # Adjust target price
             new_target_price = portfolio_adjustment.get("new_target_price")
@@ -1075,7 +1075,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                     )
                     self.conn.commit()
                     db_updated = True
-                    update_message += f"목표가: {target_price_num:,.0f} 원으로 조정\n"
+                    update_message += f"Target price adjusted to: {target_price_num:,.0f} KRW\n"
                     logger.info(f"{ticker} Target price AI adjustment: {target_price_num:,.0f} KRW (Urgency: {urgency})")
 
             # Adjust stop-loss
@@ -1090,21 +1090,21 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                     )
                     self.conn.commit()
                     db_updated = True
-                    update_message += f"손절가: {stop_loss_num:,.0f} 으로 조정\n"
-                    logger.info(f"{ticker} Stop-loss AI adjustment: {stop_loss_num:,.0f} 원 (Urgency: {urgency})")
+                    update_message += f"Stop-loss adjusted to: {stop_loss_num:,.0f} KRW\n"
+                    logger.info(f"{ticker} Stop-loss AI adjustment: {stop_loss_num:,.0f} KRW (Urgency: {urgency})")
 
             # Generate Telegram message if DB was updated
             if db_updated:
                 urgency_emoji = {"high": "🚨", "medium": "⚠️", "low": "💡"}.get(urgency, "🔄")
-                message = f"{urgency_emoji} 포트폴리오 조정: {company_name}({ticker})\n"
+                message = f"{urgency_emoji} Portfolio Adjustment: {company_name}({ticker})\n"
                 message += update_message
-                message += f"조정 근거: {adjustment_reason}\n"
+                message += f"Adjustment Rationale: {adjustment_reason}\n"
                 message += f"Urgency: {urgency.upper()}\n"
 
                 # Add analysis summary
                 if analysis_summary:
-                    message += f"기술적 추세: {analysis_summary.get('technical_trend', 'N/A')}\n"
-                    message += f"시장 환경 영향: {analysis_summary.get('market_condition_impact', 'N/A')}"
+                    message += f"Technical Trend: {analysis_summary.get('technical_trend', 'N/A')}\n"
+                    message += f"Market Condition Impact: {analysis_summary.get('market_condition_impact', 'N/A')}"
 
                 self.message_queue.append(message)
                 logger.info(f"{ticker} AI-based portfolio adjustment complete: {update_message.strip()}")
@@ -1117,29 +1117,29 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
             logger.error(traceback.format_exc())
 
     def _safe_number_conversion(self, value) -> float:
-        """다양한 형태의 값을 안전하게 숫자로 변환"""
+        """Safely convert various value types to numbers"""
         try:
-            # 이미 숫자 타입인 경우
+            # If already a numeric type
             if isinstance(value, (int, float)):
                 return float(value)
-            
-            # 문자열인 경우
+
+            # If string
             if isinstance(value, str):
-                # 쉼표 제거하고 공백 제거
+                # Remove commas and spaces
                 cleaned_value = value.replace(',', '').replace(' ', '')
-                # "원" 제거 (혹시 포함되어 있을 경우)
-                cleaned_value = cleaned_value.replace('원', '')
-                
-                # 빈 문자열 체크
+                # Remove currency symbols (KRW, 원)
+                cleaned_value = cleaned_value.replace('KRW', '').replace('원', '')
+
+                # Check for empty string
                 if not cleaned_value:
                     return 0.0
-                
-                # 숫자로 변환
+
+                # Convert to number
                 return float(cleaned_value)
-            
-            # null이나 기타 타입인 경우
+
+            # If null or other type
             return 0.0
-            
+
         except (ValueError, TypeError) as e:
             logger.warning(f"Number conversion failed: {value} -> {str(e)}")
             return 0.0
@@ -1234,27 +1234,27 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
             return False
 
     def _format_sell_reason_with_analysis(self, sell_reason: str, analysis_summary: Dict[str, Any]) -> str:
-        """Sell 이유에 분석 요약 추가"""
+        """Add analysis summary to sell reason"""
         try:
             detailed_reason = sell_reason
-            
+
             if analysis_summary:
-                detailed_reason += "\n\n📊 상세 분석:"
-                
+                detailed_reason += "\n\n📊 Detailed Analysis:"
+
                 if analysis_summary.get('technical_trend'):
-                    detailed_reason += f"\n• 기술적 추세: {analysis_summary['technical_trend']}"
-                
+                    detailed_reason += f"\n• Technical Trend: {analysis_summary['technical_trend']}"
+
                 if analysis_summary.get('volume_analysis'):
-                    detailed_reason += f"\n• 거래량 분석: {analysis_summary['volume_analysis']}"
-                
+                    detailed_reason += f"\n• Volume Analysis: {analysis_summary['volume_analysis']}"
+
                 if analysis_summary.get('market_condition_impact'):
-                    detailed_reason += f"\n• 시장 환경: {analysis_summary['market_condition_impact']}"
-                
+                    detailed_reason += f"\n• Market Condition: {analysis_summary['market_condition_impact']}"
+
                 if analysis_summary.get('time_factor'):
-                    detailed_reason += f"\n• 시간 요인: {analysis_summary['time_factor']}"
-            
+                    detailed_reason += f"\n• Time Factor: {analysis_summary['time_factor']}"
+
             return detailed_reason
-            
+
         except Exception as e:
             logger.error(f"Error formatting sell reason: {str(e)}")
             return sell_reason

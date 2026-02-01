@@ -10,7 +10,7 @@ Overall Process:
 5. Send generated PDF attachments
 """
 from dotenv import load_dotenv
-load_dotenv()  # .env 파일에서 환경변수 로드
+load_dotenv()  # Load environment variables from .env file
 
 import argparse
 import asyncio
@@ -298,7 +298,7 @@ class StockAnalysisOrchestrator:
             tickers = []
             ticker_codes = set()  # For duplicate checking
 
-            # results is dict like {"거래량 급증 상위주": DataFrame, ...}
+            # results is dict like {"Volume Surge Top Stocks": DataFrame, ...}
             for trigger_type, stocks_df in results.items():
                 if hasattr(stocks_df, 'index'):  # It's a DataFrame
                     for ticker in stocks_df.index:
@@ -306,8 +306,15 @@ class StockAnalysisOrchestrator:
                             ticker_codes.add(ticker)
                             # Get stock name (with fallback to pykrx API)
                             name = ""
-                            if "종목명" in stocks_df.columns:
-                                name = stocks_df.loc[ticker, "종목명"]
+                            # Support both Korean and English column names
+                            name_col = None
+                            if "Company Name" in stocks_df.columns:
+                                name_col = "Company Name"
+                            elif "종목명" in stocks_df.columns:
+                                name_col = "종목명"
+
+                            if name_col:
+                                name = stocks_df.loc[ticker, name_col]
                             # Fallback: use pykrx API if name is empty
                             if not name:
                                 try:
@@ -318,8 +325,9 @@ class StockAnalysisOrchestrator:
 
                             # Get risk_reward_ratio if available
                             rr_ratio = 0
-                            if "손익비" in stocks_df.columns:
-                                rr_ratio = float(stocks_df.loc[ticker, "손익비"])
+                            if "Risk/Reward Ratio" in stocks_df.columns or "손익비" in stocks_df.columns:
+                                col_name = "Risk/Reward Ratio" if "Risk/Reward Ratio" in stocks_df.columns else "손익비"
+                                rr_ratio = float(stocks_df.loc[ticker, col_name])
 
                             tickers.append({
                                 'code': ticker,
@@ -747,15 +755,15 @@ class StockAnalysisOrchestrator:
 
         # Set title based on mode
         if mode == "morning":
-            title = "🔔 오전 프리즘 시그널 얼럿"
-            time_desc = "장 시작 후 10분 시점"
+            title = "🔔 Morning PRISM Signal Alert"
+            time_desc = "10 minutes after market open"
         else:
-            title = "🔔 오후 프리즘 시그널 얼럿"
-            time_desc = "장 마감 후"
+            title = "🔔 Afternoon PRISM Signal Alert"
+            time_desc = "After market close"
 
         # Message header
         message = f"{title}\n"
-        message += f"📅 {formatted_date} {time_desc} 포착된 관심종목\n\n"
+        message += f"📅 {formatted_date} Watchlist detected at {time_desc}\n\n"
 
         # Add stock information by trigger
         for trigger_type, stocks in results.items():
@@ -776,32 +784,32 @@ class StockAnalysisOrchestrator:
 
                 # Basic information
                 message += f"· *{name}* ({code})\n"
-                message += f"  {current_price:,.0f}원 {arrow} {abs(change_rate):.2f}%\n"
+                message += f"  {current_price:,.0f} KRW {arrow} {abs(change_rate):.2f}%\n"
 
                 # Additional information based on trigger type
-                if "volume_increase" in stock and trigger_type.startswith("거래량"):
+                if "volume_increase" in stock and ("Volume" in trigger_type or "거래량" in trigger_type):
                     volume_increase = stock.get("volume_increase", 0)
-                    message += f"  거래량 증가율: {volume_increase:.2f}%\n"
+                    message += f"  Volume increase: {volume_increase:.2f}%\n"
 
-                elif "gap_rate" in stock and trigger_type.startswith("갭 상승"):
+                elif "gap_rate" in stock and ("Gap" in trigger_type or "갭 상승" in trigger_type):
                     gap_rate = stock.get("gap_rate", 0)
-                    message += f"  갭 상승률: {gap_rate:.2f}%\n"
+                    message += f"  Gap up rate: {gap_rate:.2f}%\n"
 
-                elif "trade_value_ratio" in stock and "시총 대비" in trigger_type:
+                elif "trade_value_ratio" in stock and ("Market Cap" in trigger_type or "시총 대비" in trigger_type):
                     trade_value_ratio = stock.get("trade_value_ratio", 0)
                     market_cap = stock.get("market_cap", 0) / 100000000  # Convert to hundred million won units
-                    message += f"  거래대금/시총 비율: {trade_value_ratio:.2f}%\n"
-                    message += f"  시가총액: {market_cap:.2f}억원\n"
+                    message += f"  Trade value/market cap ratio: {trade_value_ratio:.2f}%\n"
+                    message += f"  Market cap: {market_cap:.2f}B KRW\n"
 
-                elif "closing_strength" in stock and "마감 강도" in trigger_type:
+                elif "closing_strength" in stock and ("Closing Strength" in trigger_type or "마감 강도" in trigger_type):
                     closing_strength = stock.get("closing_strength", 0) * 100
-                    message += f"  마감 강도: {closing_strength:.2f}%\n"
+                    message += f"  Closing strength: {closing_strength:.2f}%\n"
 
                 message += "\n"
 
         # Footer message
-        message += "💡 상세 분석 보고서는 약 10-30분 내 제공 예정\n"
-        message += "⚠️ 본 정보는 투자 참고용이며, 투자 결정과 책임은 투자자에게 있습니다."
+        message += "💡 Detailed analysis reports will be provided within 10-30 minutes\n"
+        message += "⚠️ This information is for reference only. Investment decisions and responsibility lie with the investor."
 
         return message
 
@@ -809,17 +817,17 @@ class StockAnalysisOrchestrator:
         """
         Return emoji matching trigger type
         """
-        if "거래량" in trigger_type:
+        if "Volume" in trigger_type or "거래량" in trigger_type:
             return "📊"
-        elif "갭 상승" in trigger_type:
+        elif "Gap" in trigger_type or "갭 상승" in trigger_type:
             return "📈"
-        elif "시총 대비" in trigger_type:
+        elif "Market Cap" in trigger_type or "시총 대비" in trigger_type:
             return "💰"
-        elif "상승률" in trigger_type:
+        elif "Gain" in trigger_type or "상승률" in trigger_type:
             return "🚀"
-        elif "마감 강도" in trigger_type:
+        elif "Closing Strength" in trigger_type or "마감 강도" in trigger_type:
             return "🔨"
-        elif "횡보" in trigger_type:
+        elif "Sideways" in trigger_type or "횡보" in trigger_type:
             return "↔️"
         else:
             return "🔎"

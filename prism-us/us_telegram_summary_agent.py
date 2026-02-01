@@ -531,14 +531,14 @@ Report Content:
 
         # Default message based on language
         if language == "ko":
-            default_message = f"""📊 {metadata['company_name']} ({metadata['ticker']}) - 분석 요약
+            default_message = f"""📊 {metadata['company_name']} ({metadata['ticker']}) - Analysis Summary
 
-1. 현재가: (정보 없음)
-2. 최근 추세: (정보 없음)
-3. 주요 체크포인트: 상세 분석 보고서를 참조하세요.
+1. Current Price: (Information unavailable)
+2. Recent Trend: (Information unavailable)
+3. Key Checkpoints: Please refer to the detailed analysis report.
 
-⚠️ 자동 생성 오류로 상세 정보를 표시할 수 없습니다. 전체 보고서를 확인하세요.
-본 정보는 투자 참고용이며, 투자 결정과 책임은 투자자에게 있습니다."""
+⚠️ Unable to display detailed information due to auto-generation error. Please check the full report.
+This information is for reference only. Investment decisions and responsibilities belong to the investor."""
         else:
             default_message = f"""📊 {metadata['company_name']} ({metadata['ticker']}) - Analysis Summary
 

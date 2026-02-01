@@ -58,14 +58,14 @@ async def analyze_stock(company_code: str = "000660", company_name: str = "SK하
         agents = get_agent_directory(company_name, company_code, reference_date, base_sections, language)
 
         # 5. Execute base analysis
-        # 병렬 처리 옵션: .env 파일에서 PRISM_PARALLEL_REPORT=true 설정 시 활성화
-        # ⚠️ 주의: 병렬 처리는 속도를 크게 향상시키지만, OpenAI API rate limit에 걸릴 수 있습니다.
-        # GPT-5.2 등 고급 모델 사용 시 rate limit이 더 엄격할 수 있으므로 주의하세요.
+        # Parallel processing option: Activated when PRISM_PARALLEL_REPORT=true is set in .env file
+        # ⚠️ Warning: Parallel processing greatly improves speed but may hit OpenAI API rate limits.
+        # When using advanced models like GPT-5.2, rate limits may be stricter, so be careful.
         parallel_enabled = os.getenv("PRISM_PARALLEL_REPORT", "false").lower() == "true"
 
         if parallel_enabled:
             # Parallel execution mode
-            # 각 섹션마다 독립적인 MCPApp 컨텍스트를 생성하여 MCP 서버 충돌 방지
+            # Create independent MCPApp context for each section to prevent MCP server conflicts
             logger.info(f"Running analysis in PARALLEL mode for {company_name}...")
 
             async def process_section(section):
@@ -73,7 +73,7 @@ async def analyze_stock(company_code: str = "000660", company_name: str = "SK하
                 if section not in agents:
                     return section, None
 
-                # 각 섹션마다 독립적인 MCPApp 인스턴스 생성
+                # Create independent MCPApp instance for each section
                 section_app = MCPApp(name=f"stock_analysis_{section}")
 
                 async with section_app.run() as section_context:
@@ -197,7 +197,7 @@ async def analyze_stock(company_code: str = "000660", company_name: str = "SK하
 
             volume_chart_html = get_chart_as_base64_html(
                 company_code, company_name, create_trading_volume_chart, 'Trading Volume Chart', width=900, dpi=80, image_format='jpg', compress=True,
-                days=30  # 수급 분석은 1개월 기준
+                days=30  # Supply/demand analysis based on 1 month
             )
 
             market_cap_chart_html = get_chart_as_base64_html(

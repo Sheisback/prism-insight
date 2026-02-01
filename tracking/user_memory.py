@@ -1,14 +1,14 @@
 """
 User Memory Manager for Telegram Bot
 
-사용자별 매매일지와 대화 기록을 저장하는 지속적 기억 시스템.
+Persistent memory system for storing user-specific trading journals and conversation history.
 
 Features:
-- /journal 명령어로 매매일지 기록
-- 단기기억 (1주일) / 장기기억 (그 이상) 분리
-- /evaluate, /report 명령어에서도 기억 활용
-- 답장으로 대화 이어가기 지원
-- 사용자별 격리 (user_id 기반)
+- Record trading journals via /journal command
+- Separate short-term memory (1 week) / long-term memory (beyond)
+- Utilize memory in /evaluate and /report commands
+- Support conversation threading via replies
+- User-isolated storage (user_id based)
 """
 
 import json
@@ -21,39 +21,39 @@ logger = logging.getLogger(__name__)
 
 
 class UserMemoryManager:
-    """사용자별 기억 관리자"""
+    """User-specific memory manager"""
 
-    # 기억 타입
+    # Memory types
     MEMORY_JOURNAL = 'journal'
     MEMORY_EVALUATION = 'evaluation'
     MEMORY_REPORT = 'report'
     MEMORY_CONVERSATION = 'conversation'
 
-    # 압축 레이어 (기존 패턴 동일)
-    LAYER_DETAILED = 1   # 0-7일: 전체 내용
-    LAYER_SUMMARY = 2    # 8-30일: 요약
-    LAYER_COMPRESSED = 3  # 31일+: 압축
+    # Compression layers (same as existing pattern)
+    LAYER_DETAILED = 1   # 0-7 days: Full content
+    LAYER_SUMMARY = 2    # 8-30 days: Summary
+    LAYER_COMPRESSED = 3  # 31+ days: Compressed
 
-    # 토큰 예산
+    # Token budget
     MAX_CONTEXT_TOKENS = 2000
 
     def __init__(self, db_path: str):
         """
-        UserMemoryManager 초기화
+        Initialize UserMemoryManager
 
         Args:
-            db_path: SQLite 데이터베이스 경로
+            db_path: SQLite database path
         """
         self.db_path = db_path
         self._ensure_tables()
 
     def _ensure_tables(self):
-        """테이블 존재 확인 및 생성"""
+        """Ensure tables exist and create if needed"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
 
-            # user_memories 테이블 생성
+            # Create user_memories table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS user_memories (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -74,7 +74,7 @@ class UserMemoryManager:
                 )
             """)
 
-            # user_preferences 테이블 생성
+            # Create user_preferences table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS user_preferences (
                     user_id INTEGER PRIMARY KEY,
@@ -88,7 +88,7 @@ class UserMemoryManager:
                 )
             """)
 
-            # 인덱스 생성
+            # Create indexes
             indexes = [
                 "CREATE INDEX IF NOT EXISTS idx_memories_user ON user_memories(user_id)",
                 "CREATE INDEX IF NOT EXISTS idx_memories_type ON user_memories(user_id, memory_type)",
@@ -105,11 +105,11 @@ class UserMemoryManager:
             logger.error(f"Failed to initialize user memory tables: {e}")
 
     def _get_connection(self):
-        """데이터베이스 연결 반환"""
+        """Return database connection"""
         return sqlite3.connect(self.db_path)
 
     # =========================================================================
-    # 핵심 메서드
+    # Core Methods
     # =========================================================================
 
     def save_memory(
@@ -126,22 +126,22 @@ class UserMemoryManager:
         tags: Optional[List[str]] = None
     ) -> int:
         """
-        기억 저장
+        Save memory
 
         Args:
-            user_id: 사용자 ID
-            memory_type: 기억 타입 (journal, evaluation, report, conversation)
-            content: 저장할 내용 (dict -> JSON)
-            ticker: 종목 코드/티커
-            ticker_name: 종목명
-            market_type: 시장 타입 (kr, us)
-            importance_score: 중요도 점수 (0.0 ~ 1.0)
-            command_source: 명령어 출처
-            message_id: 텔레그램 메시지 ID
-            tags: 태그 리스트
+            user_id: User ID
+            memory_type: Memory type (journal, evaluation, report, conversation)
+            content: Content to save (dict -> JSON)
+            ticker: Stock code/ticker
+            ticker_name: Stock name
+            market_type: Market type (kr, us)
+            importance_score: Importance score (0.0 ~ 1.0)
+            command_source: Command source
+            message_id: Telegram message ID
+            tags: Tag list
 
         Returns:
-            int: 생성된 기억 ID
+            int: Created memory ID
         """
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -166,7 +166,7 @@ class UserMemoryManager:
             memory_id = cursor.lastrowid or 0
             conn.commit()
 
-            # 사용자 통계 업데이트
+            # Update user statistics
             self._update_user_stats(user_id, memory_type)
 
             logger.info(f"Memory saved: user={user_id}, type={memory_type}, ticker={ticker}, id={memory_id}")
@@ -188,17 +188,17 @@ class UserMemoryManager:
         include_compressed: bool = True
     ) -> List[Dict[str, Any]]:
         """
-        기억 조회
+        Retrieve memories
 
         Args:
-            user_id: 사용자 ID
-            memory_type: 기억 타입 (None이면 전체)
-            ticker: 종목 코드/티커 (None이면 전체)
-            limit: 최대 조회 개수
-            include_compressed: 압축된 기억 포함 여부
+            user_id: User ID
+            memory_type: Memory type (None for all)
+            ticker: Stock code/ticker (None for all)
+            limit: Maximum number of results
+            include_compressed: Whether to include compressed memories
 
         Returns:
-            List[Dict]: 기억 목록
+            List[Dict]: Memory list
         """
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -252,7 +252,7 @@ class UserMemoryManager:
                 }
                 memories.append(memory)
 
-            # 접근 시간 업데이트
+            # Update access time
             if memories:
                 memory_ids = [m['id'] for m in memories]
                 self._update_access_time(memory_ids)
@@ -273,50 +273,50 @@ class UserMemoryManager:
         user_message: Optional[str] = None
     ) -> str:
         """
-        LLM에 전달할 기억 컨텍스트 빌드
+        Build memory context for LLM
 
         Args:
-            user_id: 사용자 ID
-            ticker: 종목 코드/티커 (특정 종목에 대한 기억 우선)
-            max_tokens: 최대 토큰 수 (기본 4000)
-            user_message: 현재 사용자 메시지 (티커 추출용)
+            user_id: User ID
+            ticker: Stock code/ticker (prioritize memories for specific stock)
+            max_tokens: Maximum token count (default 4000)
+            user_message: Current user message (for ticker extraction)
 
         Returns:
-            str: 포맷팅된 기억 컨텍스트
+            str: Formatted memory context
         """
         parts = []
         tokens = 0
-        loaded_tickers = set()  # 이미 로드한 티커 추적
+        loaded_tickers = set()  # Track already loaded tickers
 
-        # 토큰 추정 함수 (한글 기준 대략적 추정)
+        # Token estimation function (rough estimate for Korean text)
         def estimate_tokens(text: str) -> int:
-            return len(text) // 2  # 한글은 대략 2글자당 1토큰
+            return len(text) // 2  # Korean: roughly 1 token per 2 characters
 
-        # 우선순위 1: 해당 종목 저널 (최대 1200 토큰)
+        # Priority 1: Journals for the specific ticker (max 1200 tokens)
         if ticker:
             journals = self.get_journals(user_id, ticker=ticker, limit=10)
             if journals:
                 journal_text = self._format_journals(journals)
                 journal_tokens = estimate_tokens(journal_text)
                 if journal_tokens < 1200:
-                    parts.append(f"📝 {ticker} 관련 기록:\n{journal_text}")
+                    parts.append(f"📝 {ticker} Related Records:\n{journal_text}")
                     tokens += journal_tokens
                     loaded_tickers.add(ticker)
 
-        # 우선순위 2: 해당 종목 과거 평가 (최대 800 토큰)
+        # Priority 2: Past evaluations for the specific ticker (max 800 tokens)
         if ticker and tokens < max_tokens - 800:
             evals = self.get_memories(user_id, self.MEMORY_EVALUATION, ticker=ticker, limit=5)
             if evals:
                 eval_text = self._format_evaluations(evals)
                 eval_tokens = estimate_tokens(eval_text)
                 if tokens + eval_tokens < max_tokens:
-                    parts.append(f"📊 과거 평가:\n{eval_text}")
+                    parts.append(f"📊 Past Evaluations:\n{eval_text}")
                     tokens += eval_tokens
 
-        # 우선순위 3: 현재 메시지에서 언급된 종목 기억 로드
+        # Priority 3: Load memories for tickers mentioned in current message
         if user_message and tokens < max_tokens - 1000:
             mentioned_tickers = self._extract_tickers_from_text(user_message, user_id)
-            for mentioned_ticker in mentioned_tickers[:3]:  # 최대 3개 종목
+            for mentioned_ticker in mentioned_tickers[:3]:  # Max 3 tickers
                 if mentioned_ticker in loaded_tickers:
                     continue
                 if tokens >= max_tokens - 500:
@@ -327,13 +327,13 @@ class UserMemoryManager:
                     ticker_text = self._format_journals(ticker_journals)
                     ticker_tokens = estimate_tokens(ticker_text)
                     if tokens + ticker_tokens < max_tokens:
-                        parts.append(f"📝 {mentioned_ticker} 관련 기록:\n{ticker_text}")
+                        parts.append(f"📝 {mentioned_ticker} Related Records:\n{ticker_text}")
                         tokens += ticker_tokens
                         loaded_tickers.add(mentioned_ticker)
 
-        # 우선순위 4: 최근 저널에서 자주 언급된 종목 기억 로드
+        # Priority 4: Load memories for frequently mentioned tickers from recent journals
         if not ticker and tokens < max_tokens - 1000:
-            # 최근 저널에서 언급된 종목들 찾기
+            # Find tickers mentioned in recent journals
             recent_journals = self.get_journals(user_id, limit=20)
             ticker_counts = {}
             for j in recent_journals:
@@ -341,7 +341,7 @@ class UserMemoryManager:
                 if t and t not in loaded_tickers:
                     ticker_counts[t] = ticker_counts.get(t, 0) + 1
 
-            # 가장 많이 언급된 종목 순으로 로드
+            # Load in order of most frequently mentioned
             sorted_tickers = sorted(ticker_counts.items(), key=lambda x: x[1], reverse=True)
             for mentioned_ticker, count in sorted_tickers[:3]:
                 if tokens >= max_tokens - 500:
@@ -352,43 +352,43 @@ class UserMemoryManager:
                     ticker_text = self._format_journals(ticker_journals)
                     ticker_tokens = estimate_tokens(ticker_text)
                     if tokens + ticker_tokens < max_tokens:
-                        parts.append(f"📝 {mentioned_ticker} 관련 기록 ({count}회 언급):\n{ticker_text}")
+                        parts.append(f"📝 {mentioned_ticker} Related Records ({count} mentions):\n{ticker_text}")
                         tokens += ticker_tokens
                         loaded_tickers.add(mentioned_ticker)
 
-        # 우선순위 5: 최근 일반 저널 (남은 토큰)
+        # Priority 5: Recent general journals (remaining tokens)
         if tokens < max_tokens - 500:
             recent = self.get_journals(user_id, limit=10)
-            # 이미 포함된 ticker 제외
+            # Exclude already included tickers
             recent = [j for j in recent if j.get('ticker') not in loaded_tickers]
             if recent:
                 recent_text = self._format_journals(recent[:10])
                 recent_tokens = estimate_tokens(recent_text)
                 if tokens + recent_tokens < max_tokens:
-                    parts.append(f"💭 최근 생각:\n{recent_text}")
+                    parts.append(f"💭 Recent Thoughts:\n{recent_text}")
 
         return "\n\n".join(parts) if parts else ""
 
     def _extract_tickers_from_text(self, text: str, user_id: int) -> List[str]:
         """
-        텍스트에서 티커/종목코드 추출 (간단한 패턴 매칭)
+        Extract tickers/stock codes from text (simple pattern matching)
 
         Args:
-            text: 입력 텍스트
-            user_id: 사용자 ID (과거 기록에서 종목명 매칭용)
+            text: Input text
+            user_id: User ID (for matching stock names from past records)
 
         Returns:
-            List[str]: 추출된 티커 목록
+            List[str]: Extracted ticker list
         """
         import re
         tickers = []
 
-        # 1. 한국 종목 코드 (6자리 숫자)
+        # 1. Korean stock codes (6-digit numbers)
         kr_pattern = r'\b(\d{6})\b'
         kr_matches = re.findall(kr_pattern, text)
         tickers.extend(kr_matches)
 
-        # 2. US 티커 (1-5자리 대문자)
+        # 2. US tickers (1-5 uppercase letters)
         us_pattern = r'\b([A-Z]{1,5})\b'
         excluded_words = {
             'I', 'A', 'AN', 'THE', 'IN', 'ON', 'AT', 'TO', 'FOR', 'OF',
@@ -401,7 +401,7 @@ class UserMemoryManager:
             if t not in excluded_words and t not in tickers:
                 tickers.append(t)
 
-        # 3. 사용자의 과거 기록에서 종목명 매칭
+        # 3. Match stock names from user's past records
         try:
             past_journals = self.get_journals(user_id, limit=50)
             known_names = {}
@@ -420,7 +420,7 @@ class UserMemoryManager:
         return tickers
 
     # =========================================================================
-    # 저널 전용 메서드
+    # Journal-Specific Methods
     # =========================================================================
 
     def save_journal(
@@ -433,18 +433,18 @@ class UserMemoryManager:
         message_id: Optional[int] = None
     ) -> int:
         """
-        저널(투자 일기) 저장
+        Save journal (trading diary)
 
         Args:
-            user_id: 사용자 ID
-            text: 저널 텍스트
-            ticker: 종목 코드/티커
-            ticker_name: 종목명
-            market_type: 시장 타입
-            message_id: 텔레그램 메시지 ID
+            user_id: User ID
+            text: Journal text
+            ticker: Stock code/ticker
+            ticker_name: Stock name
+            market_type: Market type
+            message_id: Telegram message ID
 
         Returns:
-            int: 생성된 기억 ID
+            int: Created memory ID
         """
         content = {
             'text': text,
@@ -459,7 +459,7 @@ class UserMemoryManager:
             ticker=ticker,
             ticker_name=ticker_name,
             market_type=market_type,
-            importance_score=0.7,  # 저널은 기본적으로 중요도 높음
+            importance_score=0.7,  # Journals have high importance by default
             command_source='/journal',
             message_id=message_id
         )
@@ -471,15 +471,15 @@ class UserMemoryManager:
         limit: int = 5
     ) -> List[Dict[str, Any]]:
         """
-        저널 조회
+        Retrieve journals
 
         Args:
-            user_id: 사용자 ID
-            ticker: 종목 코드/티커
-            limit: 최대 조회 개수
+            user_id: User ID
+            ticker: Stock code/ticker
+            limit: Maximum number of results
 
         Returns:
-            List[Dict]: 저널 목록
+            List[Dict]: Journal list
         """
         return self.get_memories(
             user_id=user_id,
@@ -489,7 +489,7 @@ class UserMemoryManager:
         )
 
     # =========================================================================
-    # 압축 메서드
+    # Compression Methods
     # =========================================================================
 
     def compress_old_memories(
@@ -498,14 +498,14 @@ class UserMemoryManager:
         layer2_days: int = 30
     ) -> Dict[str, int]:
         """
-        오래된 기억 압축 (야간 배치용)
+        Compress old memories (for nightly batch processing)
 
         Args:
-            layer1_days: Layer 1 -> Layer 2 전환 기준일 (기본 7일)
-            layer2_days: Layer 2 -> Layer 3 전환 기준일 (기본 30일)
+            layer1_days: Days threshold for Layer 1 -> Layer 2 transition (default 7 days)
+            layer2_days: Days threshold for Layer 2 -> Layer 3 transition (default 30 days)
 
         Returns:
-            Dict[str, int]: 압축 통계 {'layer2_count': n, 'layer3_count': n}
+            Dict[str, int]: Compression statistics {'layer2_count': n, 'layer3_count': n}
         """
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -517,7 +517,7 @@ class UserMemoryManager:
             layer2_cutoff = (now - timedelta(days=layer1_days)).isoformat()
             layer3_cutoff = (now - timedelta(days=layer2_days)).isoformat()
 
-            # Layer 1 -> Layer 2 (7일 이상)
+            # Layer 1 -> Layer 2 (7+ days old)
             cursor.execute("""
                 SELECT id, content, ticker, ticker_name
                 FROM user_memories
@@ -529,7 +529,7 @@ class UserMemoryManager:
                 memory_id, content_json, ticker, ticker_name = row
                 content = json.loads(content_json) if content_json else {}
 
-                # 요약 생성
+                # Generate summary
                 summary = self._generate_summary(content, ticker, ticker_name)
 
                 cursor.execute("""
@@ -539,7 +539,7 @@ class UserMemoryManager:
                 """, (summary, memory_id))
                 stats['layer2_count'] += 1
 
-            # Layer 2 -> Layer 3 (30일 이상)
+            # Layer 2 -> Layer 3 (30+ days old)
             cursor.execute("""
                 SELECT id, summary, ticker, ticker_name
                 FROM user_memories
@@ -550,7 +550,7 @@ class UserMemoryManager:
             for row in cursor.fetchall():
                 memory_id, summary, ticker, ticker_name = row
 
-                # 한줄 압축 생성
+                # Generate one-line compression
                 compressed = self._generate_compressed(summary, ticker, ticker_name)
 
                 cursor.execute("""
@@ -572,11 +572,11 @@ class UserMemoryManager:
             conn.close()
 
     # =========================================================================
-    # 사용자 선호 메서드
+    # User Preference Methods
     # =========================================================================
 
     def get_user_preferences(self, user_id: int) -> Optional[Dict[str, Any]]:
-        """사용자 선호 설정 조회"""
+        """Retrieve user preference settings"""
         conn = self._get_connection()
         cursor = conn.cursor()
 
@@ -614,14 +614,14 @@ class UserMemoryManager:
         investment_style: Optional[str] = None,
         favorite_tickers: Optional[List[str]] = None
     ):
-        """사용자 선호 설정 업데이트"""
+        """Update user preference settings"""
         conn = self._get_connection()
         cursor = conn.cursor()
 
         try:
             now = datetime.now().isoformat()
 
-            # 기존 설정 확인
+            # Check existing settings
             cursor.execute("SELECT user_id FROM user_preferences WHERE user_id = ?", (user_id,))
             exists = cursor.fetchone() is not None
 
@@ -668,18 +668,18 @@ class UserMemoryManager:
             conn.close()
 
     # =========================================================================
-    # Private 헬퍼 메서드
+    # Private Helper Methods
     # =========================================================================
 
     def _update_user_stats(self, user_id: int, memory_type: str):
-        """사용자 통계 업데이트"""
+        """Update user statistics"""
         conn = self._get_connection()
         cursor = conn.cursor()
 
         try:
             now = datetime.now().isoformat()
 
-            # 기존 설정 확인
+            # Check existing settings
             cursor.execute("SELECT user_id FROM user_preferences WHERE user_id = ?", (user_id,))
             exists = cursor.fetchone() is not None
 
@@ -749,7 +749,7 @@ class UserMemoryManager:
             ticker = j.get('ticker', '')
             ticker_name = j.get('ticker_name', '')
 
-            # 티커와 종목명 함께 표시
+            # Display ticker and ticker name together
             if ticker and ticker_name:
                 lines.append(f"- [{created}] {ticker_name}({ticker}): {text}")
             elif ticker:
@@ -766,11 +766,11 @@ class UserMemoryManager:
             created = e.get('created_at', '')[:10]
             content = e.get('content', {})
 
-            # 요약이 있으면 사용, 없으면 응답에서 추출
+            # Use summary if available, otherwise extract from response
             summary = e.get('summary')
             if not summary:
                 response = content.get('response_summary', '')
-                summary = response[:300] + '...' if len(response) > 300 else response  # 300자로 확장
+                summary = response[:300] + '...' if len(response) > 300 else response  # Expand to 300 chars
 
             ticker = e.get('ticker', '')
             ticker_name = e.get('ticker_name', '')
@@ -792,8 +792,8 @@ class UserMemoryManager:
         if not text:
             return ''
 
-        # 간단한 요약 생성 (LLM 없이 규칙 기반)
-        # 실제로는 LLM을 사용할 수 있지만, 비용 절감을 위해 규칙 기반 사용
+        # Generate simple summary (rule-based without LLM)
+        # Could use LLM in practice, but using rule-based to save costs
         ticker_prefix = f"{ticker}: " if ticker else ""
         summary = text[:150].replace('\n', ' ').strip()
 
@@ -809,7 +809,7 @@ class UserMemoryManager:
         if not summary:
             return ''
 
-        # 한줄 압축 (최대 50자)
+        # One-line compression (max 50 chars)
         ticker_prefix = f"{ticker} " if ticker else ""
         compressed = summary[:50].replace('\n', ' ').strip()
 
@@ -848,7 +848,7 @@ class UserMemoryManager:
         cursor = conn.cursor()
 
         try:
-            # 타입별 개수
+            # Count by type
             cursor.execute("""
                 SELECT memory_type, COUNT(*) as count
                 FROM user_memories
@@ -857,7 +857,7 @@ class UserMemoryManager:
             """, (user_id,))
             type_counts = {row[0]: row[1] for row in cursor.fetchall()}
 
-            # 압축 레이어별 개수
+            # Count by compression layer
             cursor.execute("""
                 SELECT compression_layer, COUNT(*) as count
                 FROM user_memories
@@ -866,7 +866,7 @@ class UserMemoryManager:
             """, (user_id,))
             layer_counts = {f"layer_{row[0]}": row[1] for row in cursor.fetchall()}
 
-            # 종목별 개수
+            # Count by ticker
             cursor.execute("""
                 SELECT ticker, COUNT(*) as count
                 FROM user_memories

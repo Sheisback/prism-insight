@@ -92,8 +92,8 @@ def sample_scenario():
         "target_price": 90000,
         "stop_loss": 75000,
         "investment_period": "단기",
-        "sector": "반도체",
-        "rationale": "AI 반도체 수요 증가에 따른 실적 개선 기대"
+        "sector": "Semiconductor",
+        "rationale": "AI Semiconductor 수요 증가에 따른 실적 개선 기대"
     }
 
 
@@ -142,7 +142,7 @@ class TestPublishSignal:
         result = await publisher_with_mock_redis.publish_signal(
             signal_type="BUY",
             ticker="005930",
-            company_name="삼성전자",
+            company_name="Samsung Electronics",
             price=82000,
             source="AI분석"
         )
@@ -164,7 +164,7 @@ class TestPublishSignal:
         signal_data = json.loads(data["data"])
         assert signal_data["type"] == "BUY"
         assert signal_data["ticker"] == "005930"
-        assert signal_data["company_name"] == "삼성전자"
+        assert signal_data["company_name"] == "Samsung Electronics"
         assert signal_data["price"] == 82000
 
     @pytest.mark.asyncio
@@ -173,7 +173,7 @@ class TestPublishSignal:
         result = await publisher_with_mock_redis.publish_signal(
             signal_type="BUY",
             ticker="005930",
-            company_name="삼성전자",
+            company_name="Samsung Electronics",
             price=82000,
             source="AI분석",
             scenario=sample_scenario
@@ -185,7 +185,7 @@ class TestPublishSignal:
 
         assert signal_data["target_price"] == 90000
         assert signal_data["stop_loss"] == 75000
-        assert signal_data["sector"] == "반도체"
+        assert signal_data["sector"] == "Semiconductor"
 
     @pytest.mark.asyncio
     async def test_publish_signal_skip_when_not_connected(self):
@@ -196,7 +196,7 @@ class TestPublishSignal:
         result = await publisher.publish_signal(
             signal_type="BUY",
             ticker="005930",
-            company_name="삼성전자",
+            company_name="Samsung Electronics",
             price=82000
         )
 
@@ -209,11 +209,11 @@ class TestPublishBuySignal:
     @pytest.mark.asyncio
     async def test_publish_buy_signal(self, publisher_with_mock_redis, mock_redis, sample_scenario):
         """매수 시그널 발행 테스트"""
-        trade_result = {"success": True, "message": "매수 완료"}
+        trade_result = {"success": True, "message": "Buy completed"}
 
         result = await publisher_with_mock_redis.publish_buy_signal(
             ticker="005930",
-            company_name="삼성전자",
+            company_name="Samsung Electronics",
             price=82000,
             scenario=sample_scenario,
             trade_result=trade_result
@@ -227,7 +227,7 @@ class TestPublishBuySignal:
 
         assert signal_data["type"] == "BUY"
         assert signal_data["trade_success"] is True
-        assert signal_data["trade_message"] == "매수 완료"
+        assert signal_data["trade_message"] == "Buy completed"
 
 
 class TestPublishSellSignal:
@@ -236,15 +236,15 @@ class TestPublishSellSignal:
     @pytest.mark.asyncio
     async def test_publish_sell_signal(self, publisher_with_mock_redis, mock_redis):
         """매도 시그널 발행 테스트"""
-        trade_result = {"success": True, "message": "매도 완료"}
+        trade_result = {"success": True, "message": "Sell completed"}
 
         result = await publisher_with_mock_redis.publish_sell_signal(
             ticker="005930",
-            company_name="삼성전자",
+            company_name="Samsung Electronics",
             price=90000,
             buy_price=82000,
             profit_rate=9.76,
-            sell_reason="목표가 달성",
+            sell_reason="Target price reached",
             trade_result=trade_result
         )
 
@@ -257,7 +257,7 @@ class TestPublishSellSignal:
         assert signal_data["type"] == "SELL"
         assert signal_data["buy_price"] == 82000
         assert signal_data["profit_rate"] == 9.76
-        assert signal_data["sell_reason"] == "목표가 달성"
+        assert signal_data["sell_reason"] == "Target price reached"
 
 
 class TestPublishEventSignal:
@@ -268,11 +268,11 @@ class TestPublishEventSignal:
         """이벤트 시그널 발행 테스트"""
         result = await publisher_with_mock_redis.publish_event_signal(
             ticker="005930",
-            company_name="삼성전자",
+            company_name="Samsung Electronics",
             price=82000,
             event_type="YOUTUBE",
             event_source="유튜버_홍길동",
-            event_description="삼성전자 신규 영상 업로드"
+            event_description="Samsung Electronics 신규 영상 업로드"
         )
 
         assert result == "1234567890-0"
@@ -358,7 +358,7 @@ class TestIntegrationWithRealRedis:
         
         message_id = await real_publisher.publish_buy_signal(
             ticker=test_ticker,
-            company_name="테스트종목_매수",
+            company_name="Test Stock_매수",
             price=50000,
             scenario={
                 "target_price": 55000,
@@ -366,7 +366,7 @@ class TestIntegrationWithRealRedis:
                 "sector": "테스트",
                 "rationale": "테스트 매수 시그널"
             },
-            trade_result={"success": True, "message": "테스트 매수 완료"}
+            trade_result={"success": True, "message": "테스트 Buy completed"}
         )
 
         assert message_id is not None, f"message_id is None. Check Redis connection."
@@ -396,12 +396,12 @@ class TestIntegrationWithRealRedis:
         
         message_id = await real_publisher.publish_sell_signal(
             ticker=test_ticker,
-            company_name="테스트종목_매도",
+            company_name="Test Stock_매도",
             price=55000,
             buy_price=50000,
             profit_rate=10.0,
-            sell_reason="목표가 달성 테스트",
-            trade_result={"success": True, "message": "테스트 매도 완료"}
+            sell_reason="Target price reached 테스트",
+            trade_result={"success": True, "message": "테스트 Sell completed"}
         )
 
         assert message_id is not None
@@ -431,7 +431,7 @@ class TestIntegrationWithRealRedis:
         
         message_id = await real_publisher.publish_event_signal(
             ticker=test_ticker,
-            company_name="테스트종목_이벤트",
+            company_name="Test Stock_이벤트",
             price=50000,
             event_type="YOUTUBE",
             event_source="테스트_유튜버",
@@ -487,7 +487,7 @@ class TestIntegrationWithRealRedis:
             price=12000,
             buy_price=10000,
             profit_rate=20.0,
-            sell_reason="목표가 달성"
+            sell_reason="Target price reached"
         )
         published_ids.append(sell_id)
         print(f"📤 매도 시그널 발행: {sell_id}")
@@ -614,7 +614,7 @@ class TestPerformance:
         for i in range(count):
             await publisher_with_mock_redis.publish_buy_signal(
                 ticker=f"00593{i % 10}",
-                company_name=f"테스트종목{i}",
+                company_name=f"Test Stock{i}",
                 price=80000 + i * 100
             )
 
@@ -636,16 +636,16 @@ class TestEdgeCases:
         """특수문자 포함 시그널 테스트"""
         result = await publisher_with_mock_redis.publish_buy_signal(
             ticker="005930",
-            company_name="삼성전자 (우선주)",
+            company_name="Samsung Electronics (우선주)",
             price=82000,
-            scenario={"rationale": "신규 사업 진출 - AI/반도체 'HBM' 수요 증가"}
+            scenario={"rationale": "신규 사업 진출 - AI/Semiconductor 'HBM' 수요 증가"}
         )
 
         call_args = mock_redis.xadd.call_args
         # upstash-redis 1.5.0+: xadd(key, id, data) - data는 3번째 인자
         signal_data = json.loads(call_args[0][2]["data"])
 
-        assert signal_data["company_name"] == "삼성전자 (우선주)"
+        assert signal_data["company_name"] == "Samsung Electronics (우선주)"
         assert "HBM" in signal_data["rationale"]
 
     @pytest.mark.asyncio
@@ -653,7 +653,7 @@ class TestEdgeCases:
         """빈 시나리오 테스트"""
         result = await publisher_with_mock_redis.publish_buy_signal(
             ticker="005930",
-            company_name="삼성전자",
+            company_name="Samsung Electronics",
             price=82000,
             scenario={}
         )
@@ -665,7 +665,7 @@ class TestEdgeCases:
         """None 시나리오 테스트"""
         result = await publisher_with_mock_redis.publish_buy_signal(
             ticker="005930",
-            company_name="삼성전자",
+            company_name="Samsung Electronics",
             price=82000,
             scenario=None
         )
@@ -679,7 +679,7 @@ class TestEdgeCases:
 
         result = await publisher_with_mock_redis.publish_buy_signal(
             ticker="005930",
-            company_name="삼성전자",
+            company_name="Samsung Electronics",
             price=82000
         )
 
@@ -711,12 +711,12 @@ class TestSubscriberExample:
         signal = {
             "type": "BUY",
             "ticker": "005930",
-            "company_name": "삼성전자",
+            "company_name": "Samsung Electronics",
             "price": 82000,
             "timestamp": "2024-01-15T10:30:00",
             "target_price": 90000,
             "stop_loss": 75000,
-            "rationale": "AI 반도체 수요 증가"
+            "rationale": "AI Semiconductor 수요 증가"
         }
         
         # subscriber_example의 handle_signal 로직 시뮬레이션
@@ -730,7 +730,7 @@ class TestSubscriberExample:
         assert emoji == "📈"
         assert signal_type == "BUY"
         assert ticker == "005930"
-        assert company_name == "삼성전자"
+        assert company_name == "Samsung Electronics"
         assert price == 82000
 
     def test_handle_signal_sell(self):
@@ -738,10 +738,10 @@ class TestSubscriberExample:
         signal = {
             "type": "SELL",
             "ticker": "005930",
-            "company_name": "삼성전자",
+            "company_name": "Samsung Electronics",
             "price": 90000,
             "profit_rate": 9.76,
-            "sell_reason": "목표가 달성"
+            "sell_reason": "Target price reached"
         }
         
         signal_type = signal.get("type", "UNKNOWN")
@@ -753,14 +753,14 @@ class TestSubscriberExample:
         assert emoji == "📉"
         assert signal_type == "SELL"
         assert profit_rate == 9.76
-        assert sell_reason == "목표가 달성"
+        assert sell_reason == "Target price reached"
 
     def test_handle_signal_event(self):
         """이벤트 시그널 핸들링 테스트"""
         signal = {
             "type": "EVENT",
             "ticker": "005930",
-            "company_name": "삼성전자",
+            "company_name": "Samsung Electronics",
             "price": 82000,
             "event_type": "YOUTUBE",
             "event_description": "신규 영상 업로드"

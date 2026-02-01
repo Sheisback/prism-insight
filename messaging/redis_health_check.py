@@ -1,18 +1,18 @@
 """
 Redis Health Check Script
 
-Upstash Redis 무료 티어의 비활성화를 방지하기 위한 주기적 Health Check 스크립트.
-이 스크립트는 주기적으로 실행되어 Redis에 간단한 데이터를 저장하고 조회함으로써
-데이터베이스를 활성 상태로 유지합니다.
+Periodic health check script to prevent Upstash Redis free tier from being deactivated.
+This script runs periodically to store and retrieve simple data in Redis,
+keeping the database in an active state.
 
 Usage:
-    # 직접 실행
+    # Direct execution
     python messaging/redis_health_check.py
 
-    # 크론탭 등록 예시 (매일 오전 9시)
+    # Crontab example (daily at 9 AM)
     0 9 * * * cd /path/to/prism-insight && python messaging/redis_health_check.py
 
-    # 또는 asyncio를 사용하는 경우
+    # Or using asyncio
     import asyncio
     from messaging.redis_health_check import run_health_check
     asyncio.run(run_health_check())
@@ -114,7 +114,7 @@ class RedisHealthChecker:
             results["operations"]["ping"] = ping_result
             logger.info(f"✓ PING: {ping_result}")
 
-            # 2. Update last check timestamp (24시간 만료)
+            # 2. Update last check timestamp (24 hour expiration)
             timestamp = datetime.now().isoformat()
             self._redis.setex(
                 self.HEALTH_CHECK_KEY,
@@ -124,13 +124,13 @@ class RedisHealthChecker:
             results["operations"]["set_timestamp"] = timestamp
             logger.info(f"✓ SET timestamp: {timestamp}")
 
-            # 3. Increment health check counter (30일 만료)
+            # 3. Increment health check counter (30 day expiration)
             counter = self._redis.incr(self.HEALTH_COUNTER_KEY)
             self._redis.expire(self.HEALTH_COUNTER_KEY, 2592000)  # 30 days
             results["operations"]["counter"] = counter
             logger.info(f"✓ INCR counter: {counter}")
 
-            # 4. Add log entry (최근 100개만 유지, 7일 만료)
+            # 4. Add log entry (keep last 100 entries, 7 day expiration)
             log_entry = f"{timestamp}:health_check"
             self._redis.lpush(self.HEALTH_LOG_KEY, log_entry)
             self._redis.ltrim(self.HEALTH_LOG_KEY, 0, 99)  # Keep last 100 entries
@@ -138,7 +138,7 @@ class RedisHealthChecker:
             results["operations"]["log_added"] = True
             logger.info(f"✓ LPUSH log entry")
 
-            # 5. Verify data (읽기 작업)
+            # 5. Verify data (read operation)
             stored_timestamp = self._redis.get(self.HEALTH_CHECK_KEY)
             results["operations"]["retrieved_timestamp"] = stored_timestamp
             logger.info(f"✓ GET timestamp: {stored_timestamp}")
@@ -193,13 +193,13 @@ async def run_health_check_async() -> Dict[str, Any]:
 if __name__ == "__main__":
     """
     Script entry point
-    
-    이 스크립트를 크론탭이나 스케줄러로 주기적으로 실행하면
-    Upstash Redis가 비활성화되는 것을 방지할 수 있습니다.
-    
-    권장 실행 주기:
-    - 매일 1회: 충분히 안전
-    - 매주 2-3회: 최소 권장
+
+    Running this script periodically with crontab or scheduler
+    prevents Upstash Redis from being deactivated.
+
+    Recommended execution frequency:
+    - Once per day: Safe enough
+    - 2-3 times per week: Minimum recommended
     """
     try:
         logger.info("Starting Redis health check...")

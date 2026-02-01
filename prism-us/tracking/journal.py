@@ -166,32 +166,32 @@ class USJournalManager:
         """Build prompt for retrospective analysis."""
         if self.language == "ko":
             return f"""
-다음 완료된 미국 주식 매매를 복기해주세요:
+Please review the following completed US stock trade:
 
-## 매수 정보
-- 종목: {company_name}({ticker})
-- 매수가: ${buy_price:,.2f}
-- 매수일: {buy_date}
-- 매수 시나리오:
-  - 매수 점수: {scenario_data.get('buy_score', 'N/A')}
-  - 투자 근거: {scenario_data.get('rationale', 'N/A')}
-  - 목표가: ${scenario_data.get('target_price', 'N/A')}
-  - 손절가: ${scenario_data.get('stop_loss', 'N/A')}
-  - 투자 기간: {scenario_data.get('investment_period', 'N/A')}
-  - 섹터: {scenario_data.get('sector', 'N/A')}
-  - 시장 상황: {scenario_data.get('market_condition', 'N/A')}
+## Buy Information
+- Stock: {company_name}({ticker})
+- Buy Price: ${buy_price:,.2f}
+- Buy Date: {buy_date}
+- Buy Scenario:
+  - Buy Score: {scenario_data.get('buy_score', 'N/A')}
+  - Investment Rationale: {scenario_data.get('rationale', 'N/A')}
+  - Target Price: ${scenario_data.get('target_price', 'N/A')}
+  - Stop Loss: ${scenario_data.get('stop_loss', 'N/A')}
+  - Investment Period: {scenario_data.get('investment_period', 'N/A')}
+  - Sector: {scenario_data.get('sector', 'N/A')}
+  - Market Condition: {scenario_data.get('market_condition', 'N/A')}
 
-## 매도 정보
-- 매도가: ${sell_price:,.2f}
-- 수익률: {profit_rate:.2f}%
-- 보유일수: {holding_days}일
-- 매도 사유: {sell_reason}
+## Sell Information
+- Sell Price: ${sell_price:,.2f}
+- Return: {profit_rate:.2f}%
+- Holding Days: {holding_days} days
+- Sell Reason: {sell_reason}
 
-## 분석 요청
-1. yahoo_finance 도구로 현재 시장 상황과 해당 종목의 최근 흐름을 확인하세요
-2. 매수 시점과 매도 시점의 상황을 비교 분석하세요
-3. 판단의 적절성을 평가하고 교훈을 추출하세요
-4. 패턴 태그를 부여하세요
+## Analysis Request
+1. Use yahoo_finance tool to check current market conditions and recent stock trends
+2. Compare and analyze buy and sell timing situations
+3. Evaluate decision appropriateness and extract lessons
+4. Assign pattern tags
 """
         else:
             return f"""
