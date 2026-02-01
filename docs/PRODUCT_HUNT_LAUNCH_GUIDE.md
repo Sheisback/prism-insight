@@ -4,6 +4,27 @@
 > **예상 준비 기간**: 4-6주
 > **예상 작업량**: 50-120시간
 
+---
+
+## 📊 현재 진행 상황 (2026-02-01 업데이트)
+
+| 작업 | 상태 | 비고 |
+|------|------|------|
+| README 영문화 | ✅ 완료 | 이미 영문 |
+| 설치 간소화 | ✅ 완료 | quickstart.sh, demo.py |
+| 랜딩 페이지 | ✅ 완료 | https://prism-insight-landing.vercel.app |
+| 라이브 대시보드 | ✅ 완료 | analysis.stocksimulation.kr |
+| 오픈소스 라이센스 | ✅ 완료 | AGPL-3.0 |
+| **데모 영상 제작** | ❌ 미완료 | 다음 할 일 |
+| 문서 사이트 | ❌ 미완료 | 낮은 우선순위 |
+| 커뮤니티 빌딩 | ❌ 미완료 | 선택 사항 |
+
+### 다음 할 일
+1. **데모 영상 제작** - `demo.py` 실행 화면 녹화 (아래 가이드 참고)
+2. **커뮤니티 빌딩** - Product Hunt 활동 또는 Reddit/HN 준비
+
+---
+
 ## 제품 포지셔닝
 
 | 항목 | 내용 |
@@ -34,113 +55,90 @@
 | README 영문화 | 🔴 높음 | [x] 완료 (이미 영문) |
 | 설치 간소화 | 🔴 높음 | [x] 완료 (quickstart.sh, demo.py, docker-compose.quickstart.yml) |
 | 데모 영상 제작 | 🔴 높음 | [ ] |
-| 랜딩 페이지 | 🔴 높음 | [ ] |
+| 랜딩 페이지 | 🔴 높음 | [x] 완료 (https://prism-insight-landing.vercel.app) |
 | 라이브 데모 | 🟡 중간 | [x] 완료 (analysis.stocksimulation.kr) |
 | 오픈소스 라이센스 | 🟡 중간 | [x] 완료 (AGPL-3.0) |
 | 문서 사이트 | 🟢 낮음 | [ ] |
 
 ---
 
-### 🚀 랜딩 페이지 구현 가이드 (Vercel 배포)
+### 🚀 랜딩 페이지 ✅ 완료
 
-#### 배포 플랫폼: Vercel (무료)
-- ✅ Next.js 최적화 (Vercel이 제작사)
-- ✅ 무료 티어: 100GB 대역폭/월
-- ✅ GitHub 연동 자동 배포
-- ✅ 글로벌 CDN + 무료 SSL
+#### 결과물
+- **URL: https://prism-insight-landing.vercel.app**
+- 소스 코드: `examples/landing/`
 
-#### 구현 위치
-`examples/dashboard/` 기존 Next.js 프로젝트에 `/landing` 라우트 추가
+#### 포함된 기능
+- 13개 AI 에이전트 이미지 갤러리
+- 실제 스크린샷 4장 (Dashboard, Report, Telegram, Trading)
+- GitHub Star 실시간 카운트
+- QuickStart 코드 복사 기능
+- YouTube 데모 영상 임베드
+- SEO + Open Graph 메타데이터
+- 다크 모드 기본
 
-#### 실행 명령어
-
+#### 수정이 필요할 때
 ```bash
-# 1. 랜딩 페이지 생성 (Claude Code에서)
-/frontend-design
+cd examples/landing
+npm run dev          # 로컬 테스트
+vercel --prod        # 재배포
 ```
 
-#### 프롬프트 (복사용)
+---
 
-```
-Create a Product Hunt landing page for PRISM-INSIGHT, optimized for Vercel deployment.
+### 📹 데모 영상 제작 가이드
 
-Project context:
-- AI-powered stock analysis system with 13 specialized agents
-- Supports Korean (KOSPI/KOSDAQ) and US (NYSE/NASDAQ) markets
-- Open source (AGPL-3.0), free to use
-- Live demo: analysis.stocksimulation.kr
-- GitHub: dragon1086/prism-insight
+#### 스크린 레코딩 = 화면 녹화
 
-Required sections:
-1. Hero: "AI-powered Korean & US stock analysis with automated trading"
-2. Features: 13 AI agents, dual market, Telegram alerts, auto trading
-3. Demo video embed (YouTube: LVOAdVCh1QE)
-4. Screenshots gallery
-5. QuickStart code block with copy button
-6. GitHub Star CTA (use GitHub API for live count)
-7. Sponsor/Support section
+`demo.py` 실행 화면을 녹화해서 1-2분 영상으로 만드는 작업입니다.
 
-Technical requirements:
-- Use existing examples/dashboard/ Next.js 14 App Router structure
-- Create as app/landing/page.tsx (or app/(landing)/page.tsx for root)
-- Use Static Site Generation (SSG) for best Vercel performance
-- All images optimized with next/image
-- Tailwind CSS + shadcn/ui components
-- Dark/light mode support
-- Mobile-first responsive design
-- Metadata for SEO and social sharing (Open Graph)
-
-Vercel-specific:
-- No server-side API calls (static or client-side only)
-- Environment variables via NEXT_PUBLIC_ prefix if needed
-- Output as static export compatible
-```
-
-#### 배포 단계
-
+**macOS에서 녹화 방법:**
 ```bash
-# 2. 로컬 테스트
-cd examples/dashboard
-npm install
-npm run dev
-
-# 3. 빌드 테스트
-npm run build
-
-# 4. Vercel 배포
-npm i -g vercel
-vercel          # 프리뷰 배포
-vercel --prod   # 프로덕션 배포
+# 단축키: Cmd + Shift + 5
+# 또는 QuickTime Player → 파일 → 새로운 화면 기록
 ```
 
-#### 체크리스트
+**녹화할 내용:**
+1. 터미널에서 `python demo.py NVDA` 실행
+2. 분석 진행되는 로그 (3-5분 소요)
+3. 생성된 PDF 열어서 보여주기
 
-- [ ] `/frontend-design` 실행 → 랜딩 페이지 생성
-- [ ] `npm run dev` 로컬 테스트
-- [ ] 반응형 테스트 (모바일/태블릿/데스크톱)
-- [ ] 다크모드 테스트
-- [ ] `npm run build` 빌드 성공 확인
-- [ ] Vercel 계정 연동 (GitHub OAuth)
-- [ ] `vercel --prod` 프로덕션 배포
-- [ ] 커스텀 도메인 연결 (선택)
-
-#### 예상 결과물
-- URL: `prism-insight.vercel.app` (또는 커스텀 도메인)
-- Product Hunt 제출용 랜딩 페이지 완성
+**편집 & 업로드:**
+- iMovie 또는 간단한 편집 도구로 자르기
+- YouTube에 업로드
+- 랜딩 페이지의 YouTube ID 교체 (현재: `LVOAdVCh1QE`)
 
 ---
 
 ### Phase 2: 커뮤니티 빌딩 (런칭 2-4주 전)
 
-#### Product Hunt 활동 (필수!)
+#### Product Hunt 활동이란?
+
+| 활동 | 설명 |
+|------|------|
+| 댓글 달기 | 다른 제품에 피드백/응원 댓글 |
+| 업보트 | 마음에 드는 제품에 투표 |
+| 팔로워 | 활동하다 보면 자연스럽게 생김 |
+
+**왜 필요한가?**
+- Product Hunt 알고리즘이 **활성 사용자의 투표**에 더 높은 점수를 줌
+- 신규 계정이 갑자기 런칭하면 효과가 떨어짐
+
+#### 현실적인 옵션
+
+| 옵션 | 투자 시간 | 효과 |
+|------|----------|------|
+| **최소한만** | 하루 10분 × 2주 | 기본 신뢰도 확보 |
+| **적극적** | 하루 30분 × 4주 | 50+ 팔로워 가능 |
+| **스킵** | 0 | Reddit/HN에 집중 |
+
+#### 체크리스트 (선택)
 
 - [ ] 매일 3-5개 제품에 의미 있는 댓글 달기
 - [ ] 관련 제품 업보트
-- [ ] 다른 런칭에 Maker로 참여
-- [ ] PH 디스커션 포럼 참여
 - [ ] 50-100명 팔로워 확보
 
-> ⚠️ **중요**: Product Hunt는 마케팅 채널이 아니라 **메이커 커뮤니티**입니다.
+> ⚠️ **참고**: Product Hunt가 부담스러우면 Reddit (r/algotrading, r/SideProject)이나 Hacker News에 집중하는 것도 방법입니다.
 
 #### 외부 채널 준비
 
