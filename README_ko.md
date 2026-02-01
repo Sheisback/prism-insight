@@ -77,6 +77,24 @@ python3 demo.py TSLA --language ko  # Tesla (한국어 리포트)
 
 AI가 생성한 PDF 리포트는 `prism-us/pdf_reports/`에 저장됩니다.
 
+<details>
+<summary>🐳 또는 Docker로 실행 (Python 설치 불필요)</summary>
+
+```bash
+# 1. OpenAI API 키 설정
+export OPENAI_API_KEY=sk-your-key-here
+
+# 2. 컨테이너 시작
+docker-compose -f docker-compose.quickstart.yml up -d
+
+# 3. 분석 실행
+docker exec -it prism-quickstart python3 demo.py NVDA
+```
+
+리포트는 `./quickstart-output/`에 저장됩니다.
+
+</details>
+
 ---
 
 ## 🚀 전체 설치
