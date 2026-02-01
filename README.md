@@ -77,6 +77,24 @@ python3 demo.py TSLA --language ko  # Tesla (Korean report)
 
 Your AI-generated PDF reports will be saved in `prism-us/pdf_reports/`.
 
+<details>
+<summary>🐳 Or use Docker (no Python setup needed)</summary>
+
+```bash
+# 1. Set your OpenAI API key
+export OPENAI_API_KEY=sk-your-key-here
+
+# 2. Start container
+docker-compose -f docker-compose.quickstart.yml up -d
+
+# 3. Run analysis
+docker exec -it prism-quickstart python3 demo.py NVDA
+```
+
+Reports will be saved to `./quickstart-output/`.
+
+</details>
+
 ---
 
 ## 🚀 Full Installation
