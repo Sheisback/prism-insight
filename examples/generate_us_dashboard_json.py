@@ -48,6 +48,14 @@ except ImportError:
     YFINANCE_AVAILABLE = False
     logger.warning("yfinance not installed. Market index data will be unavailable.")
 
+# KIS US Stock Trading import
+try:
+    from trading.us_stock_trading import USStockTrading
+    KIS_US_AVAILABLE = True
+except ImportError:
+    KIS_US_AVAILABLE = False
+    logger.warning("KIS US Stock Trading module not available. Real portfolio will be empty.")
+
 # Translation utility import (after path setup)
 try:
     from translation_utils import DashboardTranslator
@@ -103,6 +111,84 @@ class USDashboardDataGenerator:
                 logger.error(f"Translator initialization failed: {str(e)}")
         else:
             logger.info("Translation feature disabled.")
+
+    def get_kis_us_trading_data(self) -> Dict[str, Any]:
+        """Get real trading data from KIS US Stock API"""
+        if not KIS_US_AVAILABLE:
+            logger.warning("KIS US Stock Trading API not available.")
+            return {"portfolio": [], "account_summary": {}}
+
+        try:
+            logger.info(f"Fetching KIS US trading data... (mode: {self.trading_mode})")
+            trader = USStockTrading(mode=self.trading_mode)
+
+            # Get portfolio data
+            portfolio = trader.get_portfolio()
+            logger.info(f"US Portfolio fetched: {len(portfolio)} stocks")
+
+            # Get account summary
+            account_summary = trader.get_account_summary() or {}
+            logger.info("US Account summary fetched")
+
+            # Format portfolio for dashboard
+            formatted_portfolio = []
+            for stock in portfolio:
+                formatted_stock = {
+                    "ticker": stock.get("ticker", ""),
+                    "name": stock.get("stock_name", ""),
+                    "quantity": stock.get("quantity", 0),
+                    "avg_price": stock.get("avg_price", 0),
+                    "current_price": stock.get("current_price", 0),
+                    "value": stock.get("eval_amount", 0),
+                    "profit": stock.get("profit_amount", 0),
+                    "profit_rate": stock.get("profit_rate", 0),
+                    "sector": "Real Trading",
+                    "exchange": stock.get("exchange", ""),
+                    "weight": 0  # Calculate later
+                }
+                formatted_portfolio.append(formatted_stock)
+
+            # Calculate portfolio weights
+            total_value = sum(s["value"] for s in formatted_portfolio)
+            if total_value > 0:
+                for stock in formatted_portfolio:
+                    stock["weight"] = (stock["value"] / total_value) * 100
+
+            return {
+                "portfolio": formatted_portfolio,
+                "account_summary": account_summary
+            }
+
+        except Exception as e:
+            logger.error(f"Error fetching KIS US trading data: {str(e)}")
+            return {"portfolio": [], "account_summary": {}}
+
+    def calculate_real_trading_summary(self, real_portfolio: List[Dict], account_summary: Dict) -> Dict:
+        """Calculate real trading summary statistics"""
+        if not real_portfolio and not account_summary:
+            return {
+                'total_stocks': 0,
+                'total_eval_amount': 0,
+                'total_profit_amount': 0,
+                'total_profit_rate': 0,
+                'deposit': 0,
+                'total_cash': 0,
+                'available_amount': 0
+            }
+
+        total_eval = sum(s.get('value', 0) for s in real_portfolio)
+        total_profit = sum(s.get('profit', 0) for s in real_portfolio)
+        total_cost = total_eval - total_profit
+
+        return {
+            'total_stocks': len(real_portfolio),
+            'total_eval_amount': total_eval,
+            'total_profit_amount': total_profit,
+            'total_profit_rate': (total_profit / total_cost * 100) if total_cost > 0 else 0,
+            'deposit': account_summary.get('total_eval_amount', 0) + account_summary.get('usd_cash', 0),
+            'total_cash': account_summary.get('usd_cash', 0),
+            'available_amount': account_summary.get('available_amount', 0)
+        }
 
     def connect_db(self):
         """Connect to database"""
@@ -865,6 +951,13 @@ class USDashboardDataGenerator:
                 'prism_simulator_return': prism_return
             })
 
+        # Include trades after the last market data date in the final entry
+        if result and cumulative_by_date:
+            final_cumulative = max(cumulative_by_date.values())
+            if final_cumulative != result[-1]['cumulative_realized_profit']:
+                result[-1]['cumulative_realized_profit'] = final_cumulative
+                result[-1]['prism_simulator_return'] = final_cumulative / 10
+
         return result
 
     def generate(self) -> Dict:
@@ -889,9 +982,17 @@ class USDashboardDataGenerator:
             performance_analysis = self.get_us_performance_analysis(conn)
             trading_insights['performance_analysis'] = performance_analysis
 
+            # Get KIS US real trading data
+            kis_data = self.get_kis_us_trading_data()
+            real_portfolio = kis_data.get("portfolio", [])
+            account_summary = kis_data.get("account_summary", {})
+
             # Calculate summary statistics
             portfolio_summary = self.calculate_portfolio_summary(holdings)
             trading_summary = self.calculate_trading_summary(trading_history)
+
+            # Calculate real trading summary
+            real_trading_summary = self.calculate_real_trading_summary(real_portfolio, account_summary)
 
             # Calculate Prism US simulator cumulative profit by date
             prism_performance = self.calculate_cumulative_realized_profit(
@@ -926,19 +1027,11 @@ class USDashboardDataGenerator:
                         'adjustment_needed': 0,
                         'avg_confidence': 0
                     },
-                    'real_trading': {
-                        'total_stocks': 0,
-                        'total_eval_amount': 0,
-                        'total_profit_amount': 0,
-                        'total_profit_rate': 0,
-                        'deposit': 0,
-                        'total_cash': 0,
-                        'available_amount': 0
-                    }
+                    'real_trading': real_trading_summary
                 },
                 'holdings': holdings,
-                'real_portfolio': [],  # Real US trading portfolio (future KIS overseas API integration)
-                'account_summary': {},
+                'real_portfolio': real_portfolio,
+                'account_summary': account_summary,
                 'trading_history': trading_history,
                 'watchlist': watchlist,
                 'market_condition': market_condition,
@@ -949,7 +1042,7 @@ class USDashboardDataGenerator:
 
             conn.close()
 
-            logger.info(f"US data collection complete: Holdings {len(holdings)}, Trades {len(trading_history)}, Watchlist {len(watchlist)}")
+            logger.info(f"US data collection complete: Holdings {len(holdings)}, Real {len(real_portfolio)}, Trades {len(trading_history)}, Watchlist {len(watchlist)}")
 
             return dashboard_data
 
