@@ -295,6 +295,52 @@ class USDashboardDataGenerator:
 
         return history
 
+    def get_us_holding_decisions(self, conn) -> List[Dict]:
+        """Get US holding decisions data (today only, with company name)"""
+        try:
+            cursor = conn.cursor()
+            today = datetime.now().strftime("%Y-%m-%d")
+
+            # Check if table exists
+            cursor.execute("""
+                SELECT name FROM sqlite_master
+                WHERE type='table' AND name='us_holding_decisions'
+            """)
+            if not cursor.fetchone():
+                logger.warning("us_holding_decisions table not found")
+                return []
+
+            # LEFT JOIN with us_stock_holdings to get company_name
+            cursor.execute("""
+                SELECT hd.id, hd.ticker, hd.decision_date, hd.decision_time, hd.current_price,
+                       hd.should_sell, hd.sell_reason, hd.confidence, hd.technical_trend,
+                       hd.volume_analysis, hd.market_condition_impact, hd.time_factor,
+                       hd.portfolio_adjustment_needed, hd.adjustment_reason,
+                       hd.new_target_price, hd.new_stop_loss, hd.adjustment_urgency,
+                       hd.full_json_data, hd.created_at,
+                       sh.company_name
+                FROM us_holding_decisions hd
+                LEFT JOIN us_stock_holdings sh ON hd.ticker = sh.ticker
+                WHERE hd.decision_date = ?
+                ORDER BY hd.created_at DESC
+            """, (today,))
+
+            decisions = []
+            for row in cursor.fetchall():
+                decision = self.dict_from_row(row, cursor)
+
+                # Parse full_json_data
+                decision['full_json_data'] = self.parse_json_field(decision.get('full_json_data', ''))
+
+                decisions.append(decision)
+
+            logger.info(f"US holding decisions: {len(decisions)} records for today")
+            return decisions
+
+        except Exception as e:
+            logger.warning(f"us_holding_decisions query failed (table may not exist): {str(e)}")
+            return []
+
     def get_us_watchlist_history(self, conn) -> List[Dict]:
         """Get US watchlist (not entered stocks) data"""
         cursor = conn.cursor()
@@ -973,6 +1019,7 @@ class USDashboardDataGenerator:
             holdings = self.get_us_stock_holdings(conn)
             trading_history = self.get_us_trading_history(conn)
             watchlist = self.get_us_watchlist_history(conn)
+            holding_decisions = self.get_us_holding_decisions(conn)
             market_condition = self.get_us_market_condition()
 
             # Get US trading insights
@@ -1036,7 +1083,7 @@ class USDashboardDataGenerator:
                 'watchlist': watchlist,
                 'market_condition': market_condition,
                 'prism_performance': prism_performance,
-                'holding_decisions': [],  # US holding decisions (future)
+                'holding_decisions': holding_decisions,
                 'trading_insights': trading_insights
             }
 

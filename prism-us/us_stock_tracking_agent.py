@@ -1145,6 +1145,116 @@ class USStockTrackingAgent:
             logger.error(f"Error analyzing sell decision: {str(e)}")
             return False, "분석 오류"
 
+    async def _save_holding_decision(
+        self,
+        ticker: str,
+        current_price: float,
+        should_sell: bool,
+        sell_reason: str,
+        stock_data: Dict[str, Any]
+    ) -> bool:
+        """
+        Save AI sell decision results for held stocks to us_holding_decisions table.
+        Main flow continues even if this fails.
+
+        Args:
+            ticker: Stock ticker
+            current_price: Current price
+            should_sell: Whether to sell
+            sell_reason: Reason for decision
+            stock_data: Full stock data for context
+
+        Returns:
+            bool: Save success status
+        """
+        try:
+            now = datetime.now()
+            decision_date = now.strftime("%Y-%m-%d")
+            decision_time = now.strftime("%H:%M:%S")
+
+            # Build decision JSON for storage
+            buy_price = stock_data.get('buy_price', 0)
+            profit_rate = ((current_price - buy_price) / buy_price * 100) if buy_price > 0 else 0
+
+            decision_json = {
+                "should_sell": should_sell,
+                "sell_reason": sell_reason,
+                "confidence": 7 if should_sell else 5,  # Rule-based confidence
+                "analysis_summary": {
+                    "technical_trend": "Rule-based analysis",
+                    "volume_analysis": "",
+                    "market_condition_impact": "",
+                    "time_factor": f"Holding days: {stock_data.get('holding_days', 0)}"
+                },
+                "portfolio_adjustment": {
+                    "needed": False,
+                    "reason": "",
+                    "new_target_price": stock_data.get('target_price'),
+                    "new_stop_loss": stock_data.get('stop_loss'),
+                    "urgency": "low"
+                },
+                "current_price": current_price,
+                "buy_price": buy_price,
+                "profit_rate": profit_rate
+            }
+
+            full_json_data = json.dumps(decision_json, ensure_ascii=False)
+
+            # Delete existing data then insert new (keep only latest decision for same ticker)
+            self.cursor.execute("DELETE FROM us_holding_decisions WHERE ticker = ?", (ticker,))
+
+            # Insert new decision
+            self.cursor.execute("""
+                INSERT INTO us_holding_decisions (
+                    ticker, decision_date, decision_time, current_price, should_sell,
+                    sell_reason, confidence, technical_trend, volume_analysis,
+                    market_condition_impact, time_factor, portfolio_adjustment_needed,
+                    adjustment_reason, new_target_price, new_stop_loss, adjustment_urgency,
+                    full_json_data
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                ticker, decision_date, decision_time, current_price, should_sell,
+                sell_reason, decision_json.get("confidence", 5),
+                decision_json["analysis_summary"]["technical_trend"],
+                decision_json["analysis_summary"]["volume_analysis"],
+                decision_json["analysis_summary"]["market_condition_impact"],
+                decision_json["analysis_summary"]["time_factor"],
+                decision_json["portfolio_adjustment"]["needed"],
+                decision_json["portfolio_adjustment"]["reason"],
+                decision_json["portfolio_adjustment"]["new_target_price"],
+                decision_json["portfolio_adjustment"]["new_stop_loss"],
+                decision_json["portfolio_adjustment"]["urgency"],
+                full_json_data
+            ))
+
+            self.conn.commit()
+            logger.info(f"{ticker} US holding decision saved - should_sell: {should_sell}")
+            return True
+
+        except Exception as e:
+            logger.error(f"{ticker} US holding decision save failed (main flow continues): {str(e)}")
+            return False
+
+    async def _delete_holding_decision(self, ticker: str) -> bool:
+        """
+        Delete decision data for sold stocks from us_holding_decisions table.
+        Main flow continues even if this fails.
+
+        Args:
+            ticker: Stock ticker
+
+        Returns:
+            bool: Delete success status
+        """
+        try:
+            self.cursor.execute("DELETE FROM us_holding_decisions WHERE ticker = ?", (ticker,))
+            self.conn.commit()
+            logger.info(f"{ticker} US holding decision deleted")
+            return True
+        except Exception as e:
+            logger.error(f"{ticker} US holding decision delete failed: {str(e)}")
+            return False
+
     async def sell_stock(self, stock_data: Dict[str, Any], sell_reason: str) -> bool:
         """
         Process stock sale.
@@ -1274,6 +1384,9 @@ class USStockTrackingAgent:
                 should_sell, sell_reason = await self._analyze_sell_decision(stock)
 
                 if should_sell:
+                    # Delete from holding_decisions when selling
+                    await self._delete_holding_decision(ticker)
+
                     sell_success = await self.sell_stock(stock, sell_reason)
 
                     if sell_success:
@@ -1346,6 +1459,9 @@ class USStockTrackingAgent:
                             "reason": sell_reason
                         })
                 else:
+                    # Save holding decision when not selling
+                    await self._save_holding_decision(ticker, current_price, should_sell, sell_reason, stock)
+
                     # Update current price
                     self.cursor.execute(
                         """UPDATE us_stock_holdings
