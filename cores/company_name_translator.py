@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 _translation_cache: Dict[str, str] = {}
 
 
-def _sanitize_for_filename(name: str) -> str:
+def _sanitize_for_filename(name: str, ascii_only: bool = False) -> str:
     """
     Convert name to filename-safe format.
 
@@ -25,6 +25,7 @@ def _sanitize_for_filename(name: str) -> str:
 
     Args:
         name: Company name to sanitize
+        ascii_only: If True, only keep ASCII alphanumeric characters (removes Korean, etc.)
 
     Returns:
         Filename-safe string
@@ -32,8 +33,12 @@ def _sanitize_for_filename(name: str) -> str:
     # Replace spaces with underscores
     sanitized = name.strip().replace(" ", "_")
 
-    # Remove characters not safe for filenames (keep alphanumeric, underscore, hyphen)
-    sanitized = re.sub(r'[^\w\-]', '', sanitized, flags=re.UNICODE)
+    if ascii_only:
+        # For English filenames: only keep ASCII alphanumeric, underscore, hyphen
+        sanitized = re.sub(r'[^a-zA-Z0-9_\-]', '', sanitized)
+    else:
+        # Keep Unicode word characters (allows Korean, etc.)
+        sanitized = re.sub(r'[^\w\-]', '', sanitized, flags=re.UNICODE)
 
     # Collapse multiple underscores
     sanitized = re.sub(r'_+', '_', sanitized)
@@ -118,13 +123,14 @@ Return ONLY the English company name, nothing else. No quotes, no explanation.
         )
 
         # Clean and sanitize the result
+        # Use ascii_only=True to ensure English-only filename (no Korean characters)
         english_name = english_name.strip().strip('"\'')
-        sanitized_name = _sanitize_for_filename(english_name)
+        sanitized_name = _sanitize_for_filename(english_name, ascii_only=True)
 
-        # Fallback to Korean name if translation is empty
+        # Fallback to ticker-based name if translation is empty (don't use Korean in English filename)
         if not sanitized_name:
-            logger.warning(f"Translation returned empty for '{korean_name}', using Korean name as fallback")
-            sanitized_name = _sanitize_for_filename(korean_name)
+            logger.warning(f"Translation returned empty for '{korean_name}', using 'Company' as fallback")
+            sanitized_name = "Company"
 
         # Cache the result
         _translation_cache[korean_name] = sanitized_name
@@ -134,8 +140,9 @@ Return ONLY the English company name, nothing else. No quotes, no explanation.
 
     except Exception as e:
         logger.error(f"Failed to translate company name '{korean_name}': {str(e)}")
-        # Fallback: return sanitized original name
-        fallback = _sanitize_for_filename(korean_name)
+        # Fallback: return generic name (don't use Korean characters in English filename)
+        # Korean name would fail the ascii_only sanitization anyway
+        fallback = "Company"
         _translation_cache[korean_name] = fallback
         return fallback
 

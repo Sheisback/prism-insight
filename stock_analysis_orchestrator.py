@@ -144,10 +144,12 @@ class StockAnalysisOrchestrator:
                 pass
 
         if target_lang == "en":
+            # Translate Korean company name to English for English channel
             translated_name = await translate_company_name(parsed['company_name']) if parsed['company_name'] else ""
         else:
-            # For other languages, keep original (sanitized)
-            translated_name = parsed['company_name']
+            # For other languages (ja, zh, etc.), also translate to English for filename compatibility
+            # This ensures PDF filenames don't contain Korean characters in any broadcast channel
+            translated_name = await translate_company_name(parsed['company_name']) if parsed['company_name'] else ""
 
         # Reconstruct filename
         # Format: {ticker}_{translated_company}_{date}_{mode}_{suffix}_{lang}.md
