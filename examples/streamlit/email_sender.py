@@ -8,8 +8,8 @@ import markdown.extensions.tables
 from config import SMTP_SERVER, SMTP_PORT, SENDER_EMAIL, SENDER_PASSWORD
 
 def convert_md_to_html(md_content: str) -> str:
-    """마크다운을 HTML로 변환"""
-    # GitHub 스타일의 CSS
+    """Convert Markdown to HTML"""
+    # GitHub-style CSS
     css = """
     <style>
         body { 
@@ -29,7 +29,7 @@ def convert_md_to_html(md_content: str) -> str:
     </style>
     """
 
-    # 마크다운을 HTML로 변환
+    # Convert Markdown to HTML
     html = markdown.markdown(
         md_content,
         extensions=[
@@ -39,7 +39,7 @@ def convert_md_to_html(md_content: str) -> str:
         ]
     )
 
-    # 완성된 HTML 문서
+    # Complete HTML document
     complete_html = f"""
     <!DOCTYPE html>
     <html>
@@ -56,38 +56,38 @@ def convert_md_to_html(md_content: str) -> str:
     return complete_html
 
 def send_email(to_email: str, report_content: str) -> bool:
-    """이메일 전송 함수"""
+    """Email sending function"""
     try:
-        # 이메일 메시지 생성
+        # Create email message
         msg = MIMEMultipart('alternative')
         msg['From'] = SENDER_EMAIL
         msg['To'] = to_email
         msg['Subject'] = "주식 종목 분석 보고서"
 
-        # 1. HTML 버전 (메인 컨텐츠)
+        # 1. HTML version (main content)
         html_content = convert_md_to_html(report_content)
         msg.attach(MIMEText(html_content, 'html'))
 
-        # 2. 마크다운 파일 첨부
+        # 2. Attach Markdown file
         md_attachment = MIMEText(report_content, 'plain')
         md_attachment.add_header('Content-Disposition', 'attachment', filename='analysis_report.md')
         msg.attach(md_attachment)
 
-        # 3. HTML 파일 첨부
+        # 3. Attach HTML file
         html_attachment = MIMEText(html_content, 'html')
         html_attachment.add_header('Content-Disposition', 'attachment', filename='analysis_report.html')
         msg.attach(html_attachment)
 
-        # SMTP 서버 연결 및 로그인
+        # Connect to SMTP server and login
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
         server.starttls()
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
 
-        # 이메일 발송
+        # Send email
         server.send_message(msg)
         server.quit()
         return True
 
     except Exception as e:
-        print(f"이메일 전송 중 오류 발생: {str(e)}")
+        print(f"Error sending email: {str(e)}")
         return False

@@ -36,7 +36,10 @@ logger.addHandler(handler)
 logger.setLevel(logging.INFO)
 
 def configure_korean_font():
-    """Robust function for Korean font configuration - Supports Rocky Linux 8 & Ubuntu 22.04"""
+    """
+    Robust function for Korean font configuration
+    Supports Rocky Linux 8, Ubuntu 22.04, macOS, and Windows
+    """
     global KOREAN_FONT_PATH, KOREAN_FONT_PROP
     import glob  # For wildcard path processing
 
@@ -46,28 +49,28 @@ def configure_korean_font():
     plt.rcParams['axes.unicode_minus'] = False
 
     if system == 'Darwin':  # macOS
-        # macOS font paths
+        # macOS system and user font paths
         font_paths = [
             '/System/Library/Fonts/AppleSDGothicNeo.ttc',
             '/Library/Fonts/AppleSDGothicNeo.ttc',
             '/System/Library/Fonts/Supplemental/AppleGothic.ttf',
-            # Paths when Nanum fonts are installed
+            # Additional paths for manually installed Nanum fonts
             '/Library/Fonts/NanumGothic.ttf',
-            # User font directories
+            # User-specific font directories
             os.path.expanduser('~/Library/Fonts/AppleSDGothicNeo.ttc'),
             os.path.expanduser('~/Library/Fonts/NanumGothic.ttf'),
         ]
 
-        # Check if font files exist
+        # Check if font files exist and try to load them
         for path in font_paths:
             if os.path.exists(path):
                 try:
-                    # Register with font manager
+                    # Register font with matplotlib font manager
                     fm.fontManager.addfont(path)
                     KOREAN_FONT_PATH = path
                     KOREAN_FONT_PROP = fm.FontProperties(fname=path)
 
-                    # matplotlib configuration
+                    # Set matplotlib global font configuration
                     plt.rcParams['font.family'] = 'AppleSDGothicNeo'
                     mpl.rcParams['font.family'] = 'AppleSDGothicNeo'
 
@@ -80,14 +83,14 @@ def configure_korean_font():
                     logger.debug(f"macOS font format error: {path} -> {e}")
                     continue
 
-        # If path search fails, try by font name
+        # If file path search fails, try searching by font name
         korean_font_list = ['AppleSDGothicNeo-Regular', 'Apple SD Gothic Neo', 'AppleGothic', 'Malgun Gothic', 'NanumGothic']
         for font_name in korean_font_list:
             try:
-                # Find font with matching name from installed system fonts
+                # Search installed system fonts by name
                 font_path = fm.findfont(fm.FontProperties(family=font_name))
                 if font_path and not font_path.endswith('afm'):
-                    # matplotlib configuration
+                    # Set matplotlib global font configuration
                     plt.rcParams['font.family'] = font_name
                     mpl.rcParams['font.family'] = font_name
                     KOREAN_FONT_PATH = font_path
@@ -103,7 +106,7 @@ def configure_korean_font():
                 continue
 
     elif system == 'Windows':
-        # Windows case
+        # Windows default Korean font (Malgun Gothic)
         try:
             plt.rcParams['font.family'] = 'Malgun Gothic'
             mpl.rcParams['font.family'] = 'Malgun Gothic'
@@ -115,18 +118,18 @@ def configure_korean_font():
         except (OSError, RuntimeError) as e:
             logger.debug(f"Windows font system error: {e}")
 
-    else:  # Linux (Supports Rocky Linux 8 & Ubuntu 22.04+)
-        # Distribution-specific font paths
+    else:  # Linux (Rocky Linux 8, Ubuntu 22.04+, and other distributions)
+        # Linux distribution-specific font paths
         font_paths = []
 
-        # Rocky Linux 8 / CentOS 8 / RHEL 8 paths
+        # Rocky Linux 8 / CentOS 8 / RHEL 8 font paths
         rocky_paths = [
             '/usr/share/fonts/google-nanum/NanumGothic.ttf',
             '/usr/share/fonts/nanum/NanumGothicCoding.ttf',
             '/usr/share/fonts/korean/NanumGothic.ttf',
         ]
 
-        # Ubuntu 22.04 / Debian-based paths
+        # Ubuntu 22.04 / Debian-based distribution font paths
         ubuntu_paths = [
             '/usr/share/fonts/truetype/nanum/NanumGothic.ttf',
             '/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf',
@@ -135,7 +138,7 @@ def configure_korean_font():
             '/usr/share/fonts/nanum/NanumGothic.ttf',
         ]
 
-        # Common paths (supports various installation methods)
+        # Common font paths (for manual installations)
         common_paths = [
             '/usr/share/fonts/NanumGothic.ttf',
             '/usr/local/share/fonts/NanumGothic.ttf',
@@ -144,24 +147,24 @@ def configure_korean_font():
             '/home/*/.local/share/fonts/NanumGothic.ttf',
         ]
 
-        # Combine all paths (Rocky → Ubuntu → Common order)
+        # Combine all paths (priority: Rocky → Ubuntu → Common)
         font_paths = rocky_paths + ubuntu_paths + common_paths
 
-        # Search font files (supports wildcards)
+        # Search for font files (supports wildcard patterns like /home/*)
         for path in font_paths:
             try:
-                # Handle wildcard paths (/home/* etc.)
+                # Handle wildcard paths (e.g., /home/*/fonts)
                 if '*' in path:
                     matching_paths = glob.glob(path)
                     for match_path in matching_paths:
                         if os.path.exists(match_path):
                             try:
-                                # Register with font manager
+                                # Register font with matplotlib font manager
                                 fm.fontManager.addfont(match_path)
                                 KOREAN_FONT_PATH = match_path
                                 KOREAN_FONT_PROP = fm.FontProperties(fname=match_path)
 
-                                # matplotlib configuration
+                                # Set matplotlib global font configuration
                                 plt.rcParams['font.family'] = 'NanumGothic'
                                 mpl.rcParams['font.family'] = 'NanumGothic'
 
@@ -177,15 +180,15 @@ def configure_korean_font():
                                 logger.debug(f"Linux font permission error: {match_path} -> {e}")
                                 continue
                 else:
-                    # Handle regular paths
+                    # Handle regular file paths (no wildcards)
                     if os.path.exists(path):
                         try:
-                            # Register with font manager
+                            # Register font with matplotlib font manager
                             fm.fontManager.addfont(path)
                             KOREAN_FONT_PATH = path
                             KOREAN_FONT_PROP = fm.FontProperties(fname=path)
 
-                            # matplotlib configuration
+                            # Set matplotlib global font configuration
                             plt.rcParams['font.family'] = 'NanumGothic'
                             mpl.rcParams['font.family'] = 'NanumGothic'
 
@@ -204,7 +207,7 @@ def configure_korean_font():
                 logger.debug(f"glob pattern processing error: {path} -> {e}")
                 continue
 
-        # Retry with matplotlib font manager if path search fails
+        # If file path search fails, try searching with matplotlib font manager
         logger.info("Path search failed, searching with matplotlib font manager...")
         korean_font_names = [
             'NanumGothic', 'Nanum Gothic', 'NanumBarunGothic', 'Nanum Barun Gothic',
@@ -215,13 +218,13 @@ def configure_korean_font():
             try:
                 font_path = fm.findfont(fm.FontProperties(family=font_name))
                 if font_path and not font_path.endswith('.afm') and os.path.exists(font_path):
-                    # matplotlib configuration
+                    # Set matplotlib global font configuration
                     plt.rcParams['font.family'] = font_name
                     mpl.rcParams['font.family'] = font_name
                     KOREAN_FONT_PATH = font_path
                     KOREAN_FONT_PROP = fm.FontProperties(family=font_name)
 
-                    logger.info(f"Korean font configured (manager): {font_name} -> {font_path}")
+                    logger.info(f"Korean font configured (via font manager): {font_name} -> {font_path}")
                     return font_path
             except (AttributeError, KeyError) as e:
                 logger.debug(f"Linux font manager attribute error: {font_name} -> {e}")
@@ -233,20 +236,20 @@ def configure_korean_font():
                 logger.debug(f"Linux font manager value error: {font_name} -> {e}")
                 continue
 
-    # Installation guide by distribution when all attempts fail
+    # Display installation instructions when all font detection attempts fail
     logger.info("⚠️ Korean font configuration failed: Korean text may not display properly.")
 
-    # Distribution-specific installation instructions
+    # Provide distribution-specific installation instructions
     try:
         if system == 'Linux':
-            # Detect Rocky Linux / CentOS / RHEL
+            # Detect Rocky Linux / CentOS / RHEL distributions
             if (os.path.exists('/etc/rocky-release') or
                     os.path.exists('/etc/centos-release') or
                     os.path.exists('/etc/redhat-release')):
                 logger.info("Rocky Linux/CentOS/RHEL Korean font installation:")
                 logger.info("sudo dnf install google-nanum-fonts")
 
-            # Detect Ubuntu / Debian
+            # Detect Ubuntu / Debian distributions
             elif (os.path.exists('/etc/debian_version') or
                   os.path.exists('/etc/lsb-release')):
                 logger.info("Ubuntu/Debian Korean font installation:")
@@ -267,11 +270,11 @@ def configure_korean_font():
 
     return None
 
-# Initialize global variables
+# Initialize global font variables
 KOREAN_FONT_PATH = None
 KOREAN_FONT_PROP = None
 
-# Configure immediately on execution
+# Configure Korean font immediately on module import
 KOREAN_FONT_PATH = configure_korean_font()
 
 def get_chart_as_base64_html(ticker, company_name, chart_function, chart_name, width=900,
@@ -308,7 +311,7 @@ def get_chart_as_base64_html(ticker, company_name, chart_function, chart_name, w
         if fig is None:
             return None
 
-        # Save image to memory (apply compression settings)
+        # Save image to in-memory buffer (apply compression settings)
         buffer = BytesIO()
 
         # Configure save options based on image format
@@ -321,70 +324,73 @@ def get_chart_as_base64_html(ticker, company_name, chart_function, chart_name, w
         if image_format.lower() == 'png' and compress:
             save_kwargs['transparent'] = False
             save_kwargs['facecolor'] = 'white'
-            save_kwargs['compress_level'] = 9  # Maximum compression (0-9)
+            save_kwargs['compress_level'] = 9  # Maximum PNG compression (0-9 scale)
 
-        # Save without quality parameter
+        # Save figure to buffer (no quality parameter for PNG)
         fig.savefig(buffer, **save_kwargs)
 
-        plt.close(fig)  # Prevent memory leak
+        plt.close(fig)  # Close figure to prevent memory leak
         buffer.seek(0)
 
-        # Additional image compression (using PIL)
+        # Apply additional JPEG compression using PIL if available
         if compress and image_format.lower() in ['jpg', 'jpeg']:
             try:
                 from PIL import Image
-                # Read image from buffer
+                # Load image from buffer
                 img = Image.open(buffer)
-                # Compress and save to new buffer
+                # Compress and save to new buffer with quality=85
                 new_buffer = BytesIO()
                 img.save(new_buffer, format='JPEG', quality=85, optimize=True)
                 buffer = new_buffer
                 buffer.seek(0)
             except ImportError:
-                # Proceed without PIL if library not available
+                # Continue without PIL if not available
                 pass
 
-        # Encode to Base64
+        # Encode image to Base64 string
         img_str = base64.b64encode(buffer.getvalue()).decode('utf-8')
 
-        # File size debugging (optional)
+        # Optional: Log file size for debugging
         # size_kb = len(buffer.getvalue()) / 1024
         # logger.info(f"Chart '{chart_name}' size: {size_kb:.1f} KB")
 
-        # Set MIME type based on image format
+        # Determine MIME type based on image format
         content_type = f"image/{image_format.lower()}"
         if image_format.lower() == 'jpg':
             content_type = 'image/jpeg'
 
-        # Generate HTML image tag
+        # Return HTML image tag with embedded Base64 data
         return f'<img src="data:{content_type};base64,{img_str}" alt="{company_name} {chart_name}" width="{width}" />'
 
     except Exception as e:
         logger.error(f"Error occurred during chart generation: {str(e)}")
         return  None
 
-# Custom style for Korean text display in mplfinance
+# Custom mplfinance style for Korean text display
 def create_mpf_style(base_mpl_style='seaborn-v0_8-whitegrid'):
-    """Generate Korean-compatible style for mplfinance library"""
-    # Use base style
+    """
+    Generate Korean-compatible chart style for mplfinance library
+    Applies Korean font settings and custom color scheme
+    """
+    # Apply base matplotlib style
     plt.style.use(base_mpl_style)
 
-    # RC parameters including Korean font settings
+    # Configure RC parameters with Korean font support
     rc_font = {
         'font.family': plt.rcParams['font.family'],
         'font.size': 10,
-        'axes.unicode_minus': False
+        'axes.unicode_minus': False  # Prevent minus sign display issues
     }
 
-    # Chart color configuration
+    # Define candlestick chart colors
     mc = mpf.make_marketcolors(
-        up='#089981', down='#F23645',
+        up='#089981', down='#F23645',  # Green for up, red for down
         edge='inherit',
         wick='inherit',
         volume={'up': '#a3f7b5', 'down': '#ffa5a5'},
     )
 
-    # Generate mplfinance style
+    # Create mplfinance style with custom settings
     s = mpf.make_mpf_style(
         marketcolors=mc,
         gridstyle='-',
@@ -496,49 +502,49 @@ def create_price_chart(ticker, company_name=None, days=730, save_path=None, adju
     df = df.sort_index()
 
     # Calculate moving averages (krx_data_client returns English column names)
-    df['MA20'] = df['Close'].rolling(window=20).mean()
-    df['MA60'] = df['Close'].rolling(window=60).mean()
-    df['MA120'] = df['Close'].rolling(window=120).mean()
+    df['MA20'] = df['Close'].rolling(window=20).mean()  # 20-day moving average
+    df['MA60'] = df['Close'].rolling(window=60).mean()  # 60-day moving average
+    df['MA120'] = df['Close'].rolling(window=120).mean()  # 120-day moving average
 
-    # DataFrame for mplfinance (use as-is since columns are already in English)
+    # Prepare OHLCV DataFrame for mplfinance (columns already in English format)
     ohlc_df = df[['Open', 'High', 'Low', 'Close', 'Volume']].copy()
 
-    # Create Korean-compatible mplfinance style
+    # Create Korean-compatible mplfinance chart style
     s = create_mpf_style()
 
-    # Plot title
+    # Set chart title
     title = f"{company_name} ({ticker}) - Price Chart"
 
-    # Additional plot settings
+    # Configure moving average overlay plots
     additional_plots = [
-        mpf.make_addplot(df['MA20'], color='#ff9500', width=1),
-        mpf.make_addplot(df['MA60'], color='#0066cc', width=1.5),
-        mpf.make_addplot(df['MA120'], color='#cc3300', width=1.5, linestyle='--'),
+        mpf.make_addplot(df['MA20'], color='#ff9500', width=1),  # 20-day MA (orange)
+        mpf.make_addplot(df['MA60'], color='#0066cc', width=1.5),  # 60-day MA (blue)
+        mpf.make_addplot(df['MA120'], color='#cc3300', width=1.5, linestyle='--'),  # 120-day MA (red, dashed)
     ]
 
     if KOREAN_FONT_PATH:
-        # Register Korean font directly (for mplfinance)
+        # Apply Korean font to mplfinance charts
         font_prop = fm.FontProperties(fname=KOREAN_FONT_PATH)
         plt.rcParams['font.family'] = font_prop.get_name()
         mpl.rcParams['font.family'] = font_prop.get_name()
 
-    # Create chart
+    # Generate candlestick chart with volume
     fig, axes = mpf.plot(
         ohlc_df,
-        type='candle',
+        type='candle',  # Candlestick chart type
         style=s,
         title=title,
         ylabel='Price',
-        volume=True,
+        volume=True,  # Include volume subplot
         figsize=(12, 8),
         tight_layout=True,
-        addplot=additional_plots,
-        panel_ratios=(4, 1),
+        addplot=additional_plots,  # Add moving averages
+        panel_ratios=(4, 1),  # Price:Volume height ratio
         returnfig=True
     )
 
     if KOREAN_FONT_PROP:
-        # Reset title
+        # Apply Korean font to main title
         fig.suptitle(
             f"{company_name} ({ticker}) - Price Chart",
             fontproperties=KOREAN_FONT_PROP,
@@ -546,18 +552,18 @@ def create_price_chart(ticker, company_name=None, days=730, save_path=None, adju
             fontweight='bold'
         )
 
-    # Get price and volume axes
+    # Extract price and volume subplot axes
     ax1, ax2 = axes[0], axes[2]
 
-    # Add moving average legend
+    # Add legend for moving averages
     ax1.legend(['MA20', 'MA60', 'MA120'], loc='upper left')
 
-    # Add annotations to important price points
-    max_point = df['Close'].idxmax()
-    min_point = df['Close'].idxmin()
-    last_point = df.index[-1]
+    # Identify key price points for annotation
+    max_point = df['Close'].idxmax()  # Highest closing price date
+    min_point = df['Close'].idxmin()  # Lowest closing price date
+    last_point = df.index[-1]  # Most recent date
 
-    # Annotation styling
+    # Define annotation box style
     bbox_props = dict(boxstyle="round,pad=0.3", fc="#f8f9fa", ec="none", alpha=0.9)
 
     ax1.annotate(
@@ -590,12 +596,12 @@ def create_price_chart(ticker, company_name=None, days=730, save_path=None, adju
         bbox=bbox_props
     )
 
-    # Set Y-axis formatter
+    # Format Y-axis numbers based on price range
     max_price = df['High'].max()
     formatter = select_number_formatter(max_price)
     ax1.yaxis.set_major_formatter(formatter)
 
-    # Add watermark
+    # Add watermark to chart
     fig.text(
         0.99, 0.01,
         "AI Stock Analysis",
@@ -605,9 +611,9 @@ def create_price_chart(ticker, company_name=None, days=730, save_path=None, adju
     )
 
     if save_path:
-        # Re-verify Korean font before saving
+        # Ensure Korean font is applied before saving
         if KOREAN_FONT_PROP:
-            # Reapply Korean font to important elements
+            # Apply Korean font to all text elements
             for ax in fig.axes:
                 for text in ax.texts:
                     text.set_fontproperties(KOREAN_FONT_PROP)
@@ -617,12 +623,12 @@ def create_price_chart(ticker, company_name=None, days=730, save_path=None, adju
                 if hasattr(ax, 'title') and ax.title is not None:
                     ax.title.set_fontproperties(KOREAN_FONT_PROP)
 
-                # Apply font to legend as well
+                # Apply font to legend text
                 if ax.legend_ is not None:
                     for text in ax.legend_.get_texts():
                         text.set_fontproperties(KOREAN_FONT_PROP)
 
-        # Increase resolution and specify backend
+        # Save chart with high resolution
         plt.savefig(save_path, dpi=300, bbox_inches='tight', backend='agg')
         plt.close()
         return save_path
@@ -816,23 +822,23 @@ def create_market_cap_chart(ticker, company_name=None, days=730, save_path=None)
 
 def create_fundamentals_chart(ticker, company_name=None, days=730, save_path=None):
     """
-    기본 지표 차트 생성 (PER, PBR, 배당수익률)
+    Generate fundamental indicators chart (PER, PBR, Dividend Yield)
 
     Parameters:
     -----------
     ticker : str
-        주식 티커 심볼
+        Stock ticker symbol
     company_name : str, optional
-        회사명 (제목용)
+        Company name (for title)
     days : int, optional
-        조회 기간 (일)
+        Query period (days)
     save_path : str, optional
-        차트 저장 경로 (None이면 화면에 표시)
+        Chart save path (display on screen if None)
 
     Returns:
     --------
     fig : matplotlib figure
-        차트가 포함된 figure 객체
+        Figure object containing the chart
     """
     # Calculate date range
     end_date = datetime.now().strftime('%Y%m%d')
@@ -849,7 +855,7 @@ def create_fundamentals_chart(ticker, company_name=None, days=730, save_path=Non
     df = get_market_fundamental_by_date(start_date, end_date, ticker)
 
     if df is None or len(df) == 0:
-        logger.info(f"{ticker}에 대한 기본 지표 데이터가 없습니다.")
+        logger.info(f"No fundamental indicator data available for {ticker}.")
         return None
 
     # Check if index is datetime
@@ -1055,23 +1061,23 @@ def create_fundamentals_chart(ticker, company_name=None, days=730, save_path=Non
 
 def create_trading_volume_chart(ticker, company_name=None, days=30, save_path=None):
     """
-    투자자별 거래량 차트 생성
+    Generate trading volume chart by investor type
 
     Parameters:
     -----------
     ticker : str
-        주식 티커 심볼
+        Stock ticker symbol
     company_name : str, optional
-        회사명 (제목용)
+        Company name (for title)
     days : int, optional
-        조회 기간 (일) - 수급 분석을 위해 기본값 30일
+        Query period (days) - default 30 days for supply/demand analysis
     save_path : str, optional
-        차트 저장 경로 (None이면 화면에 표시)
+        Chart save path (display on screen if None)
 
     Returns:
     --------
     fig : matplotlib figure
-        차트가 포함된 figure 객체
+        Figure object containing the chart
     """
     # Calculate date range
     end_date = datetime.now().strftime('%Y%m%d')
@@ -1101,18 +1107,18 @@ def create_trading_volume_chart(ticker, company_name=None, days=30, save_path=No
     # Create chart
     fig, axes = plt.subplots(2, 1, figsize=(12, 10), gridspec_kw={'height_ratios': [2, 3]})
 
-    # 1. Cumulative net purchases by major investors
-    # Select major investor types (Korean names used for data access)
+    # 1. Net purchase analysis by major investor groups
+    # Korean investor type names (as returned by pykrx API)
     investor_types = ['기관합계', '외국인합계', '개인', '기타법인']
 
-    # English mapping for display (full mapping of pykrx return values)
+    # Korean to English investor name mapping (comprehensive pykrx field mapping)
     investor_names_en = {
-        # Major investors
+        # Primary investor categories
         '기관합계': 'Institutions',
         '외국인합계': 'Foreigners',
         '개인': 'Individuals',
         '기타법인': 'Other Corps',
-        # Institutional details
+        # Institutional subcategories
         '금융투자': 'Securities',
         '보험': 'Insurance',
         '투신': 'Mutual Funds',
@@ -1121,20 +1127,20 @@ def create_trading_volume_chart(ticker, company_name=None, days=30, save_path=No
         '기타금융': 'Other Finance',
         '연기금등': 'Pension Funds',
         '연기금 등': 'Pension Funds',  # pykrx spacing variant
-        # Others
+        # Additional categories
         '전체': 'Total',
         '외국인': 'Foreigners',
         '기관': 'Institutions',
-        '기타외국인': 'Other Foreigners',  # pykrx additional investor type
+        '기타외국인': 'Other Foreigners',  # Additional pykrx investor type
     }
 
-    # Calculate total net purchases by investor (krx_data_client returns daily data)
-    # Calculate sum for each investor column
+    # Calculate cumulative net purchases by investor type (sum of daily data)
+    # Extract columns that match our investor types
     investor_cols = [col for col in df_volume.columns if col in investor_types]
     if investor_cols:
         investor_data = df_volume[investor_cols].sum()
 
-        # Draw chart
+        # Create bar chart
         bar_width = 0.6
         pos = np.arange(len(investor_data))
 
@@ -1146,32 +1152,33 @@ def create_trading_volume_chart(ticker, company_name=None, days=30, save_path=No
             alpha=0.7
         )
 
-        # Label and title settings
+        # Set subplot title
         axes[0].set_title("Net Purchase by Investor Type", fontsize=12, loc='left')
 
         axes[0].set_xticks(pos)
 
-        # Display X-axis labels in English
+        # Convert Korean labels to English for display
         english_labels = [investor_names_en.get(name, name) for name in investor_data.index]
         axes[0].set_xticklabels(english_labels, rotation=45)
 
+        # Add zero reference line
         axes[0].axhline(y=0, color='black', linestyle='-', alpha=0.3)
         axes[0].grid(axis='y', linestyle='--', alpha=0.7)
 
-        # Format numbers
+        # Format Y-axis numbers based on value range
         max_vol = investor_data.max()
         min_vol = investor_data.min()
         formatter = select_number_formatter(max(abs(max_vol), abs(min_vol)))
         axes[0].yaxis.set_major_formatter(formatter)
 
-        # Add data labels
+        # Add value labels on bars
         for bar in bars:
             height = bar.get_height()
             value = int(height)
             va = 'bottom' if height >= 0 else 'top'
             y_pos = 0.3 if height >= 0 else -0.3
 
-            # Set Korean font
+            # Apply Korean font if available
             if KOREAN_FONT_PROP:
                 axes[0].text(
                     bar.get_x() + bar.get_width()/2.,
@@ -1194,23 +1201,23 @@ def create_trading_volume_chart(ticker, company_name=None, days=30, save_path=No
                     rotation=0
                 )
 
-    # 2. Daily net purchase trend
-    # Check if index is datetime
+    # 2. Daily cumulative net purchase trend
+    # Ensure index is datetime type
     if not isinstance(df_daily.index, pd.DatetimeIndex):
         df_daily.index = pd.to_datetime(df_daily.index)
 
-    # Sort by date in ascending order
+    # Sort data by date in ascending order
     df_daily = df_daily.sort_index()
 
-    # Select key investors only
+    # Filter to key investor types only
     key_investors = [col for col in df_daily.columns if col in investor_types]
 
-    # Calculate cumulative net purchases
+    # Calculate cumulative sum of daily net purchases
     df_cumulative = df_daily[key_investors].cumsum()
 
-    # Draw chart
+    # Plot time series for each investor type
     for i, investor in enumerate(key_investors):
-        # Use English labels
+        # Translate Korean name to English for legend
         english_label = investor_names_en.get(investor, investor)
         axes[1].plot(
             df_cumulative.index,
@@ -1220,17 +1227,17 @@ def create_trading_volume_chart(ticker, company_name=None, days=30, save_path=No
             label=english_label
         )
 
-    # Label and title settings
+    # Set subplot title and labels
     axes[1].set_title("Daily Cumulative Net Purchase Trend", fontsize=12, loc='left')
 
     axes[1].set_xlabel('')
-    axes[1].axhline(y=0, color='black', linestyle='-', alpha=0.3)
+    axes[1].axhline(y=0, color='black', linestyle='-', alpha=0.3)  # Zero reference line
     axes[1].grid(linestyle='--', alpha=0.7)
 
-    # Add legend
+    # Add legend for investor types
     legend = axes[1].legend(loc='upper left')
 
-    # Format numbers
+    # Format Y-axis numbers based on value range
     max_vol = df_cumulative.max().max()
     min_vol = df_cumulative.min().min()
     formatter = select_number_formatter(max(abs(max_vol), abs(min_vol)))
@@ -1372,20 +1379,23 @@ def create_comprehensive_report(ticker, company_name=None, days=730, output_dir=
     return report_paths
 
 def check_font_available():
-    """Check Korean font availability and provide installation guidance"""
-    # List available fonts
+    """
+    Check Korean font availability and provide installation guidance
+    Returns list of available Korean fonts on the system
+    """
+    # Get list of all available fonts
     available_fonts = [f.name for f in fm.fontManager.ttflist]
 
-    # List of potential Korean font names
+    # Filter fonts that likely support Korean (by font name keywords)
     possible_korean_fonts = [
         f for f in available_fonts if any(keyword in f for keyword in
                                           ['Gothic', 'Hangul', '고딕', 'Apple', 'Nanum', '나눔', 'Malgun', 'SD', 'Gulim', '굴림', 'Batang', '바탕', 'Dotum', '돋움'])
     ]
 
-    # Check for Korean characters
+    # Filter fonts containing Korean characters in their name
     korean_fonts = [f for f in available_fonts if any(char in f for char in '가나다라마바사아자차카타파하')]
 
-    # Merge two lists (remove duplicates)
+    # Combine both lists and remove duplicates
     all_korean_fonts = list(set(possible_korean_fonts + korean_fonts))
 
     if not all_korean_fonts:
@@ -1399,19 +1409,19 @@ def check_font_available():
             logger.info("- Nanum Gothic (https://hangeul.naver.com/font)")
             logger.info("- Or use macOS built-in 'Apple SD Gothic Neo'.")
         else:  # Linux
-            if os.path.exists('/etc/rocky-release'):  # Rocky Linux case
+            if os.path.exists('/etc/rocky-release'):  # Rocky Linux
                 logger.info("Rocky Linux 8 Korean font installation:")
                 logger.info("sudo dnf install google-nanum-fonts")
-            else:  # Other Linux
-                logger.info("Linux: Nanum Gothic font installation")
+            else:  # Other Linux distributions
+                logger.info("Linux: Nanum Gothic font installation instructions")
                 logger.info("Ubuntu/Debian: sudo apt-get install fonts-nanum")
                 logger.info("CentOS/RHEL: sudo dnf install google-nanum-fonts")
-                logger.info("Or download Nanum Gothic fonts and copy to ~/.fonts folder")
+                logger.info("Manual install: Download Nanum Gothic fonts and copy to ~/.fonts")
 
-        logger.info("\nAfter font installation, refresh matplotlib font cache:")
+        logger.info("\nAfter font installation, rebuild matplotlib font cache:")
         logger.info("import matplotlib.font_manager as fm")
-        logger.info("fm.fontManager.rebuild()  # Latest matplotlib version")
-        logger.info("# or fm._rebuild()  # Older matplotlib version")
+        logger.info("fm.fontManager.rebuild()  # For latest matplotlib")
+        logger.info("# or fm._rebuild()  # For older matplotlib versions")
     else:
         logger.info(f"Found {len(all_korean_fonts)} available Korean fonts:")
         for i, font in enumerate(all_korean_fonts[:10]):  # Show maximum 10 fonts
@@ -1423,41 +1433,41 @@ def check_font_available():
 
 def main():
     """
-    Usage example of stock chart generation functions
+    Example usage of stock chart generation functions
+    Demonstrates comprehensive report generation for Samsung Electronics
     """
-    # Check Korean fonts
+    # Check available Korean fonts on system
     korean_fonts = check_font_available()
 
-    # Example: Generate Samsung Electronics chart
-    ticker = "005930"  # Samsung Electronics
-    company_name = "삼성전자"
+    # Example: Generate charts for Samsung Electronics
+    ticker = "005930"  # Samsung Electronics ticker
+    company_name = "삼성전자"  # Samsung Electronics (Korean)
 
-    # Generate comprehensive report
+    # Generate comprehensive analysis report with all charts
     report_paths = create_comprehensive_report(ticker, company_name)
 
-    logger.info(f"Generated report with the following charts:")
+    logger.info(f"Generated comprehensive report with the following charts:")
     for chart_type, path in report_paths.items():
         logger.info(f"- {chart_type}: {path}")
 
-    # Individual chart examples
-    # Uncomment to generate and display individual charts
+    # Individual chart generation examples (uncomment to use):
 
-    # Price chart
+    # Generate and display price chart
     #fig_price = create_price_chart(ticker, company_name)
     #plt.figure(fig_price.number)
     #plt.show()
 
-    # Market cap chart
+    # Generate and display market cap chart
     #fig_mc = create_market_cap_chart(ticker, company_name)
     #plt.figure(fig_mc.number)
     #plt.show()
 
-    # Fundamentals chart
+    # Generate and display fundamentals chart
     #fig_fund = create_fundamentals_chart(ticker, company_name)
     #plt.figure(fig_fund.number)
     #plt.show()
 
-    # Trading volume chart
+    # Generate and display trading volume chart
     #fig_vol = create_trading_volume_chart(ticker, company_name, days=60)
     #plt.figure(fig_vol.number)
     #plt.show()

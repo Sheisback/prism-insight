@@ -6,8 +6,8 @@ Running this script will receive buy/sell signals published by PRISM-INSIGHT
 in real-time via GCP Pub/Sub and execute actual auto-trading.
 
 Supported Markets:
-    - KR (한국): 09:00-15:30 KST, domestic_stock_trading 모듈 사용
-    - US (미국): 09:30-16:00 EST, us_stock_trading 모듈 사용
+    - KR (Korea): 09:00-15:30 KST, using domestic_stock_trading module
+    - US (USA): 09:30-16:00 EST, using us_stock_trading module
 
 Usage:
     1. Install google-cloud-pubsub package
@@ -26,10 +26,10 @@ Options:
     --dry-run: Run simulation only without actual trading
 
 Note:
-    모의투자(demo) 모드에서 장외 시간에 시그널이 들어오면,
-    해당 시장의 다음 영업일 장 시작 시점에 자동으로 시장가 매수/매도를 실행합니다.
-    - KR: 다음 영업일 09:05 KST
-    - US: 다음 영업일 09:35 EST (KST 기준 23:35)
+    In demo mode, if signals arrive during off-market hours,
+    market orders will be automatically executed at the next trading day's market open:
+    - KR: Next trading day 09:05 KST
+    - US: Next trading day 09:35 EST (23:35 KST)
 """
 import os
 import sys
@@ -55,11 +55,11 @@ except ImportError:
 
 
 # ============================================================
-# 스케줄링 관련 유틸리티
+# Scheduling Utilities
 # ============================================================
 
 def get_trading_mode() -> str:
-    """kis_devlp.yaml에서 거래 모드 확인 (demo/real)"""
+    """Check trading mode from kis_devlp.yaml (demo/real)"""
     try:
         import yaml
         config_path = PROJECT_ROOT / "trading" / "config" / "kis_devlp.yaml"
@@ -72,18 +72,18 @@ def get_trading_mode() -> str:
 
 def is_market_hours(market: str = "KR") -> bool:
     """
-    현재 시간이 정규 장 시간인지 확인
+    Check if current time is during regular market hours
 
     Args:
-        market: "KR" (한국) or "US" (미국)
+        market: "KR" (Korea) or "US" (USA)
 
     Returns:
-        bool: 장 시간 여부
+        bool: Whether market is open
     """
     if market == "US":
         return is_us_market_hours()
 
-    # 한국: 09:00~15:30 KST
+    # Korea: 09:00~15:30 KST
     now = datetime.now().time()
     market_open = time(9, 0)
     market_close = time(15, 30)
@@ -91,21 +91,21 @@ def is_market_hours(market: str = "KR") -> bool:
 
 
 def is_us_market_hours() -> bool:
-    """현재 시간이 미국 정규 장 시간(09:30~16:00 EST, 영업일만)인지 확인"""
+    """Check if current time is during US market hours (09:30~16:00 EST, trading days only)"""
     try:
-        # prism-us/check_market_day.py 활용 (NYSE 캘린더 기반)
+        # Use prism-us/check_market_day.py (NYSE calendar based)
         import sys
         sys.path.insert(0, str(PROJECT_ROOT / "prism-us"))
         from check_market_day import is_market_open
         return is_market_open()
     except ImportError:
-        # fallback: pytz로 직접 계산
+        # fallback: calculate directly with pytz
         try:
             import pytz
             us_eastern = pytz.timezone('US/Eastern')
             now_est = datetime.now(us_eastern)
 
-            # 주말 체크 (EST 기준)
+            # Check weekend (EST timezone)
             if now_est.weekday() >= 5:
                 return False
 
@@ -114,81 +114,81 @@ def is_us_market_hours() -> bool:
             market_close = time(16, 0)
             return market_open <= current_time <= market_close
         except ImportError:
-            # pytz도 없으면 KST 기준으로 대략 계산
+            # If pytz is also unavailable, approximate calculation based on KST
             now = datetime.now()
-            if now.weekday() >= 5:  # 주말
+            if now.weekday() >= 5:  # Weekend
                 return False
             now_time = now.time()
             return now_time >= time(23, 30) or now_time <= time(6, 0)
 
 
 def is_market_day_check() -> bool:
-    """영업일인지 확인 (check_market_day.py 활용)"""
+    """Check if it's a trading day (using check_market_day.py)"""
     try:
         from check_market_day import is_market_day
         return is_market_day()
     except ImportError:
-        # fallback: 주말만 체크
+        # fallback: only check weekends
         return datetime.now().weekday() < 5
 
 
 def get_next_market_open(market: str = "KR") -> datetime:
     """
-    다음 영업일 장 시작 시간 계산
+    Calculate next trading day's market open time
 
     Args:
-        market: "KR" (한국) or "US" (미국)
+        market: "KR" (Korea) or "US" (USA)
 
     Returns:
-        datetime: 다음 영업일 장 시작 시간
+        datetime: Next trading day's market open time
     """
     if market == "US":
         return get_next_us_market_open()
 
-    # 한국: 다음 영업일 09:05 KST
+    # Korea: Next trading day 09:05 KST
     now = datetime.now()
     next_day = now + timedelta(days=1)
 
-    # 다음 영업일 찾기 (최대 7일까지 탐색)
+    # Find next trading day (search up to 7 days)
     for _ in range(7):
-        # 주말 스킵
+        # Skip weekends
         if next_day.weekday() >= 5:
             next_day += timedelta(days=1)
             continue
 
-        # 공휴일 체크 (is_market_day_check 활용)
+        # Check holidays (using is_market_day_check)
         try:
             from check_market_day import is_market_day
             from holidays.countries import KR
 
-            # 임시로 해당 날짜가 영업일인지 확인
+            # Check if the date is a trading day
             kr_holidays = KR()
             if next_day.date() in kr_holidays:
                 next_day += timedelta(days=1)
                 continue
-            # 노동절 체크
+            # Check Labor Day
             if next_day.month == 5 and next_day.day == 1:
                 next_day += timedelta(days=1)
                 continue
         except ImportError:
             pass
 
-        # 영업일 발견
+        # Found trading day
         break
 
-    # 09:05 설정 (장 시작 후 안정화 시간)
+    # Set to 09:05 (stabilization time after market open)
     return next_day.replace(hour=9, minute=5, second=0, microsecond=0)
 
 
 def get_next_us_market_open() -> datetime:
     """
-    다음 미국 영업일 장 시작 시간 계산 (09:35 EST -> KST로 변환)
+    Calculate next US trading day's market open time (09:35 EST -> convert to KST)
 
     Returns:
-        datetime: 다음 미국 영업일 장 시작 시간 (KST)
+        datetime: Next US trading day's market open time (KST)
     """
     try:
-        # prism-us/check_market_day.py 활용 (NYSE 캘린더 기반)
+        # Use prism-us/check_market_day.py (NYSE calendar based)
         import sys
         sys.path.insert(0, str(PROJECT_ROOT / "prism-us"))
         from check_market_day import get_next_trading_day, EST, KST
@@ -196,18 +196,18 @@ def get_next_us_market_open() -> datetime:
         next_trading_day = get_next_trading_day()
         if next_trading_day:
             import pytz
-            # 09:35 EST 설정 (장 시작 후 안정화 시간)
+            # Set to 09:35 EST (stabilization time after market open)
             market_open_est = datetime.combine(next_trading_day, time(9, 35))
             market_open_est = EST.localize(market_open_est)
 
-            # KST로 변환
+            # Convert to KST
             market_open_kst = market_open_est.astimezone(KST)
-            return market_open_kst.replace(tzinfo=None)  # naive datetime 반환
+            return market_open_kst.replace(tzinfo=None)  # Return naive datetime
 
     except ImportError:
         pass
 
-    # fallback: pytz로 직접 계산
+    # fallback: calculate directly with pytz
     try:
         import pytz
         us_eastern = pytz.timezone('US/Eastern')
@@ -216,20 +216,20 @@ def get_next_us_market_open() -> datetime:
         now_est = datetime.now(us_eastern)
         next_day_est = now_est + timedelta(days=1)
 
-        # 다음 영업일 찾기 (최대 7일까지 탐색)
+        # Find next trading day (search up to 7 days)
         for _ in range(7):
             if next_day_est.weekday() >= 5:
                 next_day_est += timedelta(days=1)
                 continue
             break
 
-        # 09:35 EST 설정
+        # Set to 09:35 EST
         market_open_est = next_day_est.replace(hour=9, minute=35, second=0, microsecond=0)
         market_open_kst = market_open_est.astimezone(kst)
         return market_open_kst.replace(tzinfo=None)
 
     except ImportError:
-        # pytz도 없으면 대략 계산 (EST + 14시간 = KST)
+        # If pytz is also unavailable, approximate calculation (EST + 14 hours = KST)
         now = datetime.now()
         next_day = now + timedelta(days=1)
 
@@ -239,16 +239,16 @@ def get_next_us_market_open() -> datetime:
                 continue
             break
 
-        # KST 기준 23:35 (다음날 EST 09:35)
+        # 23:35 KST (next day 09:35 EST)
         return next_day.replace(hour=23, minute=35, second=0, microsecond=0)
 
 
 class ScheduledOrderManager:
     """
-    예약 주문 관리자
+    Scheduled Order Manager
 
-    모의투자 장외 시간에 들어온 시그널을 저장하고,
-    다음 영업일 장 시작 시 자동 실행합니다.
+    Stores signals received during off-market hours in demo mode
+    and executes them automatically at the next trading day's market open.
     """
 
     def __init__(self, storage_path: Path = None, logger: logging.Logger = None):
@@ -259,38 +259,38 @@ class ScheduledOrderManager:
         self._scheduler_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
 
-        # 저장된 예약 주문 로드
+        # Load saved scheduled orders
         self._load_orders()
 
     def _load_orders(self):
-        """파일에서 예약 주문 로드"""
+        """Load scheduled orders from file"""
         try:
             if self.storage_path.exists():
                 with open(self.storage_path, 'r', encoding='utf-8') as f:
                     self.orders = json.load(f)
                 if self.orders:
-                    self.logger.info(f"📋 {len(self.orders)}개의 예약 주문 로드됨")
+                    self.logger.info(f"📋 Loaded {len(self.orders)} scheduled orders")
         except Exception as e:
-            self.logger.error(f"예약 주문 로드 실패: {e}")
+            self.logger.error(f"Failed to load scheduled orders: {e}")
             self.orders = []
 
     def _save_orders(self):
-        """예약 주문을 파일에 저장"""
+        """Save scheduled orders to file"""
         try:
             self.storage_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.storage_path, 'w', encoding='utf-8') as f:
                 json.dump(self.orders, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            self.logger.error(f"예약 주문 저장 실패: {e}")
+            self.logger.error(f"Failed to save scheduled orders: {e}")
 
     def add_order(self, signal: Dict[str, Any], signal_type: str = "BUY", market: str = "KR") -> bool:
         """
-        예약 주문 추가
+        Add scheduled order
 
         Args:
             signal: Signal data dictionary
-            signal_type: "BUY" or "SELL" (기본값: "BUY" - 하위 호환성)
-            market: "KR" or "US" (기본값: "KR" - 하위 호환성)
+            signal_type: "BUY" or "SELL" (default: "BUY" - backward compatibility)
+            market: "KR" or "US" (default: "KR" - backward compatibility)
         """
         with self._lock:
             order = {
@@ -308,13 +308,13 @@ class ScheduledOrderManager:
             company_name = signal.get("company_name", "")
             execute_time = get_next_market_open(market).strftime("%Y-%m-%d %H:%M")
 
-            action_type = "매수" if signal_type == "BUY" else "매도"
+            action_type = "BUY" if signal_type == "BUY" else "SELL"
             market_label = "🇺🇸 US" if market == "US" else "🇰🇷 KR"
-            self.logger.info(f"⏰ 예약 주문 등록: [{market_label}] {company_name}({ticker}) [{action_type}] -> {execute_time} 실행 예정")
+            self.logger.info(f"⏰ Scheduled order registered: [{market_label}] {company_name}({ticker}) [{action_type}] -> scheduled for {execute_time}")
             return True
 
     def get_pending_orders(self) -> List[Dict[str, Any]]:
-        """실행 대기 중인 주문 조회"""
+        """Get pending orders"""
         with self._lock:
             now = datetime.now()
             pending = []
@@ -326,7 +326,7 @@ class ScheduledOrderManager:
             return pending
 
     def mark_executed(self, order: Dict[str, Any], success: bool, message: str = ""):
-        """주문 실행 완료 처리"""
+        """Mark order as executed"""
         with self._lock:
             order["status"] = "executed" if success else "failed"
             order["executed_at"] = datetime.now().isoformat()
@@ -334,7 +334,7 @@ class ScheduledOrderManager:
             self._save_orders()
 
     def clear_old_orders(self, days: int = 7):
-        """오래된 주문 정리"""
+        """Clean up old orders"""
         with self._lock:
             cutoff = datetime.now() - timedelta(days=days)
             original_count = len(self.orders)
@@ -346,19 +346,19 @@ class ScheduledOrderManager:
             removed = original_count - len(self.orders)
             if removed > 0:
                 self._save_orders()
-                self.logger.info(f"🗑️ {removed}개의 오래된 주문 정리됨")
+                self.logger.info(f"🗑️ Cleaned up {removed} old orders")
 
     def start_scheduler(self, execute_callback):
-        """백그라운드 스케줄러 시작"""
+        """Start background scheduler"""
         def scheduler_loop():
-            self.logger.info("🕐 예약 주문 스케줄러 시작됨 (KR/US 시장 지원)")
+            self.logger.info("🕐 Scheduled order scheduler started (KR/US markets supported)")
             while not self._stop_event.is_set():
                 try:
-                    # 1분마다 체크
+                    # Check every minute
                     if self._stop_event.wait(60):
                         break
 
-                    # 대기 중인 주문 조회
+                    # Get pending orders
                     pending_orders = self.get_pending_orders()
                     for order in pending_orders:
                         signal = order["signal"]
@@ -367,13 +367,13 @@ class ScheduledOrderManager:
                         ticker = signal.get("ticker", "")
                         company_name = signal.get("company_name", "")
 
-                        # 해당 시장의 장 시간인지 체크
+                        # Check if market is open for this market
                         if not is_market_hours(market):
                             continue
 
-                        action_type = "매수" if signal_type == "BUY" else "매도"
+                        action_type = "BUY" if signal_type == "BUY" else "SELL"
                         market_label = "🇺🇸 US" if market == "US" else "🇰🇷 KR"
-                        self.logger.info(f"🚀 예약 주문 실행: [{market_label}] {company_name}({ticker}) [{action_type}]")
+                        self.logger.info(f"🚀 Executing scheduled order: [{market_label}] {company_name}({ticker}) [{action_type}]")
 
                         try:
                             result = execute_callback(order)
@@ -382,27 +382,27 @@ class ScheduledOrderManager:
                             self.mark_executed(order, success, message)
 
                             if success:
-                                self.logger.info(f"✅ 예약 주문 성공: [{market_label}] {company_name}({ticker})")
+                                self.logger.info(f"✅ Scheduled order succeeded: [{market_label}] {company_name}({ticker})")
                             else:
-                                self.logger.error(f"❌ 예약 주문 실패: [{market_label}] {company_name}({ticker}) - {message}")
+                                self.logger.error(f"❌ Scheduled order failed: [{market_label}] {company_name}({ticker}) - {message}")
                         except Exception as e:
                             self.mark_executed(order, False, str(e))
-                            self.logger.error(f"❌ 예약 주문 실행 오류: {e}")
+                            self.logger.error(f"❌ Scheduled order execution error: {e}")
 
-                    # 매일 자정에 오래된 주문 정리
+                    # Clean up old orders daily at midnight
                     if datetime.now().hour == 0 and datetime.now().minute < 2:
                         self.clear_old_orders()
 
                 except Exception as e:
-                    self.logger.error(f"스케줄러 오류: {e}")
+                    self.logger.error(f"Scheduler error: {e}")
 
-            self.logger.info("🕐 예약 주문 스케줄러 종료됨")
+            self.logger.info("🕐 Scheduled order scheduler stopped")
 
         self._scheduler_thread = threading.Thread(target=scheduler_loop, daemon=True)
         self._scheduler_thread.start()
 
     def stop_scheduler(self):
-        """스케줄러 중지"""
+        """Stop scheduler"""
         self._stop_event.set()
         if self._scheduler_thread:
             self._scheduler_thread.join(timeout=5)
@@ -437,13 +437,27 @@ def setup_logging(log_file: str = None) -> logging.Logger:
     return logger
 
 
-async def execute_buy_trade(ticker: str, company_name: str, logger: logging.Logger) -> Dict[str, Any]:
-    """Execute actual buy order (async)"""
+async def execute_buy_trade(ticker: str, company_name: str, logger: logging.Logger, limit_price: Optional[int] = None) -> Dict[str, Any]:
+    """Execute actual buy order (async)
+
+    Args:
+        ticker: Stock code
+        company_name: Company name for logging
+        logger: Logger instance
+        limit_price: Limit price for reserved orders (required for off-hours trading)
+    """
     try:
         from trading.domestic_stock_trading import AsyncTradingContext
 
         async with AsyncTradingContext() as trading:
-            trade_result = await trading.async_buy_stock(stock_code=ticker)
+            # Get current price for limit_price if not provided (needed for reserved orders)
+            effective_limit_price = limit_price
+            if not effective_limit_price:
+                price_info = trading.get_current_price(ticker)
+                if price_info:
+                    effective_limit_price = int(price_info['current_price'])
+
+            trade_result = await trading.async_buy_stock(stock_code=ticker, limit_price=effective_limit_price)
 
         if trade_result['success']:
             logger.info(f"✅ Actual buy successful: {company_name}({ticker}) - {trade_result['message']}")
@@ -460,13 +474,27 @@ async def execute_buy_trade(ticker: str, company_name: str, logger: logging.Logg
         return {"success": False, "message": str(e)}
 
 
-async def execute_sell_trade(ticker: str, company_name: str, logger: logging.Logger) -> Dict[str, Any]:
-    """Execute actual sell order (async)"""
+async def execute_sell_trade(ticker: str, company_name: str, logger: logging.Logger, limit_price: Optional[int] = None) -> Dict[str, Any]:
+    """Execute actual sell order (async)
+
+    Args:
+        ticker: Stock code
+        company_name: Company name for logging
+        logger: Logger instance
+        limit_price: Limit price for reserved orders (required for off-hours trading)
+    """
     try:
         from trading.domestic_stock_trading import AsyncTradingContext
 
         async with AsyncTradingContext() as trading:
-            trade_result = await trading.async_sell_stock(stock_code=ticker)
+            # Get current price for limit_price if not provided (needed for reserved orders)
+            effective_limit_price = limit_price
+            if not effective_limit_price:
+                price_info = trading.get_current_price(ticker)
+                if price_info:
+                    effective_limit_price = int(price_info['current_price'])
+
+            trade_result = await trading.async_sell_stock(stock_code=ticker, limit_price=effective_limit_price)
 
         if trade_result['success']:
             logger.info(f"✅ Actual sell successful: {company_name}({ticker}) - {trade_result['message']}")
@@ -483,8 +511,15 @@ async def execute_sell_trade(ticker: str, company_name: str, logger: logging.Log
         return {"success": False, "message": str(e)}
 
 
-async def execute_us_buy_trade(ticker: str, company_name: str, logger: logging.Logger) -> Dict[str, Any]:
-    """Execute actual US stock buy order (async)"""
+async def execute_us_buy_trade(ticker: str, company_name: str, logger: logging.Logger, limit_price: Optional[float] = None) -> Dict[str, Any]:
+    """Execute actual US stock buy order (async)
+
+    Args:
+        ticker: Stock ticker symbol
+        company_name: Company name for logging
+        logger: Logger instance
+        limit_price: Limit price in USD for reserved orders (required for off-hours trading)
+    """
     try:
         # Import from prism-us module
         import sys
@@ -492,7 +527,15 @@ async def execute_us_buy_trade(ticker: str, company_name: str, logger: logging.L
         from trading.us_stock_trading import USStockTrading
 
         trading = USStockTrading()
-        trade_result = await trading.async_buy_stock(ticker=ticker)
+
+        # Get current price for limit_price if not provided (needed for reserved orders)
+        effective_limit_price = limit_price
+        if not effective_limit_price:
+            price_info = trading.get_current_price(ticker)
+            if price_info:
+                effective_limit_price = price_info['current_price']
+
+        trade_result = await trading.async_buy_stock(ticker=ticker, limit_price=effective_limit_price)
 
         if trade_result['success']:
             logger.info(f"✅ 🇺🇸 US buy successful: {company_name}({ticker}) - {trade_result['message']}")
@@ -509,8 +552,15 @@ async def execute_us_buy_trade(ticker: str, company_name: str, logger: logging.L
         return {"success": False, "message": str(e)}
 
 
-async def execute_us_sell_trade(ticker: str, company_name: str, logger: logging.Logger) -> Dict[str, Any]:
-    """Execute actual US stock sell order (async)"""
+async def execute_us_sell_trade(ticker: str, company_name: str, logger: logging.Logger, limit_price: Optional[float] = None) -> Dict[str, Any]:
+    """Execute actual US stock sell order (async)
+
+    Args:
+        ticker: Stock ticker symbol
+        company_name: Company name for logging
+        logger: Logger instance
+        limit_price: Limit price in USD for reserved orders (required for off-hours trading)
+    """
     try:
         # Import from prism-us module
         import sys
@@ -518,7 +568,15 @@ async def execute_us_sell_trade(ticker: str, company_name: str, logger: logging.
         from trading.us_stock_trading import USStockTrading
 
         trading = USStockTrading()
-        trade_result = await trading.async_sell_stock(ticker=ticker)
+
+        # Get current price for limit_price if not provided (needed for reserved orders)
+        effective_limit_price = limit_price
+        if not effective_limit_price:
+            price_info = trading.get_current_price(ticker)
+            if price_info:
+                effective_limit_price = price_info['current_price']
+
+        trade_result = await trading.async_sell_stock(ticker=ticker, limit_price=effective_limit_price)
 
         if trade_result['success']:
             logger.info(f"✅ 🇺🇸 US sell successful: {company_name}({ticker}) - {trade_result['message']}")
@@ -575,35 +633,40 @@ def main():
         logger.info("🔹 LIVE mode: Actual trading will be executed!")
         logger.info(f"🔹 Trading mode: {trading_mode.upper()}")
 
-    # Initialize scheduled order manager (모의투자 장외 시간 스케줄링용)
+    # Initialize scheduled order manager (for demo mode off-market hours scheduling)
     global scheduled_order_manager
     if not args.dry_run and trading_mode == "demo":
         scheduled_order_manager = ScheduledOrderManager(logger=logger)
 
-        # 스케줄러 콜백 함수 정의
+        # Define scheduler callback function
         def execute_scheduled_order(order: dict) -> dict:
-            """스케줄된 주문 실행 (동기 래퍼)"""
+            """Execute scheduled order (sync wrapper)"""
             signal = order.get("signal", {})
             signal_type = order.get("signal_type", "BUY")
             market = order.get("market", "KR")
             ticker = signal.get("ticker", "")
             company_name = signal.get("company_name", "")
+            # Get price from signal for limit orders (signal may contain price info)
+            price = signal.get("price", 0)
 
-            # Market에 따라 다른 트레이딩 함수 호출
+            # Call different trading functions based on market
+            # Pass price as limit_price for reserved orders
             if market == "US":
+                limit_price = float(price) if price else None
                 if signal_type == "SELL":
-                    return asyncio.run(execute_us_sell_trade(ticker, company_name, logger))
+                    return asyncio.run(execute_us_sell_trade(ticker, company_name, logger, limit_price=limit_price))
                 else:  # BUY
-                    return asyncio.run(execute_us_buy_trade(ticker, company_name, logger))
-            else:  # KR (기본값)
+                    return asyncio.run(execute_us_buy_trade(ticker, company_name, logger, limit_price=limit_price))
+            else:  # KR (default)
+                limit_price = int(price) if price else None
                 if signal_type == "SELL":
-                    return asyncio.run(execute_sell_trade(ticker, company_name, logger))
+                    return asyncio.run(execute_sell_trade(ticker, company_name, logger, limit_price=limit_price))
                 else:  # BUY
-                    return asyncio.run(execute_buy_trade(ticker, company_name, logger))
+                    return asyncio.run(execute_buy_trade(ticker, company_name, logger, limit_price=limit_price))
 
-        # 백그라운드 스케줄러 시작
+        # Start background scheduler
         scheduled_order_manager.start_scheduler(execute_scheduled_order)
-        logger.info("📅 모의투자 장외 시간 스케줄러 활성화됨")
+        logger.info("📅 Demo mode off-market hours scheduler activated")
 
     # Check GCP connection info
     if not args.project_id or not args.subscription_id:
@@ -645,7 +708,7 @@ def main():
         ticker = signal.get("ticker", "")
         company_name = signal.get("company_name", "")
         price = signal.get("price", 0)
-        market = signal.get("market", "KR")  # KR (한국) or US (미국)
+        market = signal.get("market", "KR")  # KR (Korea) or US (USA)
 
         # Emoji by signal type
         emoji = {
@@ -686,20 +749,20 @@ def main():
                 trading_mode = get_trading_mode()
                 in_market_hours = is_market_hours(market)
 
-                # 모의투자 + 장외시간: 다음 영업일로 스케줄링
+                # Demo mode + off-market hours: schedule for next trading day
                 if trading_mode == "demo" and not in_market_hours:
-                    logger.info(f"⏰ [DEMO 모드 장외시간] 다음 영업일 예약 등록: {market_label} {company_name}({ticker}) [매수]")
+                    logger.info(f"⏰ [DEMO mode off-hours] Scheduling for next trading day: {market_label} {company_name}({ticker}) [BUY]")
                     if scheduled_order_manager:
                         scheduled_order_manager.add_order(signal, signal_type="BUY", market=market)
                     else:
-                        logger.warning("스케줄러 미초기화 - 주문 스킵")
+                        logger.warning("Scheduler not initialized - skipping order")
                 else:
-                    # 실전투자 또는 장중: 즉시 실행
+                    # Live trading or market hours: execute immediately
                     logger.info(f"🚀 Executing buy order: {market_label} {company_name}({ticker})")
                     if market == "US":
-                        asyncio.run(execute_us_buy_trade(ticker, company_name, logger))
+                        asyncio.run(execute_us_buy_trade(ticker, company_name, logger, limit_price=float(price) if price else None))
                     else:
-                        asyncio.run(execute_buy_trade(ticker, company_name, logger))
+                        asyncio.run(execute_buy_trade(ticker, company_name, logger, limit_price=int(price) if price else None))
             else:
                 logger.info(f"🔸 [DRY-RUN] Buy skipped: {market_label} {company_name}({ticker})")
 
@@ -725,20 +788,20 @@ def main():
                 trading_mode = get_trading_mode()
                 in_market_hours = is_market_hours(market)
 
-                # 모의투자 + 장외시간: 다음 영업일로 스케줄링 (BUY와 동일한 로직)
+                # Demo mode + off-market hours: schedule for next trading day (same logic as BUY)
                 if trading_mode == "demo" and not in_market_hours:
-                    logger.info(f"⏰ [DEMO 모드 장외시간] 다음 영업일 예약 등록: {market_label} {company_name}({ticker}) [매도]")
+                    logger.info(f"⏰ [DEMO mode off-hours] Scheduling for next trading day: {market_label} {company_name}({ticker}) [SELL]")
                     if scheduled_order_manager:
                         scheduled_order_manager.add_order(signal, signal_type="SELL", market=market)
                     else:
-                        logger.warning("스케줄러 미초기화 - 매도 주문 스킵")
+                        logger.warning("Scheduler not initialized - skipping sell order")
                 else:
-                    # 실전투자 또는 장중: 즉시 실행
+                    # Live trading or market hours: execute immediately
                     logger.info(f"🚀 Executing sell order: {market_label} {company_name}({ticker})")
                     if market == "US":
-                        asyncio.run(execute_us_sell_trade(ticker, company_name, logger))
+                        asyncio.run(execute_us_sell_trade(ticker, company_name, logger, limit_price=float(price) if price else None))
                     else:
-                        asyncio.run(execute_sell_trade(ticker, company_name, logger))
+                        asyncio.run(execute_sell_trade(ticker, company_name, logger, limit_price=int(price) if price else None))
             else:
                 logger.info(f"🔸 [DRY-RUN] Sell skipped: {market_label} {company_name}({ticker})")
 
@@ -785,12 +848,12 @@ def main():
     except KeyboardInterrupt:
         streaming_pull_future.cancel()
 
-        # 스케줄러 정리
+        # Clean up scheduler
         if scheduled_order_manager:
             scheduled_order_manager.stop_scheduler()
             pending_count = len([o for o in scheduled_order_manager.orders if o["status"] == "pending"])
             if pending_count > 0:
-                logger.info(f"📋 {pending_count}개의 예약 주문이 다음 실행 시 처리됩니다.")
+                logger.info(f"📋 {pending_count} scheduled orders will be processed on next run.")
 
         logger.info("=" * 60)
         logger.info(f"Subscription ended.")

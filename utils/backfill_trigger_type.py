@@ -54,12 +54,12 @@ def simplify_trigger_type(trigger_type: str) -> str:
     Simplify trigger names from trigger_batch.py
     """
     mapping = {
-        '거래량 급증 상위주': 'Volume Surge',
-        '갭 상승 모멘텀 상위주': 'Gap Up',
-        '시총 대비 집중 자금 유입 상위주': 'Capital Inflow',
-        '일중 상승률 상위주': 'Intraday Surge',
-        '마감 강도 상위주': 'Closing Strength',
-        '거래량 증가 상위 횡보주': 'Sideways Volume',
+        '거래량 급증 상위주': 'Volume Surge',  # Trading volume surge top stocks
+        '갭 상승 모멘텀 상위주': 'Gap Up',  # Gap up momentum top stocks
+        '시총 대비 집중 자금 유입 상위주': 'Capital Inflow',  # Concentrated capital inflow relative to market cap
+        '일중 상승률 상위주': 'Intraday Surge',  # Intraday gain rate top stocks
+        '마감 강도 상위주': 'Closing Strength',  # Closing strength top stocks
+        '거래량 증가 상위 횡보주': 'Sideways Volume',  # High volume sideways stocks
     }
     return mapping.get(trigger_type, trigger_type)
 
@@ -173,21 +173,21 @@ def determine_trigger_info(
             combined = rationale.lower()
 
             # Heuristics based on rationale
-            if '급등' in combined or 'surge' in combined or ('거래량' in combined and '급증' in combined):
+            if '급등' in combined or 'surge' in combined or ('거래량' in combined and '급증' in combined):  # Sharp rise / volume / spike
                 trigger_type = 'Volume Surge'
-            elif '갭' in combined or 'gap' in combined:
+            elif '갭' in combined or 'gap' in combined:  # Gap
                 trigger_type = 'Gap Up'
-            elif '자금' in combined and '유입' in combined:
+            elif '자금' in combined and '유입' in combined:  # Capital / inflow
                 trigger_type = 'Capital Inflow'
-            elif '일중' in combined or ('장중' in combined and '상승' in combined):
+            elif '일중' in combined or ('장중' in combined and '상승' in combined):  # Intraday / during trading / rise
                 trigger_type = 'Intraday Surge'
-            elif '마감' in combined or '강도' in combined:
+            elif '마감' in combined or '강도' in combined:  # Closing / strength
                 trigger_type = 'Closing Strength'
-            elif '횡보' in combined:
+            elif '횡보' in combined:  # Sideways
                 trigger_type = 'Sideways Volume'
-            elif '돌파' in combined or 'breakout' in combined:
+            elif '돌파' in combined or 'breakout' in combined:  # Breakout
                 trigger_type = 'Technical Breakout'
-            elif '뉴스' in combined or 'news' in combined:
+            elif '뉴스' in combined or 'news' in combined:  # News
                 trigger_type = 'News Catalyst'
             else:
                 trigger_type = 'Comprehensive Analysis'

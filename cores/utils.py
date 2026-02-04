@@ -4,15 +4,15 @@ import subprocess
 # WiseReport URL template configuration
 WISE_REPORT_BASE = "https://comp.wisereport.co.kr/company/"
 URLS = {
-    "기업현황": "c1010001.aspx?cmp_cd={}",  # Company Status
-    "기업개요": "c1020001.aspx?cmp_cd={}",  # Company Overview
-    "재무분석": "c1030001.aspx?cmp_cd={}",  # Financial Analysis
-    "투자지표": "c1040001.aspx?cmp_cd={}",  # Investment Indicators
-    "컨센서스": "c1050001.aspx?cmp_cd={}",  # Consensus
-    "경쟁사분석": "c1060001.aspx?cmp_cd={}",  # Competitor Analysis
-    "지분현황": "c1070001.aspx?cmp_cd={}",  # Shareholding Status
-    "업종분석": "c1090001.aspx?cmp_cd={}",  # Industry Analysis
-    "최근리포트": "c1080001.aspx?cmp_cd={}"  # Recent Reports
+    "기업현황": "c1010001.aspx?cmp_cd={}",  # Company status (Korean key for API)
+    "기업개요": "c1020001.aspx?cmp_cd={}",  # Company overview (Korean key for API)
+    "재무분석": "c1030001.aspx?cmp_cd={}",  # Financial analysis (Korean key for API)
+    "투자지표": "c1040001.aspx?cmp_cd={}",  # Investment indicators (Korean key for API)
+    "컨센서스": "c1050001.aspx?cmp_cd={}",  # Consensus (Korean key for API)
+    "경쟁사분석": "c1060001.aspx?cmp_cd={}",  # Competitor analysis (Korean key for API)
+    "지분현황": "c1070001.aspx?cmp_cd={}",  # Shareholding status (Korean key for API)
+    "업종분석": "c1090001.aspx?cmp_cd={}",  # Industry analysis (Korean key for API)
+    "최근리포트": "c1080001.aspx?cmp_cd={}"  # Recent reports (Korean key for API)
 }
 
 
@@ -35,7 +35,8 @@ def clean_markdown(text: str) -> str:
     text = text.replace('\\n', '\n')
 
     # 3. Remove unnecessary newlines between Korean characters (GPT-5.2 output cleanup)
-    # Example: "코\n리\n아" -> "코리아" (apply repeatedly)
+    # Pattern matches Korean characters (Hangul syllables range: 가-힣)
+    # Apply repeatedly until no more matches
     prev_text = None
     while prev_text != text:
         prev_text = text
@@ -152,25 +153,27 @@ def clean_markdown(text: str) -> str:
     text = '\n'.join(final_lines)
 
     # 6. Add missing newlines after headers/subheadings (when GPT-5.2 concatenates without newlines)
-    # Pattern: "관점본" -> "관점\n\n본", "계획다음" -> "계획\n\n다음"
+    # Korean header endings and sentence starters for fixing concatenated text
+    # Common Korean section endings: perspective, plan, interpretation, trend, status, overview, strategy, summary, background, conclusion
     header_endings = ['관점', '계획', '해석', '동향', '현황', '개요', '전략', '요약', '배경', '결론']
+    # Common Korean sentence starters: this, next, this is, this time, that, actual, current, however, therefore, especially, also, but, meanwhile
     sentence_starters = ['본', '다음', '이는', '이번', '해당', '실제', '현재', '그러', '따라', '특히', '또한', '다만', '한편']
 
     for ending in header_endings:
         for starter in sentence_starters:
-            # "관점본" -> "관점\n\n본" (when concatenated without newlines)
+            # Fix concatenated Korean text (when concatenated without newlines)
             text = text.replace(f'{ending}{starter}', f'{ending}\n\n{starter}')
 
     # 7. Add missing newlines after numbered subheadings
-    # Pattern: "4) 미래 계획다음은" -> "4) 미래 계획\n\n다음은"
+    # Fix numbered Korean subheadings concatenated with sentence starters
     for starter in sentence_starters:
-        # Handle patterns like "계획다음" (already handled above)
-        # Additionally handle "n) 제목단어" patterns
+        # Handle patterns with numbered sections
+        # Pattern matches: "n) Korean_title (plan|status|analysis|trend|overview|background)" + sentence_starter
         text = re.sub(rf'(\d+\)\s*[가-힣]+\s*(?:계획|현황|분석|동향|개요|배경))({starter})', rf'\1\n\n\2', text)
 
     return text
 
 
 def get_wise_report_url(report_type: str, company_code: str) -> str:
-    """WiseReport URL 생성"""
+    """Generate WiseReport URL"""
     return WISE_REPORT_BASE + URLS[report_type].format(company_code)

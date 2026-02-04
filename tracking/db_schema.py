@@ -123,7 +123,7 @@ CREATE TABLE IF NOT EXISTS trading_principles (
 
     -- Scope classification
     scope TEXT NOT NULL DEFAULT 'universal',  -- universal/market/sector
-    scope_context TEXT,  -- market='bull/bear', sector='반도체' etc.
+    scope_context TEXT,  -- market='bull/bear', sector='semiconductor' etc.
 
     -- Principle content
     condition TEXT NOT NULL,

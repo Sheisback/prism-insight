@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Jeon Ingu Contrarian Trading System - Analysis & Trading Simulator
-(전인구경제연구소 - Jeon Ingu Economic Research Institute)
+(Jeon Ingu Economic Research Institute)
 
 Simplified strategy:
 - Jeon says UP → Buy KODEX Inverse 2X (252670)
@@ -65,7 +65,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Constants
-CHANNEL_ID = "UCznImSIaxZR7fdLCICLdgaQ"  # Jeon Ingu Economic Research Institute (전인구경제연구소)
+CHANNEL_ID = "UCznImSIaxZR7fdLCICLdgaQ"  # Jeon Ingu Economic Research Institute
 RSS_URL = f"https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL_ID}"
 VIDEO_HISTORY_FILE = DATA_DIR / "jeoningu_video_history.json"
 AUDIO_FILE = AUDIO_TEMP_DIR / "temp_audio.mp3"
@@ -176,7 +176,7 @@ Review the title from Jeon Ingu Economic Research Institute channel and determin
 
 **Interview Video (guest appears for discussion):**
 - Contains person's name with titles like "Professor", "Doctor", "Analyst", "Writer", "Expert"
-- Contains series numbers like "Part 1", "Part 2" (1부, 2부, 3부 in Korean)
+- Contains series numbers like "Part 1", "Part 2" (Part 1/2/3 in Korean)
 - Examples:
   * "Why Japan is raising interest rates (ft. Professor Kim Part 2)" → Interview
   * "You should buy this Korean industry (ft. Professor So Part 2)" → Interview
@@ -194,7 +194,7 @@ Review the title from Jeon Ingu Economic Research Institute channel and determin
   * "100% capital gains tax exemption if selling US stocks and buying Korean stocks (ft. exchange rate drop)" → Own opinion
 
 ## Core Rules
-- Title with "Professor", "Doctor", "Writer", "Analyst" + "Part 1/2/3" (or 1부/2부/3부) → **Always Interview**
+- Title with "Professor", "Doctor", "Writer", "Analyst" + "Part 1/2/3" (or Korean Part notation) → **Always Interview**
 - No person names, only numbers (e.g., "ft.1") → Own opinion
 
 ## Output
@@ -213,7 +213,7 @@ Output only one of: "Own Opinion" or "Interview"
         Uses mcp-agent with GPT-4o-mini to classify video titles quickly and cheaply.
         
         Patterns:
-        - "ft. [person name]" (2부, 3부 etc.) → Interview (skip)
+        - "ft. [person name]" (Part 2, Part 3 etc.) → Interview (skip)
         - "ft. [topic]" or no "ft." → Jeon's own opinion (analyze)
         """
         if not videos:
@@ -247,15 +247,15 @@ Output only one of: "Own Opinion" or "Interview"
 
                 if classification == "Own Opinion":
                     filtered_videos.append(video)
-                    logger.info(f"✅ [{classification}] {title}")
+                    logger.info(f"[{classification}] {title}")
                 else:
-                    logger.info(f"⏭️  [{classification}] {title} - Skipping")
+                    logger.info(f"[{classification}] {title} - Skipping")
                     
             except Exception as e:
                 logger.error(f"Title classification error for '{title}': {e}")
                 # On error, include the video (safer to analyze than skip)
                 filtered_videos.append(video)
-                logger.warning(f"⚠️  Error occurred, including video: {title}")
+                logger.warning(f"Error occurred, including video: {title}")
         
         logger.info(f"Filtered: {len(filtered_videos)}/{len(videos)} videos are Jeon's own opinions")
         return filtered_videos
@@ -821,7 +821,7 @@ click the <b>'Lab'</b> tab!
                     }
                     await self.db.insert_trade(sell_trade)
                     trades_executed.append(sell_trade)
-                    logger.info(f"✅ SELL: {current_position['stock_name']} (neutral sentiment)")
+                    logger.info(f"SELL: {current_position['stock_name']} (neutral sentiment)")
                 else:
                     # No position to sell, just record analysis
                     record = {
@@ -890,7 +890,7 @@ click the <b>'Lab'</b> tab!
                     await self.db.insert_trade(sell_trade)
                     trades_executed.append(sell_trade)
                     current_balance = new_balance
-                    logger.info(f"✅ SELL: {current_position['stock_name']} (position switch)")
+                    logger.info(f"SELL: {current_position['stock_name']} (position switch)")
 
                 elif current_position and current_position['stock_code'] == target_code:
                     # Already holding target stock, no action needed
@@ -949,11 +949,11 @@ click the <b>'Lab'</b> tab!
                 }
                 await self.db.insert_trade(buy_trade)
                 trades_executed.append(buy_trade)
-                logger.info(f"✅ BUY: {target_name} x {quantity} @ {buy_price:,} (all-in: {buy_amount:,.0f} KRW)")
+                logger.info(f"BUY: {target_name} x {quantity} @ {buy_price:,} (all-in: {buy_amount:,.0f} KRW)")
 
             # Log performance metrics
             metrics = await self.db.calculate_performance_metrics()
-            logger.info(f"📊 Performance: Win {metrics['win_rate']:.1f}%, Return {metrics['cumulative_return']:.2f}%")
+            logger.info(f"Performance: Win {metrics['win_rate']:.1f}%, Return {metrics['cumulative_return']:.2f}%")
 
         except Exception as e:
             logger.error(f"Trading execution error: {e}", exc_info=True)
@@ -1067,9 +1067,9 @@ click the <b>'Lab'</b> tab!
 
             # First run check
             if len(previous_videos) == 0:
-                logger.info("🎬 First run - initializing history")
+                logger.info("First run - initializing history")
                 self.save_video_history(current_videos)
-                logger.info("✅ History initialized. Run again to process new videos.")
+                logger.info("History initialized. Run again to process new videos.")
                 return
 
             # Find new videos

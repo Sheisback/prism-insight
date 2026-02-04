@@ -257,13 +257,13 @@ def performance_test():
 
 
 if __name__ == "__main__":
-    # 기본 테스트 실행
+    # Run basic tests
     exit_code = run_tests()
-    
-    # 엣지 케이스 테스트
+
+    # Run edge case tests
     run_edge_case_tests()
-    
-    # 성능 테스트
+
+    # Run performance test
     performance_test()
-    
+
     sys.exit(exit_code)

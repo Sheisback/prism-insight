@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-KRX API 테스트 스크립트
-서버에서 krx_data_client가 정상 작동하는지 확인합니다.
+KRX API Test Script
+Verifies that krx_data_client works properly on the server.
 """
 import datetime
 import sys

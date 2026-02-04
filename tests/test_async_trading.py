@@ -392,5 +392,5 @@ async def main():
 
 
 if __name__ == "__main__":
-    # 이벤트 루프 실행
+    # Run event loop
     asyncio.run(main())

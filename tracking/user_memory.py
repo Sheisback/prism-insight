@@ -718,7 +718,7 @@ class UserMemoryManager:
             conn.close()
 
     def _update_access_time(self, memory_ids: List[int]):
-        """기억 접근 시간 업데이트"""
+        """Update memory access time"""
         if not memory_ids:
             return
 
@@ -740,12 +740,12 @@ class UserMemoryManager:
             conn.close()
 
     def _format_journals(self, journals: List[Dict[str, Any]]) -> str:
-        """저널을 포맷팅 (상세 내용 포함)"""
+        """Format journals (including detailed content)"""
         lines = []
         for j in journals:
             created = j.get('created_at', '')[:10]
             content = j.get('content', {})
-            text = content.get('text', '')[:500]  # 500자로 확장 (기존 100자)
+            text = content.get('text', '')[:500]  # Expanded to 500 chars (was 100)
             ticker = j.get('ticker', '')
             ticker_name = j.get('ticker_name', '')
 
@@ -760,7 +760,7 @@ class UserMemoryManager:
         return '\n'.join(lines)
 
     def _format_evaluations(self, evals: List[Dict[str, Any]]) -> str:
-        """평가를 포맷팅 (상세 내용 포함)"""
+        """Format evaluations (including detailed content)"""
         lines = []
         for e in evals:
             created = e.get('created_at', '')[:10]
@@ -770,7 +770,7 @@ class UserMemoryManager:
             summary = e.get('summary')
             if not summary:
                 response = content.get('response_summary', '')
-                summary = response[:300] + '...' if len(response) > 300 else response  # Expand to 300 chars
+                summary = response[:300] + '...' if len(response) > 300 else response  # Expand to Expanded to 300 chars
 
             ticker = e.get('ticker', '')
             ticker_name = e.get('ticker_name', '')
@@ -787,7 +787,7 @@ class UserMemoryManager:
         ticker: Optional[str],
         ticker_name: Optional[str]
     ) -> str:
-        """기억 요약 생성 (Layer 2용)"""
+        """Generate memory summary (for Layer 2)"""
         text = content.get('text', content.get('response_summary', ''))
         if not text:
             return ''
@@ -805,7 +805,7 @@ class UserMemoryManager:
         ticker: Optional[str],
         ticker_name: Optional[str]
     ) -> str:
-        """한줄 압축 생성 (Layer 3용)"""
+        """Generate one-line compression (for Layer 3)"""
         if not summary:
             return ''
 
@@ -817,14 +817,14 @@ class UserMemoryManager:
 
     def delete_memory(self, memory_id: int, user_id: int) -> bool:
         """
-        특정 기억 삭제 (사용자 소유 확인)
+        Delete specific memory (with ownership verification)
 
         Args:
-            memory_id: 기억 ID
-            user_id: 사용자 ID (소유자 확인용)
+            memory_id: Memory ID
+            user_id: User ID (for ownership verification)
 
         Returns:
-            bool: 삭제 성공 여부
+            bool: Whether deletion was successful
         """
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -843,7 +843,7 @@ class UserMemoryManager:
             conn.close()
 
     def get_memory_stats(self, user_id: int) -> Dict[str, Any]:
-        """사용자 기억 통계 조회"""
+        """Query user memory statistics"""
         conn = self._get_connection()
         cursor = conn.cursor()
 

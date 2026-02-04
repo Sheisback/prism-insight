@@ -722,7 +722,7 @@ class USStockTrading:
             "ACNT_PRDT_CD": self.trenv.my_prod,
             "OVRS_EXCG_CD": exchange,
             "PDNO": ticker.upper(),
-            "FT_ORD_QTY": str(buy_quantity),
+            "FT_ORD_QTY": str(int(buy_quantity)),  # Must be integer string for KIS API
             "FT_ORD_UNPR3": str(limit_price),
             "ORD_SVR_DVSN_CD": "0"
         }
@@ -852,7 +852,7 @@ class USStockTrading:
             "ACNT_PRDT_CD": self.trenv.my_prod,
             "OVRS_EXCG_CD": exchange,
             "PDNO": ticker.upper(),
-            "FT_ORD_QTY": str(quantity),
+            "FT_ORD_QTY": str(int(quantity)),  # Must be integer string for KIS API
             "FT_ORD_UNPR3": order_price,
             "ORD_SVR_DVSN_CD": "0"
         }
@@ -997,9 +997,9 @@ class USStockTrading:
             self._stock_locks[ticker] = asyncio.Lock()
         return self._stock_locks[ticker]
 
-    async def async_buy_stock(self, ticker: str, buy_amount: float = None,
+    async def async_buy_stock(self, ticker: str, buy_amount: Optional[float] = None,
                               exchange: str = None, timeout: float = 30.0,
-                              limit_price: float = None) -> Dict[str, Any]:
+                              limit_price: Optional[float] = None) -> Dict[str, Any]:
         """
         Async buy API with timeout
 
@@ -1105,7 +1105,7 @@ class USStockTrading:
         return result
 
     async def async_sell_stock(self, ticker: str, exchange: str = None,
-                               timeout: float = 30.0, limit_price: float = None,
+                               timeout: float = 30.0, limit_price: Optional[float] = None,
                                use_moo: bool = False) -> Dict[str, Any]:
         """
         Async sell API with timeout

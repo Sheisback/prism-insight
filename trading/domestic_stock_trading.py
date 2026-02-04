@@ -616,9 +616,9 @@ class DomesticStockTrading:
         if limit_price and limit_price > 0:
             ord_dvsn_cd = "00"  # Limit price
             ord_unpr = str(int(limit_price))
-            # Calculate quantity based on limit price
-            buy_quantity = amount // limit_price
-            logger.info(f"[{stock_code}] Reserved order limit price: {limit_price:,} KRW, quantity: {buy_quantity} shares")
+            # Calculate quantity based on limit price (must be int for API)
+            buy_quantity = int(amount // limit_price)
+            logger.info(f"[{stock_code}] Reserved order limit price: {int(limit_price):,} KRW, quantity: {buy_quantity} shares")
         else:
             ord_dvsn_cd = "01"  # Market price
             ord_unpr = "0"
@@ -642,7 +642,7 @@ class DomesticStockTrading:
             "CANO": self.trenv.my_acct,
             "ACNT_PRDT_CD": self.trenv.my_prod,
             "PDNO": stock_code,
-            "ORD_QTY": str(buy_quantity),
+            "ORD_QTY": str(int(buy_quantity)),  # Must be integer string for KIS API
             "ORD_UNPR": ord_unpr,
             "SLL_BUY_DVSN_CD": "02",  # 02: Buy
             "ORD_DVSN_CD": ord_dvsn_cd,
@@ -981,7 +981,7 @@ class DomesticStockTrading:
         if limit_price and limit_price > 0:
             ord_dvsn_cd = "00"  # Limit price
             ord_unpr = str(int(limit_price))
-            logger.info(f"[{stock_code}] Reserved sell order limit price: {limit_price:,} KRW, quantity: {buy_quantity} shares")
+            logger.info(f"[{stock_code}] Reserved sell order limit price: {int(limit_price):,} KRW, quantity: {buy_quantity} shares")
         else:
             ord_dvsn_cd = "01"  # Market price
             ord_unpr = "0"
@@ -994,7 +994,7 @@ class DomesticStockTrading:
             "CANO": self.trenv.my_acct,
             "ACNT_PRDT_CD": self.trenv.my_prod,
             "PDNO": stock_code,
-            "ORD_QTY": str(buy_quantity),
+            "ORD_QTY": str(int(buy_quantity)),  # Must be integer string for KIS API
             "ORD_UNPR": ord_unpr,
             "SLL_BUY_DVSN_CD": "01",  # 01: Sell
             "ORD_DVSN_CD": ord_dvsn_cd,
@@ -1074,7 +1074,7 @@ class DomesticStockTrading:
             self._stock_locks[stock_code] = asyncio.Lock()
         return self._stock_locks[stock_code]
 
-    async def async_buy_stock(self, stock_code: str, buy_amount: int = None, timeout: float = 30.0, limit_price: int = None) -> Dict[str, Any]:
+    async def async_buy_stock(self, stock_code: str, buy_amount: Optional[int] = None, timeout: float = 30.0, limit_price: Optional[int] = None) -> Dict[str, Any]:
         """
         Async buy API (with timeout)
         Get current price → Calculate buyable quantity → Market buy
@@ -1193,7 +1193,7 @@ class DomesticStockTrading:
 
         return result
 
-    async def async_sell_stock(self, stock_code: str, timeout: float = 30.0, limit_price: int = None) -> Dict[str, Any]:
+    async def async_sell_stock(self, stock_code: str, timeout: float = 30.0, limit_price: Optional[int] = None) -> Dict[str, Any]:
         """
         Async sell API (with timeout)
         Sell all holding quantity at market price

@@ -132,20 +132,20 @@ class LanguageConfig:
             }
         else:  # Korean (default)
             return {
-                # 알림 제목
+                # Alert titles
                 "alert_title_morning": "🌅 오전 매수 신호 알림",
                 "alert_title_afternoon": "🌆 오후 매수 신호 알림",
 
-                # 시간 설명
+                # Time descriptions
                 "time_desc_morning": "장 시작 10분 후",
                 "time_desc_afternoon": "점심시간 이후 10분 후",
 
-                # 메시지 템플릿
+                # Message templates
                 "detected_stocks": "📊 {date} ({time_desc}) 매수 신호 감지",
                 "total_stocks": "총 {count}개 종목",
                 "no_signals": "오늘은 매수 신호가 감지되지 않았습니다.",
 
-                # 보고서 섹션
+                # Report sections
                 "buy_score": "매수 점수",
                 "current_price": "현재가",
                 "target_price": "목표가",
@@ -154,13 +154,13 @@ class LanguageConfig:
                 "sector": "산업군",
                 "rationale": "투자 근거",
 
-                # 면책 조항
+                # Disclaimers
                 "disclaimer_title": "📝 안내사항",
                 "disclaimer_simulation": "이 보고서는 AI 기반 시뮬레이션 결과이며, 실제 매매와 무관합니다.",
                 "disclaimer_reference": "본 정보는 단순 참고용이며, 투자 결정과 책임은 전적으로 투자자에게 있습니다.",
                 "disclaimer_not_recommendation": "이 채널은 리딩방이 아니며, 특정 종목 매수/매도를 권유하지 않습니다.",
 
-                # 포트폴리오 요약
+                # Portfolio summary
                 "portfolio_summary_title": "📊 프리즘 시뮬레이터 | 실시간 포트폴리오",
                 "current_holdings": "현재 보유 종목",
                 "best_performer": "최고 수익",
@@ -173,16 +173,16 @@ class LanguageConfig:
                 "win_rate": "승률",
                 "cumulative_return": "누적 수익률",
 
-                # 차트 레이블
+                # Chart labels
                 "chart_title_price": "주가 차트",
                 "chart_title_volume": "거래량",
 
-                # 투자 기간
+                # Investment periods
                 "period_short": "단기",
                 "period_medium": "중기",
                 "period_long": "장기",
 
-                # 날짜 형식
+                # Date format
                 "date_format": "%Y.%m.%d"  # 2024.01.15
             }
 

@@ -2,7 +2,7 @@
 """
 Migration Script: Extract lessons from trading_journal and insert into trading_principles
 
-This script migrates existing lessons from trading_journal entries (e.g., 카카오, 삼성전자)
+This script migrates existing lessons from trading_journal entries (e.g., Kakao, Samsung Electronics)
 to the new trading_principles table for universal trading wisdom.
 
 Usage:

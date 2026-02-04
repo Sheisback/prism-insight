@@ -57,7 +57,7 @@ def get_historical_price(ticker: str, target_date: str) -> float | None:
         if df.empty:
             return None
 
-        # Return most recent closing price (종가 = Close)
+        # Return most recent closing price
         return float(df['종가'].iloc[-1])
 
     except Exception as e:

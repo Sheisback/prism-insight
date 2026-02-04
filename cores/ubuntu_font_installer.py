@@ -10,7 +10,7 @@ import os
 import shutil
 
 def step0_force_cache_refresh():
-    """STEP 0: 폰트 캐시 강제 새로고침"""
+    """STEP 0: Force font cache refresh"""
     print("=== STEP 0: Force Font Cache Refresh ===")
     
     print("🔄 Clearing matplotlib cache...")
@@ -26,7 +26,7 @@ def step0_force_cache_refresh():
     
     print("\n🔄 Rebuilding matplotlib font manager...")
     try:
-        # 여러 방법을 시도
+        # Try multiple methods
         if hasattr(fm, 'fontManager'):
             if hasattr(fm.fontManager, 'rebuild'):
                 fm.fontManager.rebuild()
@@ -43,8 +43,8 @@ def step0_force_cache_refresh():
 
 def step1_system_font_check():
     print("\n=== STEP 1: System Font Check & Auto Installation ===")
-    
-    # 나눔폰트 파일 존재 여부 확인
+
+    # Check if Nanum font files exist
     nanum_found = False
     try:
         result = subprocess.run(['find', '/usr', '-name', '*nanum*', '-type', 'f'], 
@@ -65,7 +65,7 @@ def step1_system_font_check():
     except Exception as e:
         print(f"❌ Error searching system: {e}")
 
-    # fc-list로 추가 확인
+    # Additional verification with fc-list
     fc_list_found = False
     try:
         result = subprocess.run(['fc-list'], 
@@ -84,7 +84,7 @@ def step1_system_font_check():
     except Exception as e:
         print(f"\n❌ Error checking fc-list: {e}")
     
-    # 나눔폰트가 설치되지 않은 경우 자동 설치
+    # Auto-install if Nanum fonts are not installed
     if not nanum_found or not fc_list_found:
         print("\n🚨 NANUM FONTS NOT PROPERLY INSTALLED!")
         print("📦 Installing Nanum fonts automatically...")
@@ -137,11 +137,11 @@ def step1_system_font_check():
                     print("ℹ️  Font manager rebuild not available")
             except Exception as e:
                 print(f"⚠️ Matplotlib rebuild issue: {e}")
-            
+
             print("\n🎉 NANUM FONT INSTALLATION COMPLETED!")
             print("📝 Verifying installation...")
-            
-            # 재확인
+
+            # Re-verify installation
             verify_result = subprocess.run(['find', '/usr', '-name', '*nanum*', '-type', 'f'], 
                                          stdout=subprocess.PIPE, 
                                          stderr=subprocess.DEVNULL, 
@@ -178,7 +178,7 @@ def step2_matplotlib_font_check():
 def step3_force_nanum_settings():
     print("\n=== STEP 3: FORCE Nanum Font Settings ===")
     try:
-        # 모든 폰트 설정을 나눔폰트로 강제 변경
+        # Force all font settings to NanumGothic
         plt.rcParams['font.family'] = ['NanumGothic']
         plt.rcParams['font.sans-serif'] = ['NanumGothic']
         plt.rcParams['axes.unicode_minus'] = False
@@ -186,8 +186,8 @@ def step3_force_nanum_settings():
         print("✅ FORCED settings applied:")
         print(f"  Font family: {plt.rcParams['font.family']}")
         print(f"  Sans-serif: {plt.rcParams['font.sans-serif']}")
-        
-        # 안전한 폰트 캐시 새로고침
+
+        # Safe font cache refresh
         try:
             if hasattr(fm, 'fontManager') and hasattr(fm.fontManager, 'rebuild'):
                 fm.fontManager.rebuild()
@@ -297,11 +297,11 @@ def step6_final_cache_refresh():
     print("\n=== STEP 6: Final Cache Refresh ===")
     try:
         print("🔄 Final matplotlib font manager rebuild...")
-        
-        # 여러 방법을 안전하게 시도
+
+        # Try multiple methods safely
         rebuild_success = False
-        
-        # 방법 1: subprocess로 실행
+
+        # Method 1: Execute via subprocess
         try:
             subprocess.run(['python3', '-c', 'import matplotlib.font_manager as fm; fm.fontManager.rebuild()'], 
                          check=True, capture_output=True, text=True, timeout=30)
@@ -309,8 +309,8 @@ def step6_final_cache_refresh():
             rebuild_success = True
         except:
             pass
-        
-        # 방법 2: 직접 fontManager.rebuild() 호출
+
+        # Method 2: Direct fontManager.rebuild() call
         if not rebuild_success:
             try:
                 if hasattr(fm, 'fontManager') and hasattr(fm.fontManager, 'rebuild'):
@@ -319,8 +319,8 @@ def step6_final_cache_refresh():
                     rebuild_success = True
             except Exception as e:
                 print(f"⚠️  fontManager.rebuild() failed: {e}")
-        
-        # 방법 3: _rebuild() 시도 (구버전용)
+
+        # Method 3: Try _rebuild() (for older versions)
         if not rebuild_success:
             try:
                 if hasattr(fm, '_rebuild'):
@@ -351,10 +351,10 @@ def step6_final_cache_refresh():
 def main():
     print("🚀 NANUM FONT AUTO-INSTALLER & FORCED APPLICATION - V2")
     print("=" * 70)
-    
+
     step0_force_cache_refresh()
-    
-    # Step 1에서 설치 확인 및 자동 설치
+
+    # Check installation and auto-install in Step 1
     installation_success = step1_system_font_check()
     
     if not installation_success:

@@ -49,17 +49,17 @@ Usage examples:
         help='Trading mode (demo: demo trading, real: real trading, default: demo)'
     )
     
-    # 위치 인자로도 mode 받을 수 있도록 (하위 호환성)
+    # Also allow mode as positional argument (backward compatibility)
     parser.add_argument(
-        'mode_pos', 
+        'mode_pos',
         nargs='?',
         choices=['demo', 'real'],
-        help='거래 모드 (위치 인자, --mode와 동일)'
+        help='Trading mode (positional argument, same as --mode)'
     )
-    
+
     args = parser.parse_args()
-    
-    # 위치 인자로 mode가 주어진 경우 우선 적용
+
+    # Prioritize mode if given as positional argument
     if args.mode_pos:
         args.mode = args.mode_pos
     
@@ -203,7 +203,7 @@ def show_usage():
 
 
 if __name__ == "__main__":
-    # 인자 없이 실행된 경우 사용법 표시
+    # Show usage if run without arguments
     if len(sys.argv) == 1:
         show_usage()
     else:
