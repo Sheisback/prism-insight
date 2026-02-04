@@ -70,6 +70,7 @@ telegram_messages/
 
 # Dashboard generated data
 examples/dashboard/public/*_dashboard_data*.json
+examples/dashboard/public/dashboard_data*.json
 
 # MCP servers (should be installed separately)
 perplexity-ask/
@@ -77,3 +78,13 @@ perplexity-ask/
 # Generated docs
 docs/GEEKNEWS_POST_FINAL.md
 docs/TELEGRAM_JOURNAL_GUIDE.md
+
+# Logs directory
+logs/
+
+# prism-us generated files
+prism-us/reports/
+prism-us/*.log
+
+# tests generated files
+tests/*.log
