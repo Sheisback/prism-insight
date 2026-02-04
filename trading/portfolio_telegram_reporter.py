@@ -121,7 +121,7 @@ class PortfolioTelegramReporter:
         if currency == "USD":
             return f"${amount:,.2f}" if amount else "$0.00"
         else:  # KRW
-            return f"{amount:,.0f} KRW" if amount else "0 KRW"
+            return f"{amount:,.0f}원" if amount else "0원"
 
     def format_percentage(self, rate: float) -> str:
         """Format percentage"""
@@ -134,7 +134,7 @@ class PortfolioTelegramReporter:
             return f"{sign}${amount:,.2f}" if amount else "$0.00"
         else:  # KRW
             sign = "+" if amount >= 0 else ""
-            return f"{sign}{amount:,.0f} KRW" if amount else "0 KRW"
+            return f"{sign}{amount:,.0f}원" if amount else "0원"
 
     def create_portfolio_message(
         self,
@@ -160,15 +160,15 @@ class PortfolioTelegramReporter:
 
         current_time = datetime.datetime.now().strftime("%m/%d %H:%M")
         mode_emoji = "🧪" if self.trading_mode == "demo" else "💰"
-        mode_text = "Demo Trading" if self.trading_mode == "demo" else "Live Trading"
+        mode_text = "모의투자" if self.trading_mode == "demo" else "실전투자"
 
         # Header
-        message = f"📊 Portfolio Report {mode_emoji}\n"
+        message = f"📊 포트폴리오 리포트 {mode_emoji}\n"
         message += f"🕐 {current_time} | {mode_text}\n\n"
 
         # Season 2 info
-        message += f"🏆 *Season 2* (Start: {self.SEASON2_START_DATE})\n"
-        message += f"💵 Initial Capital: `{self.format_currency(self.SEASON2_START_AMOUNT)}`\n\n"
+        message += f"🏆 *시즌2* (시작: {self.SEASON2_START_DATE})\n"
+        message += f"💵 시작금액: `{self.format_currency(self.SEASON2_START_AMOUNT)}`\n\n"
 
         # ========== KR Account Summary ==========
         if kr_account_summary:
@@ -190,22 +190,22 @@ class PortfolioTelegramReporter:
             # Total assets and season profit
             season_profit_emoji = "📈" if season_profit >= 0 else "📉"
 
-            message += f"🇰🇷 *Korean Stock Account*\n"
-            message += f"💰 Total Assets: `{self.format_currency(total_assets)}`\n"
-            message += f"{season_profit_emoji} Season Profit: `{self.format_currency_with_sign(season_profit)}` "
+            message += f"🇰🇷 *한국주식 계좌*\n"
+            message += f"💰 총 자산: `{self.format_currency(total_assets)}`\n"
+            message += f"{season_profit_emoji} 시즌 수익: `{self.format_currency_with_sign(season_profit)}` "
             message += f"({self.format_percentage(season_profit_rate)})\n"
-            message += f"📊 Unrealized P/L: `{self.format_currency_with_sign(total_profit)}` "
+            message += f"📊 평가손익: `{self.format_currency_with_sign(total_profit)}` "
             message += f"({self.format_percentage(total_profit_rate)})\n"
-            message += f"💳 Cash: `{self.format_currency(total_cash)}` ({cash_ratio:.1f}%)\n"
+            message += f"💳 현금: `{self.format_currency(total_cash)}` ({cash_ratio:.1f}%)\n"
         else:
-            message += "🇰🇷 *Korean Stock Account*\n"
-            message += "❌ Unable to retrieve account information\n"
+            message += "🇰🇷 *한국주식 계좌*\n"
+            message += "❌ 계좌 정보를 가져올 수 없습니다\n"
 
         message += "\n"
 
         # ========== US Account Summary ==========
         if us_portfolio or us_account_summary:
-            message += f"🇺🇸 *US Stock Account*\n"
+            message += f"🇺🇸 *미국주식 계좌*\n"
 
             if us_account_summary:
                 us_total_eval = us_account_summary.get('total_eval_amount', 0)
@@ -217,20 +217,20 @@ class PortfolioTelegramReporter:
                 # Show stock evaluation if any holdings
                 if us_total_eval > 0:
                     profit_emoji = "📈" if us_total_profit >= 0 else "📉"
-                    message += f"📊 Holdings Value: `{self.format_currency(us_total_eval, 'USD')}`\n"
-                    message += f"{profit_emoji} Unrealized P/L: `{self.format_currency_with_sign(us_total_profit, 'USD')}` "
+                    message += f"📊 보유주식: `{self.format_currency(us_total_eval, 'USD')}`\n"
+                    message += f"{profit_emoji} 평가손익: `{self.format_currency_with_sign(us_total_profit, 'USD')}` "
                     message += f"({self.format_percentage(us_total_profit_rate)})\n"
 
                 # Always show USD cash
-                message += f"💵 USD Cash: `{self.format_currency(us_cash, 'USD')}`"
+                message += f"💵 USD 현금: `{self.format_currency(us_cash, 'USD')}`"
                 if exchange_rate > 0:
                     krw_value = us_cash * exchange_rate
-                    message += f" (≈{krw_value:,.0f} KRW)\n"
-                    message += f"📈 Exchange Rate: `{exchange_rate:,.2f} KRW/USD`\n"
+                    message += f" (≈{krw_value:,.0f}원)\n"
+                    message += f"📈 환율: `{exchange_rate:,.2f}원/USD`\n"
                 else:
                     message += "\n"
             else:
-                message += "❌ Unable to retrieve account information\n"
+                message += "❌ 계좌 정보를 가져올 수 없습니다\n"
 
             message += "\n"
 
@@ -238,7 +238,7 @@ class PortfolioTelegramReporter:
         message += "━" * 20 + "\n"
 
         if kr_portfolio:
-            message += f"🇰🇷 *Korean Holdings* ({len(kr_portfolio)} stocks)\n"
+            message += f"🇰🇷 *한국 보유종목* ({len(kr_portfolio)}개)\n"
 
             for i, stock in enumerate(kr_portfolio, 1):
                 stock_name = stock.get('stock_name', 'Unknown')
@@ -259,17 +259,17 @@ class PortfolioTelegramReporter:
 
                 # Stock information
                 message += f"\n*{i}. {stock_name}* ({stock_code}) {status_emoji}\n"
-                message += f"  Value: `{self.format_currency(eval_amount)}`\n"
-                message += f"  Avg Price: `{self.format_currency(avg_price)}` ({quantity} shares)\n"
-                message += f"  P/L: `{self.format_currency_with_sign(profit_amount)}`  |  {self.format_percentage(profit_rate)}\n"
+                message += f"  평가: `{self.format_currency(eval_amount)}`\n"
+                message += f"  단가: `{self.format_currency(avg_price)}` ({quantity}주)\n"
+                message += f"  손익: `{self.format_currency_with_sign(profit_amount)}`  |  {self.format_percentage(profit_rate)}\n"
 
         else:
-            message += "🇰🇷 *Korean Holdings*: None\n"
+            message += "🇰🇷 *한국 보유종목*: 없음\n"
 
         # ========== US Holdings ==========
         if us_portfolio:
             message += "\n" + "━" * 20 + "\n"
-            message += f"🇺🇸 *US Holdings* ({len(us_portfolio)} stocks)\n"
+            message += f"🇺🇸 *미국 보유종목* ({len(us_portfolio)}개)\n"
 
             for i, stock in enumerate(us_portfolio, 1):
                 ticker = stock.get('ticker', '???')
@@ -293,9 +293,9 @@ class PortfolioTelegramReporter:
                 exchange_tag = f"[{exchange}]" if exchange else ""
                 message += f"\n*{i}. {ticker}* {exchange_tag} {status_emoji}\n"
                 message += f"  {stock_name[:20]}{'...' if len(stock_name) > 20 else ''}\n"
-                message += f"  Value: `{self.format_currency(eval_amount, 'USD')}`\n"
-                message += f"  Avg Price: `{self.format_currency(avg_price, 'USD')}` ({quantity} shares)\n"
-                message += f"  P/L: `{self.format_currency_with_sign(profit_amount, 'USD')}`  |  {self.format_percentage(profit_rate)}\n"
+                message += f"  평가: `{self.format_currency(eval_amount, 'USD')}`\n"
+                message += f"  단가: `{self.format_currency(avg_price, 'USD')}` ({quantity}주)\n"
+                message += f"  손익: `{self.format_currency_with_sign(profit_amount, 'USD')}`  |  {self.format_percentage(profit_rate)}\n"
 
         return message
 

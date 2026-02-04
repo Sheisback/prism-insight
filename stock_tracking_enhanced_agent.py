@@ -430,14 +430,14 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                     market_condition_text = scenario.get("market_condition")
 
                     # Generate skip message
-                    skip_message = f"⚠️ Purchase Deferred: {company_name}({ticker})\n" \
-                                   f"Current Price: {current_price:,.0f} KRW\n" \
-                                   f"Buy Score: {buy_score}/10\n" \
-                                   f"Decision: {decision}\n" \
-                                   f"Market Condition: {market_condition_text}\n" \
-                                   f"Sector: {scenario.get('sector', 'Unknown')}\n" \
-                                   f"Defer Reason: {reason}\n" \
-                                   f"Analysis Opinion: {scenario.get('rationale', 'No information')}"
+                    skip_message = f"⚠️ 매수 보류: {company_name}({ticker})\n" \
+                                   f"현재가: {current_price:,.0f}원\n" \
+                                   f"매수 Score: {buy_score}/10\n" \
+                                   f"결정: {decision}\n" \
+                                   f"시장 상황: {market_condition_text}\n" \
+                                   f"산업군: {scenario.get('sector', '알 수 없음')}\n" \
+                                   f"보류 사유: {reason}\n" \
+                                   f"분석 의견: {scenario.get('rationale', '정보 없음')}"
 
                     self.message_queue.append(skip_message)
                     logger.info(f"Purchase deferred: {company_name}({ticker}) - {reason}")
@@ -1075,7 +1075,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                     )
                     self.conn.commit()
                     db_updated = True
-                    update_message += f"Target price adjusted to: {target_price_num:,.0f} KRW\n"
+                    update_message += f"목표가: {target_price_num:,.0f}원으로 조정\n"
                     logger.info(f"{ticker} Target price AI adjustment: {target_price_num:,.0f} KRW (Urgency: {urgency})")
 
             # Adjust stop-loss
@@ -1090,21 +1090,21 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                     )
                     self.conn.commit()
                     db_updated = True
-                    update_message += f"Stop-loss adjusted to: {stop_loss_num:,.0f} KRW\n"
+                    update_message += f"손절가: {stop_loss_num:,.0f}원으로 조정\n"
                     logger.info(f"{ticker} Stop-loss AI adjustment: {stop_loss_num:,.0f} KRW (Urgency: {urgency})")
 
             # Generate Telegram message if DB was updated
             if db_updated:
                 urgency_emoji = {"high": "🚨", "medium": "⚠️", "low": "💡"}.get(urgency, "🔄")
-                message = f"{urgency_emoji} Portfolio Adjustment: {company_name}({ticker})\n"
+                message = f"{urgency_emoji} 포트폴리오 조정: {company_name}({ticker})\n"
                 message += update_message
-                message += f"Adjustment Rationale: {adjustment_reason}\n"
-                message += f"Urgency: {urgency.upper()}\n"
+                message += f"조정 근거: {adjustment_reason}\n"
+                message += f"긴급도: {urgency.upper()}\n"
 
                 # Add analysis summary
                 if analysis_summary:
-                    message += f"Technical Trend: {analysis_summary.get('technical_trend', 'N/A')}\n"
-                    message += f"Market Condition Impact: {analysis_summary.get('market_condition_impact', 'N/A')}"
+                    message += f"기술적 추세: {analysis_summary.get('technical_trend', 'N/A')}\n"
+                    message += f"시장 환경 영향: {analysis_summary.get('market_condition_impact', 'N/A')}"
 
                 self.message_queue.append(message)
                 logger.info(f"{ticker} AI-based portfolio adjustment complete: {update_message.strip()}")

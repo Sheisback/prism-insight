@@ -53,40 +53,40 @@ def analyze_sell_decision(stock_data: Dict[str, Any]) -> Tuple[bool, str]:
 
         # Check stop-loss condition
         if stop_loss > 0 and current_price <= stop_loss:
-            return True, f"Stop-loss condition reached (Stop-loss: {stop_loss:,.0f} KRW)"
+            return True, f"손절 조건 도달 (손절가: {stop_loss:,.0f}원)"
 
         # Check target price reached
         if target_price > 0 and current_price >= target_price:
-            return True, f"Target price achieved (Target: {target_price:,.0f} KRW)"
+            return True, f"목표가 달성 (목표가: {target_price:,.0f}원)"
 
         # Sell conditions by investment period
         if investment_period == "Short-term":
             if days_passed >= 15 and profit_rate >= 5:
-                return True, f"Short-term goal achieved (Held: {days_passed} days, Return: {profit_rate:.2f}%)"
+                return True, f"단기 투자 목표 달성 (보유: {days_passed}일, 수익률: {profit_rate:.2f}%)"
             if days_passed >= 10 and profit_rate <= -3:
-                return True, f"Short-term loss protection (Held: {days_passed} days, Return: {profit_rate:.2f}%)"
+                return True, f"단기 투자 손실 방어 (보유: {days_passed}일, 수익률: {profit_rate:.2f}%)"
 
         # General sell conditions
         if profit_rate >= 10:
-            return True, f"Return 10%+ achieved (Current return: {profit_rate:.2f}%)"
+            return True, f"수익률 10% 이상 달성 (현재 수익률: {profit_rate:.2f}%)"
 
         if profit_rate <= -5:
-            return True, f"Loss -5%+ incurred (Current return: {profit_rate:.2f}%)"
+            return True, f"손실 -5% 이상 발생 (현재 수익률: {profit_rate:.2f}%)"
 
         if days_passed >= 30 and profit_rate < 0:
-            return True, f"Held 30+ days with loss (Held: {days_passed} days, Return: {profit_rate:.2f}%)"
+            return True, f"30일 이상 보유 중 손실 (보유: {days_passed}일, 수익률: {profit_rate:.2f}%)"
 
         if days_passed >= 60 and profit_rate >= 3:
-            return True, f"Held 60+ days with 3%+ profit (Held: {days_passed} days, Return: {profit_rate:.2f}%)"
+            return True, f"60일 이상 보유 중 3% 이상 수익 (보유: {days_passed}일, 수익률: {profit_rate:.2f}%)"
 
         if investment_period == "Long-term" and days_passed >= 90 and profit_rate < 0:
-            return True, f"Long-term loss cleanup (Held: {days_passed} days, Return: {profit_rate:.2f}%)"
+            return True, f"장기 투자 손실 정리 (보유: {days_passed}일, 수익률: {profit_rate:.2f}%)"
 
-        return False, "Continue holding"
+        return False, "보유 지속"
 
     except Exception as e:
         logger.error(f"Error analyzing sell: {str(e)}")
-        return False, "Analysis error"
+        return False, "분석 오류"
 
 
 def format_buy_message(
@@ -109,23 +109,23 @@ def format_buy_message(
     Returns:
         str: Formatted message
     """
-    message = f"📈 New Buy: {company_name}({ticker})\n" \
-              f"Buy Price: {current_price:,.0f} KRW\n" \
-              f"Target Price: {scenario.get('target_price', 0):,.0f} KRW\n" \
-              f"Stop Loss: {scenario.get('stop_loss', 0):,.0f} KRW\n" \
-              f"Investment Period: {scenario.get('investment_period', 'Short-term')}\n" \
-              f"Sector: {scenario.get('sector', 'Unknown')}\n"
+    message = f"📈 신규 매수: {company_name}({ticker})\n" \
+              f"매수가: {current_price:,.0f}원\n" \
+              f"목표가: {scenario.get('target_price', 0):,.0f}원\n" \
+              f"손절가: {scenario.get('stop_loss', 0):,.0f}원\n" \
+              f"투자기간: {scenario.get('investment_period', '단기')}\n" \
+              f"산업군: {scenario.get('sector', '알 수 없음')}\n"
 
     if scenario.get('valuation_analysis'):
-        message += f"Valuation: {scenario.get('valuation_analysis')}\n"
+        message += f"밸류에이션: {scenario.get('valuation_analysis')}\n"
 
     if scenario.get('sector_outlook'):
-        message += f"Sector Outlook: {scenario.get('sector_outlook')}\n"
+        message += f"업종 전망: {scenario.get('sector_outlook')}\n"
 
     if rank_change_msg:
-        message += f"Trading Value Analysis: {rank_change_msg}\n"
+        message += f"거래대금 분석: {rank_change_msg}\n"
 
-    message += f"Rationale: {scenario.get('rationale', 'No information')}\n"
+    message += f"투자근거: {scenario.get('rationale', '정보 없음')}\n"
 
     # Format trading scenario section
     trading_scenarios = scenario.get('trading_scenarios', {})
@@ -138,44 +138,44 @@ def format_buy_message(
 def _format_trading_scenarios(trading_scenarios: Dict[str, Any], current_price: float) -> str:
     """Format trading scenarios section."""
     message = "\n" + "=" * 40 + "\n"
-    message += "📋 Trading Scenarios\n"
+    message += "📋 매매 시나리오\n"
     message += "=" * 40 + "\n\n"
 
     # Key levels
     key_levels = trading_scenarios.get('key_levels', {})
     if key_levels:
-        message += "💰 Key Price Levels:\n"
+        message += "💰 핵심 가격대:\n"
 
         primary_resistance = parse_price_value(key_levels.get('primary_resistance', 0))
         secondary_resistance = parse_price_value(key_levels.get('secondary_resistance', 0))
         if primary_resistance or secondary_resistance:
-            message += "  📈 Resistance:\n"
+            message += "  📈 저항선:\n"
             if secondary_resistance:
-                message += f"    • 2nd: {secondary_resistance:,.0f} KRW\n"
+                message += f"    • 2차: {secondary_resistance:,.0f}원\n"
             if primary_resistance:
-                message += f"    • 1st: {primary_resistance:,.0f} KRW\n"
+                message += f"    • 1차: {primary_resistance:,.0f}원\n"
 
-        message += f"  ━━ Current Price: {current_price:,.0f} KRW ━━\n"
+        message += f"  ━━ 현재가: {current_price:,.0f}원 ━━\n"
 
         primary_support = parse_price_value(key_levels.get('primary_support', 0))
         secondary_support = parse_price_value(key_levels.get('secondary_support', 0))
         if primary_support or secondary_support:
-            message += "  📉 Support:\n"
+            message += "  📉 지지선:\n"
             if primary_support:
-                message += f"    • 1st: {primary_support:,.0f} KRW\n"
+                message += f"    • 1차: {primary_support:,.0f}원\n"
             if secondary_support:
-                message += f"    • 2nd: {secondary_support:,.0f} KRW\n"
+                message += f"    • 2차: {secondary_support:,.0f}원\n"
 
         volume_baseline = key_levels.get('volume_baseline', '')
         if volume_baseline:
-            message += f"  📊 Volume Baseline: {volume_baseline}\n"
+            message += f"  📊 거래량 기준: {volume_baseline}\n"
 
         message += "\n"
 
     # Sell triggers
     sell_triggers = trading_scenarios.get('sell_triggers', [])
     if sell_triggers:
-        message += "🔔 Sell Signals:\n"
+        message += "🔔 매도 시그널:\n"
         for trigger in sell_triggers:
             if "profit" in trigger.lower() or "target" in trigger.lower() or "resistance" in trigger.lower():
                 emoji = "✅"
@@ -191,7 +191,7 @@ def _format_trading_scenarios(trading_scenarios: Dict[str, Any], current_price: 
     # Hold conditions
     hold_conditions = trading_scenarios.get('hold_conditions', [])
     if hold_conditions:
-        message += "✋ Hold Conditions:\n"
+        message += "✋ 보유 지속 조건:\n"
         for condition in hold_conditions:
             message += f"  • {condition}\n"
         message += "\n"
@@ -199,7 +199,7 @@ def _format_trading_scenarios(trading_scenarios: Dict[str, Any], current_price: 
     # Portfolio context
     portfolio_context = trading_scenarios.get('portfolio_context', '')
     if portfolio_context:
-        message += f"💼 Portfolio Perspective:\n  {portfolio_context}\n"
+        message += f"💼 포트폴리오 관점:\n  {portfolio_context}\n"
 
     return message
 
@@ -229,12 +229,12 @@ def format_sell_message(
         str: Formatted message
     """
     arrow = "⬆️" if profit_rate > 0 else "⬇️" if profit_rate < 0 else "➖"
-    message = f"📉 Sell: {company_name}({ticker})\n" \
-              f"Buy Price: {buy_price:,.0f} KRW\n" \
-              f"Sell Price: {sell_price:,.0f} KRW\n" \
-              f"Return: {arrow} {abs(profit_rate):.2f}%\n" \
-              f"Holding Period: {holding_days} days\n" \
-              f"Sell Reason: {sell_reason}"
+    message = f"📉 매도: {company_name}({ticker})\n" \
+              f"매수가: {buy_price:,.0f}원\n" \
+              f"매도가: {sell_price:,.0f}원\n" \
+              f"수익률: {arrow} {abs(profit_rate):.2f}%\n" \
+              f"보유기간: {holding_days}일\n" \
+              f"매도이유: {sell_reason}"
     return message
 
 

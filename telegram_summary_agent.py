@@ -216,17 +216,17 @@ class TelegramSummaryGenerator:
         )
 
         # Construct message prompt
-        prompt_message = f"""This is a detailed analysis report for {metadata['stock_name']}({metadata['stock_code']}) stock.
-            This stock was captured by {trigger_type} trigger.
+        prompt_message = f"""다음은 {metadata['stock_name']}({metadata['stock_code']}) 종목에 대한 상세 분석 보고서입니다.
+            이 종목은 {trigger_type} 트리거에 포착되었습니다.
 
-            Report content:
+            보고서 내용:
             {report_content}
             """
 
         # Add warning message if trigger mode is morning
         if metadata.get('trigger_mode') == 'morning':
             logger.info("Adding warning message for 10-minute post-market-open data")
-            prompt_message += "\nThis stock was captured 10 minutes after market open and may differ from current situation."
+            prompt_message += "\n⚠️ 주의: 본 정보는 장 시작 후 10분 시점 데이터입니다. 현재 상황과 다를 수 있습니다."
 
         # Generate Telegram message using evaluation-optimization workflow
         response = await evaluator_optimizer.generate_str(
@@ -254,7 +254,7 @@ class TelegramSummaryGenerator:
 
             # Try to extract only actual message content
             emoji_start = re.search(r'(📊|📈|📉|💰|⚠️|🔍)', cleaned_response)
-            message_end = re.search(r'This information is for investment reference only, investment decisions and responsibilities lie with the investor\.', cleaned_response)
+            message_end = re.search(r'본 정보는 투자 참고용이며, 투자 결정과 책임은 투자자에게 있습니다\.', cleaned_response)
 
             if emoji_start and message_end:
                 return cleaned_response[emoji_start.start():message_end.end()]
@@ -282,7 +282,7 @@ class TelegramSummaryGenerator:
         logger.debug(f"Response string before regex: {response_str[:100]}...")
 
         # Try to extract Telegram message format with regex
-        content_match = re.search(r'(📊|📈|📉|💰|⚠️|🔍).*?This information is for investment reference only, investment decisions and responsibilities lie with the investor\.', response_str, re.DOTALL)
+        content_match = re.search(r'(📊|📈|📉|💰|⚠️|🔍).*?본 정보는 투자 참고용이며, 투자 결정과 책임은 투자자에게 있습니다\.', response_str, re.DOTALL)
 
         if content_match:
             logger.info("Extracted message content with regex.")
@@ -293,14 +293,14 @@ class TelegramSummaryGenerator:
         logger.warning(f"Original message not extracted by regex: {response_str[:100]}...")
 
         # Generate default message
-        default_message = f"""📊 {metadata['stock_name']}({metadata['stock_code']}) - Analysis Summary
+        default_message = f"""📊 {metadata['stock_name']}({metadata['stock_code']}) - 분석 요약
 
-    1. Current price: (No information)
-    2. Recent trend: (No information)
-    3. Key checkpoints: Refer to detailed analysis report.
+    1. 현재가: (정보 없음)
+    2. 최근 추세: (정보 없음)
+    3. 주요 체크포인트: 상세 분석 보고서 참조.
 
-    ⚠️ Cannot display detailed information due to auto-generation error. Please check full report.
-    This information is for investment reference only, investment decisions and responsibilities lie with the investor."""
+    ⚠️ 자동 생성 오류로 상세 정보를 표시할 수 없습니다. 전체 보고서를 확인하세요.
+    본 정보는 투자 참고용이며, 투자 결정과 책임은 투자자에게 있습니다."""
 
         return default_message
 
