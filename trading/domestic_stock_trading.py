@@ -684,39 +684,27 @@ class DomesticStockTrading:
                     'message': f'Reserved buy order completed ({buy_quantity} shares, {order_type_str}, {period_str})'
                 }
             else:
-                # If reserved order fails, retry with market buy once (wait 1 sec to prevent rate limit)
-                logger.error(f"Reserved buy order failed: {res.getErrorCode()} - {res.getErrorMessage()}")
-                time.sleep(1.0)  # Prevent rate limit
-                market_price_result = self.buy_market_price(stock_code, amount)
-                if market_price_result.get('success', False):
-                    logger.info(f"[{stock_code}] Market buy retry successful")
-                    return market_price_result
-                else:
-                    logger.error(f"[{stock_code}] Both reserved order and market buy failed")
-                    return {
-                        'success': False,
-                        'order_no': None,
-                        'stock_code': stock_code,
-                        'quantity': buy_quantity,
-                        'message': f"Reserved order failed: {res.getErrorCode()} - {res.getErrorMessage()} / Market buy also failed: {market_price_result.get('message')}"
-                    }
-
-        except Exception as e:
-            logger.error(f"Error during reserved buy order: {str(e)}")
-            time.sleep(1.0)  # Prevent rate limit
-            market_price_result = self.buy_market_price(stock_code, amount)
-            if market_price_result.get('success', False):
-                logger.info(f"[{stock_code}] Market buy retry successful")
-                return market_price_result
-            else:
-                logger.error(f"[{stock_code}] Both reserved order and market buy error")
+                # Reserved order failed - do NOT fallback to market (doesn't work outside hours)
+                # Market buy will fail with APBK0918 "장운영시간이 아닙니다" outside trading hours
+                error_msg = f"{res.getErrorCode()} - {res.getErrorMessage()}"
+                logger.error(f"Reserved buy order failed: {error_msg}")
                 return {
                     'success': False,
                     'order_no': None,
                     'stock_code': stock_code,
                     'quantity': buy_quantity,
-                    'message': f"Error during reserved buy order: {str(e)} / Market buy also error: {market_price_result.get('message')}"
+                    'message': f"Reserved order failed: {error_msg}"
                 }
+
+        except Exception as e:
+            logger.error(f"Error during reserved buy order: {str(e)}")
+            return {
+                'success': False,
+                'order_no': None,
+                'stock_code': stock_code,
+                'quantity': buy_quantity,
+                'message': f"Error during reserved buy order: {str(e)}"
+            }
 
     def sell_all_market_price(self, stock_code: str) -> Dict[str, Any]:
         """
@@ -1036,37 +1024,27 @@ class DomesticStockTrading:
                     'message': f'Reserved sell order completed ({buy_quantity} shares, {order_type_str}, {period_str})'
                 }
             else:
-                # If reserved order fails, retry with market sell all once
-                logger.error(f"Reserved sell order failed: {res.getErrorCode()} - {res.getErrorMessage()}")
-                market_sell_result = self.sell_all_market_price(stock_code)
-                if market_sell_result.get('success', False):
-                    logger.info(f"[{stock_code}] Market sell all retry successful")
-                    return market_sell_result
-                else:
-                    logger.error(f"[{stock_code}] Both reserved order and market sell failed")
-                    return {
-                        'success': False,
-                        'order_no': None,
-                        'stock_code': stock_code,
-                        'quantity': buy_quantity,
-                        'message': f"Reserved order failed: {res.getErrorCode()} - {res.getErrorMessage()} / Market sell also failed: {market_sell_result.get('message')}"
-                    }
-
-        except Exception as e:
-            logger.error(f"Error during reserved sell order: {str(e)}")
-            market_sell_result = self.sell_all_market_price(stock_code)
-            if market_sell_result.get('success', False):
-                logger.info(f"[{stock_code}] Market sell all retry successful")
-                return market_sell_result
-            else:
-                logger.error(f"[{stock_code}] Both reserved order and market sell error")
+                # Reserved order failed - do NOT fallback to market (doesn't work outside hours)
+                # Market sell will fail with APBK0918 "장운영시간이 아닙니다" outside trading hours
+                error_msg = f"{res.getErrorCode()} - {res.getErrorMessage()}"
+                logger.error(f"Reserved sell order failed: {error_msg}")
                 return {
                     'success': False,
                     'order_no': None,
                     'stock_code': stock_code,
                     'quantity': buy_quantity,
-                    'message': f"Error during reserved sell order: {str(e)} / Market sell also error: {market_sell_result.get('message')}"
+                    'message': f"Reserved order failed: {error_msg}"
                 }
+
+        except Exception as e:
+            logger.error(f"Error during reserved sell order: {str(e)}")
+            return {
+                'success': False,
+                'order_no': None,
+                'stock_code': stock_code,
+                'quantity': buy_quantity,
+                'message': f"Error during reserved sell order: {str(e)}"
+            }
 
     async def _get_stock_lock(self, stock_code: str) -> asyncio.Lock:
         """Return per-stock lock (prevent concurrent trading)"""
@@ -1165,14 +1143,18 @@ class DomesticStockTrading:
                         result['total_amount'] = buy_quantity * current_price_info['current_price']
 
                         # Step 3: Execute buy (use amount, limit price if provided)
+                        # Use current_price as limit_price fallback for reserved orders (outside market hours)
+                        # CRITICAL: Convert to int - KIS API requires integer strings, not float strings ("30800" not "30800.0")
+                        effective_limit_price = int(limit_price) if (limit_price and limit_price > 0) else int(current_price)
+
                         # Prevent rate limit
                         await asyncio.sleep(0.5)
                         if limit_price:
-                            logger.info(f"[Async Buy API] {stock_code} executing reserved buy order: {buy_quantity} shares x {limit_price:,} KRW (limit)")
+                            logger.info(f"[Async Buy API] {stock_code} executing reserved buy order: {buy_quantity} shares x {effective_limit_price:,} KRW (limit)")
                         else:
-                            logger.info(f"[Async Buy API] {stock_code} executing market buy: {buy_quantity} shares x {amount:,} KRW")
+                            logger.info(f"[Async Buy API] {stock_code} executing with effective limit price: {buy_quantity} shares x {effective_limit_price:,} KRW")
                         buy_result = await asyncio.to_thread(
-                            self.smart_buy, stock_code, amount, limit_price
+                            self.smart_buy, stock_code, amount, effective_limit_price
                         )
 
                         if buy_result['success']:
@@ -1297,12 +1279,16 @@ class DomesticStockTrading:
                             return result
 
                         # Execute sell all
-                        if limit_price:
-                            logger.info(f"[Async Sell API] {stock_code} executing sell all (holding: {holding_quantity} shares, limit: {limit_price:,} KRW)")
+                        # Use current_price as limit_price fallback for reserved orders (outside market hours)
+                        # CRITICAL: Convert to int - KIS API requires integer strings, not float strings
+                        effective_limit_price = int(limit_price) if (limit_price and limit_price > 0) else (int(result['current_price']) if result['current_price'] > 0 else None)
+
+                        if effective_limit_price:
+                            logger.info(f"[Async Sell API] {stock_code} executing sell all (holding: {holding_quantity} shares, limit: {effective_limit_price:,} KRW)")
                         else:
-                            logger.info(f"[Async Sell API] {stock_code} executing sell all (holding: {holding_quantity} shares)")
+                            logger.info(f"[Async Sell API] {stock_code} executing sell all (holding: {holding_quantity} shares, market)")
                         all_sell_result = await asyncio.to_thread(
-                            self.smart_sell_all, stock_code, limit_price
+                            self.smart_sell_all, stock_code, effective_limit_price
                         )
 
                         if all_sell_result['success']:
