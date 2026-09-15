@@ -535,7 +535,7 @@ class USStockAnalysisOrchestrator:
             from observability.micro_split import get_shadow_batch_context
             watch_context = get_shadow_batch_context()
             watch_batch_ref = watch_context.get("batch_ref") if watch_context else None
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             results = await loop.run_in_executor(
                 None,
                 lambda: run_batch(mode, "INFO", results_file, macro_context=macro_context, override_date=override_date,
