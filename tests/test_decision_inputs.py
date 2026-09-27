@@ -172,3 +172,9 @@ def test_contract_is_appended_to_buy_instructions(monkeypatch):
     assert "보조 수치 팩트 사용법" in kr and "새 가점·감점·진입 차단 조건이 아닙니다" in kr
     monkeypatch.setenv("PRISM_BUY_DECISION_FACTS", "false")
     assert "보조 수치 팩트 사용법" not in create_trading_scenario_agent(language="ko").instruction
+
+
+def test_english_block_has_no_korean_missing_marker():
+    block, _ = F.render_facts_block({"features": {"last_completed_date": "2026-09-25"}}, None, None,
+                                    market="US", language="en")
+    assert "결측" not in block and "missing" in block

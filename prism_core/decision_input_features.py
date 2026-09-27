@@ -161,8 +161,10 @@ def _yn(value, language):
     return ("예" if value else "아니오") if language == "ko" else ("yes" if value else "no")
 
 
-def _num(value, suffix="", digits=2):
-    return "결측" if value is None else f"{value:,.{digits}f}{suffix}"
+def _num_lang(value, suffix="", digits=2, language="ko"):
+    if value is None:
+        return "결측" if language == "ko" else "missing"
+    return f"{value:,.{digits}f}{suffix}"
 
 
 def render_facts_block(result, peer=None, earnings=None, *, market, language="ko"):
@@ -171,6 +173,10 @@ def render_facts_block(result, peer=None, earnings=None, *, market, language="ko
     flags = rubric_flags(f, peer, earnings)
     peer = peer or {}
     ko = language == "ko"
+
+    def _num(value, suffix="", digits=2):  # language-bound missing marker
+        return _num_lang(value, suffix, digits, language)
+
     asof = f.get("last_completed_date") or ("결측" if ko else "missing")
     lines = ["### 📐 보조 수치 팩트 (결정론적 계산 · decision_inputs_v1)" if ko
              else "### 📐 Supplementary numeric facts (deterministic · decision_inputs_v1)"]
