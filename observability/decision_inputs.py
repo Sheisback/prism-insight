@@ -13,7 +13,9 @@ import os
 from datetime import date, datetime, timezone
 
 from observability.events import emit_event
-from prism_core.decision_input_features import CONTRACT_VERSION, bars_from_frame, compute
+from prism_core.decision_input_features import (
+    CONTRACT_VERSION, bars_from_frame, compute, prompt_facts_enabled, render_facts_block,
+)
 
 _EARNINGS_TIMEOUT = 3.0
 _POOL = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="decision-input-earnings")
@@ -82,6 +84,33 @@ def us_earnings(ticker, today):
         return {"status": "MISSING", "reason": type(error).__name__}
 
 
+def prompt_facts(agent, ticker, *, market, language="ko", now=None, earnings_lookup=None):
+    """Facts block for the BUY prompt ('' when disabled or unavailable). Never raises.
+
+    The computed features, flags and block are cached on the agent so the SHADOW
+    event later records exactly what the prompt contained.
+    """
+    try:
+        if not prompt_facts_enabled() or not ticker:
+            return ""
+        now = now or datetime.now(timezone.utc)
+        captured = (getattr(agent, "_decision_input_bars", {}) or {}).get(ticker)
+        if not captured or captured.get("market") != market:
+            return ""
+        result = compute(captured["bars"], market=market, observed_at=now)
+        meta = (getattr(agent, "_report_meta", None) or {}).get(ticker) or {}
+        peer = meta.get("peer_valuation")
+        earnings = (earnings_lookup or us_earnings)(ticker, now.date()) if market == "US" else None
+        block, flags = render_facts_block(result, peer, earnings, market=market, language=language)
+        if not hasattr(agent, "_decision_input_prompt"):
+            agent._decision_input_prompt = {}
+        agent._decision_input_prompt[ticker] = {"flags": flags, "block": block, "earnings": earnings,
+                                                "observed_at": now.isoformat()}
+        return block
+    except Exception:  # noqa: BLE001 - optional input must never fail a BUY decision
+        return ""
+
+
 def emit_decision_inputs(agent, *, market, ticker, decision_id, scenario, current_price, decision, source,
                          now=None, earnings_lookup=us_earnings):
     """Emit one idempotent SHADOW event per decision_id; returns the payload or None."""
@@ -98,10 +127,15 @@ def emit_decision_inputs(agent, *, market, ticker, decision_id, scenario, curren
                       "missing": {"daily_frame": "not_captured"}}
         meta = (getattr(agent, "_report_meta", None) or {}).get(ticker) or {}
         result["peer_valuation"] = meta.get("peer_valuation") or {"status": "MISSING", "reason": "not_in_report_meta"}
-        result["earnings"] = earnings_lookup(ticker, now.date()) if market == "US" else \
-            {"status": "NOT_COLLECTED", "reason": "kr_earnings_calendar_not_in_v1"}
+        shown = (getattr(agent, "_decision_input_prompt", {}) or {}).get(ticker)
+        if market == "US":
+            result["earnings"] = (shown or {}).get("earnings") or earnings_lookup(ticker, now.date())
+        else:
+            result["earnings"] = {"status": "NOT_COLLECTED", "reason": "kr_earnings_calendar_not_in_v1"}
+        result["prompt_flags"] = (shown or {}).get("flags")
         result["sector_comovement"] = {"status": "NOT_COLLECTED", "reason": "deferred_v2"}
-        payload = {"mode": "SHADOW", "trading_impact": "none", "prompt_impact": "none",
+        payload = {"mode": "SHADOW", "trading_impact": "none",
+                   "prompt_impact": "facts_block_included" if shown else "none",
                    "contract_version": CONTRACT_VERSION, "decision": decision, "source": source, **result}
         event_id = hashlib.sha256(f"{CONTRACT_VERSION}|{market}|{decision_id}".encode()).hexdigest()[:32]
         emit_event("decision_inputs.shadow_captured", service="prism-" + market.lower() + "-decision-inputs-shadow",
