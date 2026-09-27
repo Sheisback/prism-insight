@@ -282,8 +282,9 @@ class OneilService:
                         callback = None
                         if mode == "LIVE" and not campaign.get("strategy_position_id"):
                             live_agent = await self._live_agent(account)
-                            async def callback(reserved):
+                            async def materialize_callback(reserved):
                                 return await materialize_initial(live_agent, execution, reserved)
+                            callback = materialize_callback
                         def authorize():
                             current = load(self.config_path)
                             if current["mode"] != "LIVE" or current["live_db"] != self.config["live_db"]:

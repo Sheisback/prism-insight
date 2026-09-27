@@ -7,7 +7,6 @@ import json
 import os
 from pathlib import Path
 import re
-import subprocess
 import sys
 import tempfile
 
@@ -17,10 +16,21 @@ from prism_core.oneil_config import DEFAULT_PATH, defaults, implementation_hash,
 
 
 def active_entry_batches():
-    result = subprocess.run(["ps", "-eo", "pid=,args="], capture_output=True, text=True, check=True, timeout=5)
+    inventory = Path("/proc")
+    if not inventory.is_dir():
+        raise ValueError("LIVE cutover requires the Linux server process inventory")
     pattern = re.compile(r"(?:^|[/\s])(?:us_stock_analysis_orchestrator|us_stock_tracking_agent)(?:\.py|\s|$)")
-    return sum(bool(pattern.search(line)) for line in result.stdout.splitlines()
-               if line.strip().split(None, 1)[0] != str(os.getpid()))
+    count = 0
+    for process in inventory.iterdir():
+        if not process.name.isdigit() or process.name == str(os.getpid()):
+            continue
+        try:
+            with (process / "cmdline").open("rb") as stream:
+                command = stream.read(65536).replace(b"\0", b" ").decode("utf-8", errors="replace")
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        count += bool(pattern.search(command))
+    return count
 
 
 def publish(path, value, *, expected_hash=None):

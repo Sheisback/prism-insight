@@ -142,8 +142,9 @@ def main():
             if digest(d['response']) != d['sha256']:
                 raise ValueError('source_hash_mismatch')
         sources={digest(d['request']):d['response'] for d in saved['inputs']}
-        def fetcher(request):
+        def saved_fetcher(request):
             return sources[digest(request)]
+        fetcher = saved_fetcher
     result=run(packet,fetcher)
     import pandas_market_calendars as calendars
     result['implementation'] = {

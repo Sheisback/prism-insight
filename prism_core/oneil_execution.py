@@ -122,8 +122,11 @@ class OneilExecution:
 
     def list_campaigns(self, *, active_only=True):
         with self._transaction() as db:
-            query = "SELECT data FROM oneil_accounts" + (" WHERE active=1" if active_only else "")
-            return [json.loads(r[0]) for r in db.execute(query)]
+            if active_only:
+                rows = db.execute("SELECT data FROM oneil_accounts WHERE active=1")
+            else:
+                rows = db.execute("SELECT data FROM oneil_accounts")
+            return [json.loads(r[0]) for r in rows]
 
     def owner_by_symbol(self, account_id, symbol):
         with self._transaction() as db:

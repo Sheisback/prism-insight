@@ -119,7 +119,7 @@ async def collect_initial_envelope(agent, campaign, *, market_provider=None,
         now = _now()
         quote = quote_input(plan=plan, position_id=position_id, response=raw_quote, now=now)
     except Exception:
-        pass
+        quote = None
     protective = protection_only or campaign.get("status") == "EXIT_PENDING" or quote is None
     if quote is not None:
         try:

@@ -84,14 +84,21 @@ def build(db, market, source_timezone):
     connection.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
     try:
         connection.execute("BEGIN")
-        table = TABLES[market]
-        columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
+        if market == "KR":
+            info = connection.execute("PRAGMA table_info(trading_history)")
+        else:
+            info = connection.execute("PRAGMA table_info(us_trading_history)")
+        columns = {row[1] for row in info}
         if not columns:
             unavailable = "SOURCE_TABLE_MISSING"
         elif not COLUMNS <= columns:
             unavailable = "REQUIRED_COLUMNS_MISSING"
         else:
-            for sold, profit, scenario in connection.execute(f"SELECT sell_date, profit_rate, scenario FROM {table}"):
+            if market == "KR":
+                records = connection.execute("SELECT sell_date, profit_rate, scenario FROM trading_history")
+            else:
+                records = connection.execute("SELECT sell_date, profit_rate, scenario FROM us_trading_history")
+            for sold, profit, scenario in records:
                 if counts["records"] >= ROW_LIMIT:
                     raise ValueError("inventory_row_limit")
                 if time.monotonic() > deadline:

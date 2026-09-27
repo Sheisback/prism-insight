@@ -7,6 +7,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import inspect
+import logging
 import time
 
 from prism_core.oneil_adaptive_policy import _num, _time
@@ -80,7 +81,7 @@ async def _reconcile(execution, cid, broker, clock):
                 try:
                     await broker.cancel(intent, order_id, latest["broker_order_date"])
                 except Exception:
-                    pass  # Known shares still need protection if cancel fails.
+                    logging.getLogger(__name__).warning("owned cancellation unconfirmed; protecting known shares")
                 # Cancellation acknowledgement alone releases no reservation.
                 await _read_receipt(execution, cid, broker, intent, order_id, latest["broker_order_date"], clock)
 

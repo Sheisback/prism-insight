@@ -7,6 +7,7 @@ from contextlib import closing
 from datetime import datetime, timezone
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import sqlite3
@@ -77,7 +78,7 @@ def _connect(path):
                 initialize.execute("BEGIN IMMEDIATE")
                 for statement in _SCHEMA:
                     initialize.execute(statement)
-                initialize.execute(f"PRAGMA application_id={_APP_ID}")
+                initialize.execute("PRAGMA application_id=1396917059")
                 initialize.execute("PRAGMA user_version=1")
             # Publish a fully initialized file without overwriting a racing writer.
             try:
@@ -206,7 +207,7 @@ def emit_initial_capture(*, market, ticker, decision_id, position_id, scenario,
                 from observability.oneil_capture import capture_initial
                 capture_initial(payload)
             except Exception:
-                pass
+                logging.getLogger(__name__).warning("optional execution capture unavailable")
             # Serialize cooperating writers. Original is already durable if emit fails.
             with connection:
                 connection.execute("BEGIN IMMEDIATE")

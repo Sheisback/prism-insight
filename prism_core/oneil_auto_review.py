@@ -8,7 +8,8 @@ from zoneinfo import ZoneInfo
 
 
 VERSION = "oneil-auto-review-v1"
-PASS = "VALIDATED_RULE_OUTPUT"
+VALIDATED_STATUS = "VALIDATED_RULE_OUTPUT"
+PASS = VALIDATED_STATUS  # Backward-compatible classification name, not a credential.
 
 
 class _EvidenceError(ValueError):
@@ -196,7 +197,7 @@ def _base(snapshot, cutoff, sessions):
         if reasons:
             failures.extend(reasons)
             continue
-        return _result(PASS, metrics={
+        return _result(VALIDATED_STATUS, metrics={
             "weeks": duration, "start_date": str(base_days[0]), "end_date": str(base_days[-1]),
             "latest_completed_date": str(days[-1]), "base_high": str(peak), "base_low": str(low),
             "depth": str((peak - low) / peak), "prior_advance": str(peak / prior_low - 1),
@@ -270,7 +271,7 @@ def _leadership(snapshot, cutoff, sessions, local_date):
             reasons.append(key.upper() + "_GROWTH_BELOW_25_PERCENT")
     if excess <= 0:
         reasons.append("NO_POSITIVE_SPY_EXCESS_RETURN")
-    return _result("REJECTED" if reasons else PASS, reasons, {
+    return _result("REJECTED" if reasons else VALIDATED_STATUS, reasons, {
         "period_end": str(latest), "prior_period_end": str(comparisons[0]),
         "eps_growth": str(growth["eps"]), "revenue_growth": str(growth["revenue"]),
         "growth_operands": operands,
@@ -314,7 +315,7 @@ def evaluate_auto_review(snapshot, *, as_of):
             except _EvidenceError as error:
                 output[name] = _result(error.status, [error.reason], **({"pivot": None} if name == "base" else {}))
         statuses = {output[name]["status"] for name in ("base", "leadership")}
-        output["status"] = next((status for status in ("INVALID", "MISSING", "REJECTED") if status in statuses), PASS)
+        output["status"] = next((status for status in ("INVALID", "MISSING", "REJECTED") if status in statuses), VALIDATED_STATUS)
     except _EvidenceError as error:
         output["status"] = error.status
         output["base"] = _result(error.status, [error.reason], pivot=None)

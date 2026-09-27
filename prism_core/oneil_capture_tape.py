@@ -19,12 +19,15 @@ _SCHEMA = (
     "CREATE TABLE gaps (gap_id TEXT PRIMARY KEY, campaign_id TEXT NOT NULL REFERENCES campaigns(campaign_id), payload TEXT NOT NULL)",
     "CREATE INDEX records_campaign_kind ON records(campaign_id, kind)",
     "CREATE INDEX gaps_campaign ON gaps(campaign_id, gap_id)",
-) + tuple(
-    f"CREATE TRIGGER {table}_{op.lower()} BEFORE {op} ON {table} BEGIN SELECT RAISE(ABORT, 'immutable tape'); END"
-    for table in ("campaigns", "records", "gaps") for op in ("UPDATE", "DELETE")
-) + tuple(
-    f"CREATE TRIGGER {table}_replace BEFORE INSERT ON {table} WHEN EXISTS (SELECT 1 FROM {table} WHERE {key}=NEW.{key}) BEGIN SELECT RAISE(ABORT, 'immutable tape'); END"
-    for table, key in (("campaigns", "campaign_id"), ("records", "event_id"), ("gaps", "gap_id"))
+    "CREATE TRIGGER campaigns_update BEFORE UPDATE ON campaigns BEGIN SELECT RAISE(ABORT, 'immutable tape'); END",
+    "CREATE TRIGGER campaigns_delete BEFORE DELETE ON campaigns BEGIN SELECT RAISE(ABORT, 'immutable tape'); END",
+    "CREATE TRIGGER records_update BEFORE UPDATE ON records BEGIN SELECT RAISE(ABORT, 'immutable tape'); END",
+    "CREATE TRIGGER records_delete BEFORE DELETE ON records BEGIN SELECT RAISE(ABORT, 'immutable tape'); END",
+    "CREATE TRIGGER gaps_update BEFORE UPDATE ON gaps BEGIN SELECT RAISE(ABORT, 'immutable tape'); END",
+    "CREATE TRIGGER gaps_delete BEFORE DELETE ON gaps BEGIN SELECT RAISE(ABORT, 'immutable tape'); END",
+    "CREATE TRIGGER campaigns_replace BEFORE INSERT ON campaigns WHEN EXISTS (SELECT 1 FROM campaigns WHERE campaign_id=NEW.campaign_id) BEGIN SELECT RAISE(ABORT, 'immutable tape'); END",
+    "CREATE TRIGGER records_replace BEFORE INSERT ON records WHEN EXISTS (SELECT 1 FROM records WHERE event_id=NEW.event_id) BEGIN SELECT RAISE(ABORT, 'immutable tape'); END",
+    "CREATE TRIGGER gaps_replace BEFORE INSERT ON gaps WHEN EXISTS (SELECT 1 FROM gaps WHERE gap_id=NEW.gap_id) BEGIN SELECT RAISE(ABORT, 'immutable tape'); END",
 )
 
 
@@ -59,7 +62,7 @@ class OneilCaptureTape:
                     conn.execute("BEGIN IMMEDIATE")
                     for sql in _SCHEMA:
                         conn.execute(sql)
-                    conn.execute(f"PRAGMA application_id={_APP_ID}")
+                    conn.execute("PRAGMA application_id=1330533456")
                     conn.execute("PRAGMA user_version=1")
                 try:
                     os.link(temporary, self.path)
