@@ -27,6 +27,13 @@ def test_buy_prompt_reconciles_evidence_without_new_gate(market, language):
     factory = "create_trading_scenario_agent" if market == "KR" else "create_us_trading_scenario_agent"
     prompt = namespace[factory](language).instruction
     if market == "US":
+        # Reviewed 2026-09-27 decision_inputs appendix is last; peel it first.
+        from prism_core.decision_input_features import prompt_contract, prompt_facts_enabled
+        facts_appendix = prompt_contract("ko" if language == "ko" else "en", market="US")
+        if prompt_facts_enabled():
+            assert prompt.count(facts_appendix) == 1 and prompt.endswith(facts_appendix)
+            prompt = prompt[:-len(facts_appendix)]
+        assert facts_appendix not in prompt
         # Reverse only reviewed analyst/finality additions, then retain the
         # original legacy-rule and JSON hashes below. Literal snapshots ensure
         # an unrelated future appendix change cannot silently bypass this guard.

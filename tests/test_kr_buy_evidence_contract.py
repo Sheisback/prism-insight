@@ -49,6 +49,13 @@ def test_time_alone_cannot_finalize_today_bar(prompt):
 
 def test_decision_rules_and_json_schema_are_byte_preserved(prompt):
     language, text = prompt
+    # Reviewed 2026-09-27 decision_inputs appendix is peeled off before the original hashes.
+    from prism_core.decision_input_features import prompt_contract, prompt_facts_enabled
+    appendix = prompt_contract("en" if language == "en" else "ko", market="KR")
+    if prompt_facts_enabled():
+        assert text.count(appendix) == 1 and text.endswith(appendix)
+        text = text[:-len(appendix)]
+    assert appendix not in text
     heading = "## 도구 사용" if language == "ko" else "## Tool Usage"
     json_heading = "## JSON 응답 형식" if language == "ko" else "## JSON Response Format"
     # Refreshed stale hashes against 9203306b; volume changes preserve these bytes.

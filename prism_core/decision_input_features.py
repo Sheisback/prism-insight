@@ -74,9 +74,17 @@ def compute(bars, *, market, observed_at, current_price=None, scenario=None):
         missing["completed_bars"] = len(completed)
         return {"status": "MISSING", "features": features, "missing": missing}
     last, prior20 = completed[-1], completed[-21:-1]
+    features["last_completed_date"] = last["date"]
     avg20 = sum(b["volume"] for b in completed[-20:]) / 20
     features["rvol_last_completed"] = round(last["volume"] / (sum(b["volume"] for b in prior20) / 20), 4) \
         if sum(b["volume"] for b in prior20) > 0 else None
+    # Rubric item 1 says "today or any of the last 3 sessions": each vs its own prior 20.
+    recent = []
+    for k in range(1, 4):
+        base = completed[-20 - k:-k]
+        if len(base) == 20 and sum(b["volume"] for b in base) > 0:
+            recent.append(completed[-k]["volume"] / (sum(b["volume"] for b in base) / 20))
+    features["rvol_max_last3_completed"] = round(max(recent), 4) if recent else None
     # Linear time scaling overstates early-session volume (U-shaped intraday profile);
     # it is recorded as an approximation and bucketed, never used as a signal.
     if forming is not None and 0.05 <= fraction < 1 and avg20 > 0:
@@ -121,3 +129,135 @@ def compute(bars, *, market, observed_at, current_price=None, scenario=None):
         "extended_move_ge_2_atr": bool((features.get("move_atr_multiple") or 0) >= 2.0),
     }
     return {"status": "OK" if not missing else "PARTIAL", "features": features, "missing": missing}
+
+
+# --- BUY prompt facts (decision_inputs_v1) -------------------------------------------------
+# Only completed-session and dated reference facts reach the prompt. The intraday volume
+# estimate and the accumulation proxy stay SHADOW-only: the 2026-09-27 volume contract
+# (docs/VOLUME_PROMPT_REVIEW_20260927_ko.md) forbids comparing intraday with full-session
+# volume and inferring institutional accumulation from volume alone.
+RVOL = 2.0
+CHASE_PCT = 5.0            # O'Neil buy zone: up to 5% above the pivot (20-day high as a proxy)
+CHASE_ATR = 2.0
+EARNINGS_DAYS = 5
+
+
+def rubric_flags(features, peer=None, earnings=None):
+    """Deterministic answers to rubric items the agent otherwise reports as unknown."""
+    f = features or {}
+    completed = f.get("rvol_max_last3_completed")
+    high, move_atr = f.get("dist_20d_high_pct"), f.get("move_atr_multiple")
+    days = (earnings or {}).get("calendar_days_to_earnings")
+    peer = peer or {}
+    return {"volume_item_completed": None if completed is None else bool(completed >= RVOL),
+            "chase_zone": None if high is None else bool(high > CHASE_PCT or (move_atr or 0) >= CHASE_ATR),
+            "earnings_within_5d": None if days is None else bool(days <= EARNINGS_DAYS),
+            "peer_usable": peer.get("status") == "OK" and (peer.get("peer_count") or 0) >= 3}
+
+
+def _yn(value, language):
+    if value is None:
+        return "결측" if language == "ko" else "missing"
+    return ("예" if value else "아니오") if language == "ko" else ("yes" if value else "no")
+
+
+def _num_lang(value, suffix="", digits=2, language="ko"):
+    if value is None:
+        return "결측" if language == "ko" else "missing"
+    return f"{value:,.{digits}f}{suffix}"
+
+
+def render_facts_block(result, peer=None, earnings=None, *, market, language="ko"):
+    """Prompt block; every line states its basis so a missing value reads as missing."""
+    f = (result or {}).get("features") or {}
+    flags = rubric_flags(f, peer, earnings)
+    peer = peer or {}
+    ko = language == "ko"
+
+    def _num(value, suffix="", digits=2):  # language-bound missing marker
+        return _num_lang(value, suffix, digits, language)
+
+    asof = f.get("last_completed_date") or ("결측" if ko else "missing")
+    lines = ["### 📐 보조 수치 팩트 (결정론적 계산 · decision_inputs_v1)" if ko
+             else "### 📐 Supplementary numeric facts (deterministic · decision_inputs_v1)"]
+    lines.append(
+        f"- 확정 세션 거래량(기준 마지막 확정일 {asof}): 최근 3개 확정 세션 각각을 직전 20거래일 평균과 비교한 최대 "
+        f"{_num(f.get('rvol_max_last3_completed'), '배')} → 3단계 1번(최근 3거래일 내 200%) 충족: "
+        f"{_yn(flags['volume_item_completed'], language)}. 진행 중인 당일 봉은 포함하지 않았습니다." if ko else
+        f"- Completed-session volume (last completed {asof}): max over the last 3 completed sessions, each vs its "
+        f"preceding 20 sessions, {_num(f.get('rvol_max_last3_completed'), 'x')} → Step 3 item 1 (200% within the last 3 "
+        f"sessions) met: {_yn(flags['volume_item_completed'], language)}. The unfinished current bar is excluded.")
+    lines.append(
+        f"- 위치(판단 시점 가격 {_num(f.get('price_basis'), '', 2)}): 20일 고가 대비 {_num(f.get('dist_20d_high_pct'), '%')}, "
+        f"MA20 대비 {_num(f.get('dist_ma20_pct'), '%')}, 전일 종가 대비 {_num(f.get('move_vs_prev_close_pct'), '%')}"
+        f"(ATR20의 {_num(f.get('move_atr_multiple'), '배')}) → 20일 고가 +5% 초과 또는 ATR 2배 이상: "
+        f"{_yn(flags['chase_zone'], language)}" if ko else
+        f"- Location (decision price {_num(f.get('price_basis'), '', 2)}): vs 20-day high {_num(f.get('dist_20d_high_pct'), '%')}, "
+        f"vs MA20 {_num(f.get('dist_ma20_pct'), '%')}, vs prior close {_num(f.get('move_vs_prev_close_pct'), '%')} "
+        f"({_num(f.get('move_atr_multiple'), 'x')} ATR20) → >5% above 20-day high or >=2 ATR: {_yn(flags['chase_zone'], language)}")
+    if peer.get("status") == "OK":
+        lines.append(
+            f"- 동종업계 밸류에이션(WiseFn 선정 비교군 {peer.get('peer_count')}개, 재무 {peer.get('period')}, "
+            f"{peer.get('price_basis')} 기준): PER 중앙값 {_num(peer.get('peer_median_per'))}(본 종목 "
+            f"{_num(peer.get('target_per'))}, 할인 {_num(peer.get('per_discount_vs_median_pct'), '%')}), PBR 중앙값 "
+            f"{_num(peer.get('peer_median_pbr'))}(본 종목 {_num(peer.get('target_pbr'))}) → 업종 평균 대용 가능(비교군 3개 이상): "
+            f"{_yn(flags['peer_usable'], language)}" if ko else
+            f"- Peer valuation (WiseFn-selected {peer.get('peer_count')} peers, financials {peer.get('period')}): PER median "
+            f"{_num(peer.get('peer_median_per'))} (this {_num(peer.get('target_per'))}, discount "
+            f"{_num(peer.get('per_discount_vs_median_pct'), '%')}), PBR median {_num(peer.get('peer_median_pbr'))} "
+            f"→ usable as industry average (>=3 peers): {_yn(flags['peer_usable'], language)}")
+    if market == "US":
+        if (earnings or {}).get("status") == "OK":
+            lines.append(f"- 다음 실적 발표 예정: {earnings['next_earnings_date']} (D-{earnings['calendar_days_to_earnings']}, 달력일, "
+                         f"yfinance 일정) → 5일 이내: {_yn(flags['earnings_within_5d'], language)}" if ko else
+                         f"- Next scheduled earnings: {earnings['next_earnings_date']} (D-{earnings['calendar_days_to_earnings']}, "
+                         f"calendar days, yfinance) → within 5 days: {_yn(flags['earnings_within_5d'], language)}")
+        else:
+            lines.append("- 다음 실적 발표 예정: 결측(확인 불가이며 일정이 없다는 뜻이 아닙니다)" if ko else
+                         "- Next scheduled earnings: missing (unknown, not 'none scheduled')")
+    return "\n".join(lines) + "\n", flags
+
+
+def prompt_contract(language="ko", market="KR"):
+    """How the BUY agent may use the facts block; appended to the BUY instruction."""
+    us = market == "US"
+    if language == "ko":
+        text = """
+
+## 보조 수치 팩트 사용법 (입력 '📐 보조 수치 팩트' 블록)
+
+블록은 기존 채점 항목의 비어 있던 입력을 채우는 결정론적 계산입니다. 새 가점·감점·진입 차단 조건이 아닙니다.
+항목이 '결측'이면 기존처럼 보고서로 판단하고, 같은 사실을 두 번 세지 마십시오. 거래량 해석 기준은 그대로 따릅니다.
+- 3단계 1번(최근 3거래일 내 거래량 200%): 확정 세션 기준 '충족: 예'이면 충족입니다. '아니오'이면 확정 세션 기준 미충족이며,
+  진행 중인 당일 봉은 기존 기준대로 미확정으로 둡니다.
+- 4단계 'PER 30% 이상 저평가'와 미진입 단독 사유 2번(PER ≥ 업종 평균 2.5배): 보고서 2-1에 업종 평균이 없으면 블록의
+  동종업계 중앙값을 업종 평균으로 씁니다. 비교군은 WiseFn 선정 기업이며 업종 전체가 아님을 rationale에 밝히십시오.
+  '업종 평균 대용 가능: 아니오'면 참고만 하십시오.
+- 위치 수치는 기존 '추격 위험 검토'와 손절·목표 설정의 근거 수치입니다. 20일 고가는 오닐 피벗의 근사치이며,
+  '예'만으로 미진입하지 말고 돌파 실패·가격 밀림 등 기존 추격 위험 조건과 함께 판단하십시오."""
+        if us:
+            text += """
+- (미국) 실적 발표 5일 이내 '예': 발표 결과에 따른 갭 위험을 rationale에 구체적으로 적고 판단에 반영하십시오."""
+        return text + "\n"
+    text = """
+
+## Using the supplementary numeric facts (input block '📐 Supplementary numeric facts')
+
+The block fills inputs that existing rubric items already require. It adds no score bonus, penalty or entry gate.
+If an item is 'missing', judge from the report as before and never count the same fact twice. The volume interpretation rules still apply.
+- Step 3 item 1 (volume 200% within the last 3 sessions): 'met: yes' on completed sessions counts as satisfied. 'no' means not met
+  on completed sessions; the unfinished current bar stays unconfirmed as before.
+- Step 4 'PE discount >= 30%' and standalone No-Entry 2 (PE >= 2.5x industry average): when report 2-1 lacks an industry average,
+  use the block's peer median and state in the rationale that it is a WiseFn-selected peer set, not the whole industry.
+  If 'usable as industry average: no', use it for reference only.
+- Location figures support the existing chasing-risk assessment and stop/target placement. The 20-day high is only a proxy for
+  the O'Neil pivot; do not reject on 'yes' alone, judge it together with the existing failed-breakout/price-retreat conditions."""
+    if us:
+        text += """
+- (US) Earnings within 5 days 'yes': state the earnings gap risk concretely in the rationale and weigh it in the decision."""
+    return text + "\n"
+
+
+def prompt_facts_enabled():
+    import os
+    return os.getenv("PRISM_BUY_DECISION_FACTS", "true").strip().lower() in {"1", "true", "yes", "on"}

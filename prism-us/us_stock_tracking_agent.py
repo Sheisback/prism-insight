@@ -1437,10 +1437,13 @@ class USStockTrackingAgent:
             # Individual-stock trend facts for the mandatory Step 1.5 trend gate (fail-open).
             # Never raises into the buy path; returns "" on any error.
             trend_facts = ""
+            decision_facts = ""
             if ticker:
                 trend_facts = self._get_trend_facts(ticker)
                 if trend_facts:
                     logger.debug(f"[TrendFacts] US injected for {ticker} ({len(trend_facts)} chars)")
+                from observability.decision_inputs import prompt_facts
+                decision_facts = prompt_facts(self, ticker, market="US", language=getattr(self, "language", "ko"))
 
             # The prompt now contains an immutable snapshot. Release the shared
             # sqlite cursor before Codex/mcp-agent so independent candidates overlap.
@@ -1466,6 +1469,7 @@ class USStockTrackingAgent:
             {rank_change_msg}
             {score_adjustment_info}
             {trend_facts}
+            {decision_facts}
             {journal_context}
 
             ### Report Content:
@@ -1587,6 +1591,8 @@ class USStockTrackingAgent:
                 # final pre-buy gate validates the exact same as-of snapshot.
                 if trend_facts:
                     scenario_json["_deterministic_trend_facts"] = trend_facts
+                if decision_facts:
+                    scenario_json["_decision_input_facts"] = decision_facts
                 # Persist the experience-based score adjustment alongside the scenario.
                 # It rides inside the scenario JSON, stored in us_stock_holdings.scenario and
                 # copied to us_trading_history.scenario on sell — giving the weekly influence

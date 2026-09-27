@@ -799,6 +799,9 @@ Prohibited: `"$170"`, `"about $170"`, `"minimum 170"`.
     instruction = apply_buy_report_depth_evidence(
         instruction, market="US", language="ko" if language == "ko" else "en"
     )
+    from prism_core.decision_input_features import prompt_contract, prompt_facts_enabled
+    if prompt_facts_enabled():
+        instruction += prompt_contract("ko" if language == "ko" else "en", market="US")
 
     return Agent(
         name="us_trading_scenario_agent",

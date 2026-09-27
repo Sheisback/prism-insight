@@ -120,3 +120,61 @@ def test_payload_survives_event_sanitizer(monkeypatch):
     event = build_event("decision_inputs.shadow_captured", service="s", attributes=captured["attributes"])
     assert "[REDACTED]" not in json.dumps(event["attributes"])
     assert event["attributes"]["features"]["market_elapsed_fraction"] > 0
+
+
+def test_prompt_block_uses_completed_sessions_only_and_no_accumulation_claim():
+    now = datetime(2026, 9, 28, 1, 0, tzinfo=timezone.utc)  # KR session in progress
+    frame = _frame(40, today=date(2026, 9, 28), forming_volume=50_000)  # huge forming volume
+    out = F.compute(F.bars_from_frame(frame), market="KR", observed_at=now)
+    block, flags = F.render_facts_block(out, None, None, market="KR", language="ko")
+    # The forming bar's volume must not satisfy the rubric item (volume contract of 2026-09-27).
+    assert flags["volume_item_completed"] is False
+    assert "매집" not in block and "장중 추정" not in block
+    assert out["features"]["last_completed_date"] in block
+
+
+def test_completed_rvol_uses_each_sessions_own_prior_window():
+    frame = _frame(40)
+    frame.iloc[-2, frame.columns.get_loc("Volume")] = 5000  # spike two sessions ago
+    out = F.compute(F.bars_from_frame(frame), market="KR", observed_at=datetime(2026, 9, 28, 9, 0, tzinfo=timezone.utc))
+    assert out["features"]["rvol_max_last3_completed"] > 3
+    assert F.rubric_flags(out["features"])["volume_item_completed"] is True
+
+
+def test_peer_and_earnings_lines_and_missing_wording():
+    peer = {"status": "OK", "peer_count": 2, "period": "2025/12", "price_basis": "전일종가", "peer_median_per": 10,
+            "target_per": 6, "per_discount_vs_median_pct": 40, "peer_median_pbr": 1, "target_pbr": 0.8}
+    block, flags = F.render_facts_block({"features": {}}, peer, {"status": "MISSING"}, market="US", language="ko")
+    assert flags["peer_usable"] is False and "업종 평균 대용 가능(비교군 3개 이상): 아니오" in block
+    assert "일정이 없다는 뜻이 아닙니다" in block
+    block_kr, _ = F.render_facts_block({"features": {}}, None, None, market="KR", language="en")
+    assert "earnings" not in block_kr.lower() and "missing" in block_kr
+
+
+def test_prompt_facts_is_fail_open_and_caches_what_prompt_saw(monkeypatch):
+    agent = _Agent()
+    assert D.prompt_facts(agent, "X", market="KR") == ""          # nothing captured
+    D.capture_frame(agent, "X", _frame(40), market="KR")
+    agent._report_meta = {"X": {"peer_valuation": {"status": "MISSING"}}}
+    block = D.prompt_facts(agent, "X", market="KR", now=datetime(2026, 9, 28, 9, 0, tzinfo=timezone.utc))
+    assert block.startswith("### 📐") and agent._decision_input_prompt["X"]["block"] == block
+    monkeypatch.setenv("PRISM_BUY_DECISION_FACTS", "false")
+    assert D.prompt_facts(agent, "X", market="KR") == ""
+    broken = _Agent()
+    broken._decision_input_bars = {"X": {"market": "KR", "bars": None}}
+    monkeypatch.setenv("PRISM_BUY_DECISION_FACTS", "true")
+    assert D.prompt_facts(broken, "X", market="KR") == ""
+
+
+def test_contract_is_appended_to_buy_instructions(monkeypatch):
+    from cores.agents.trading_agents import create_trading_scenario_agent
+    kr = create_trading_scenario_agent(language="ko").instruction
+    assert "보조 수치 팩트 사용법" in kr and "새 가점·감점·진입 차단 조건이 아닙니다" in kr
+    monkeypatch.setenv("PRISM_BUY_DECISION_FACTS", "false")
+    assert "보조 수치 팩트 사용법" not in create_trading_scenario_agent(language="ko").instruction
+
+
+def test_english_block_has_no_korean_missing_marker():
+    block, _ = F.render_facts_block({"features": {"last_completed_date": "2026-09-25"}}, None, None,
+                                    market="US", language="en")
+    assert "결측" not in block and "missing" in block
