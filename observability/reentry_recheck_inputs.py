@@ -1,7 +1,7 @@
-"""Frozen recheck inputs for re-entry v2: latest report and trigger-time facts.
+"""Recheck inputs for re-entry v2: latest report, trigger-time facts and the BUY instruction.
 
-Shared by the SHADOW runner (which freezes these inputs at the trigger, no LLM call)
-and tools/replay_reentry_llm_recheck.py (which later feeds them to the BUY agent).
+Shared by the SHADOW runner (freezes these inputs at the trigger and runs the recheck,
+observability/reentry_v2_recheck.py) and tools/replay_reentry_llm_recheck.py.
 """
 from __future__ import annotations
 
@@ -66,6 +66,19 @@ def latest_report(root, market, ticker, day):
         if best is None or key > best[0]:
             best = (key, path)
     return best[1] if best else None
+
+
+def recheck_instruction(market, root=None):
+    """The production BUY agent instruction (current prompt flags) plus the re-entry recheck section."""
+    if market == "KR":
+        from cores.agents.trading_agents import create_trading_scenario_agent
+        return create_trading_scenario_agent(language="ko").instruction + RECHECK_KO
+    import importlib.util
+    root = Path(root) if root else Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("us_agents_recheck", root / "prism-us/cores/agents/trading_agents.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.create_us_trading_scenario_agent(language="ko").instruction + RECHECK_KO
 
 
 def market_facts(bench_bars, day):
