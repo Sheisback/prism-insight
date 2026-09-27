@@ -131,11 +131,11 @@ async def collect_initial_envelope(agent, campaign, *, market_provider=None,
             intraday = await asyncio.to_thread(intraday_provider or IntradayProvider(), plan["symbol"], as_of,
                                               "NASDAQ" if context.get("exchange") == "NASD" else "NYSE")
         except Exception:
-            pass
+            intraday = None
         try:
             market = await asyncio.to_thread(market_provider or fetch_market_snapshot)
         except Exception:
-            pass
+            market = None
         portfolio, portfolio_valid, owned_position, current_stop = _portfolio_source(agent, campaign, _now())
         try:
             raw_quote = await asyncio.to_thread(quote_provider or fetch_quote, plan["symbol"])
