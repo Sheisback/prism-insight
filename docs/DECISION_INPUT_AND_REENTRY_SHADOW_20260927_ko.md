@@ -152,3 +152,19 @@ KR 벤치마크는 종목 시장 구분을 확보하지 못해 KOSPI로 대체�
 
 - A: 오류 수정으로 LIVE 반영.
 - B·C: SHADOW 가동. 개발 재생은 C의 우위를 보여주지 못했다. 전진 관측으로 판정한다.
+
+## 7. 배포·관측 상태 (2026-09-27 기록)
+
+- PR #803(본 변경), #804(이벤트 키 정제·KIS 간격), #806(시점 기준 등록)을 병합했다.
+  db-server는 2d4fa2a다. app-server는 #804(a97feae)까지 반영됐고, 이후 변경은 db-server 러너 전용이다.
+- 배포 전 CI 동등 명령 28개 중 27개가 통과했다. `test_market_report_singleflight` 1건은 main에서도 같은 기존 실패다.
+  PR CI는 모두 통과했다.
+- 운영 실행에서 발견해 고친 결함 3건: 정제기의 `session` 키 가림, KIS 연속 조회 누락(34개 중 2개),
+  재실행 시 감시 수 변동(US 59→72). 수정 후 같은 거래일 두 번째 실행의 새 신호는 0건이고 상태도 같다.
+- 상태 초기화 전 파일: `/root/prism-server-backups/reentry-state-before-pit-20260927/`.
+  crontab 백업: `/root/prism-server-backups/crontab.before-reentry-shadow.20260927`.
+- cron: KR 평일 16:40 KST, US 평일 17:20 ET(`logs/reentry_shadow_{kr,us}.log`).
+- 첫 수동 실행: KR 완료일 2026-09-23 기준 감시 39개·신호 21건, US 2026-09-25 기준 감시 64개·신호 13건.
+  모두 LATE(백필)다. 증거 패킷 `53634ce28e3e1857270b4c87` 판정은 KR·US 모두 CONTINUE_CAPTURE.
+- **미관측:** `decision_inputs.shadow_captured` 첫 이벤트(추석 뒤 첫 KR 배치 2026-09-28 09:30, US 10:15 ET),
+  재진입 cron 첫 정규 실행(KR 2026-09-28 16:40), 첫 PROSPECTIVE 신호.
