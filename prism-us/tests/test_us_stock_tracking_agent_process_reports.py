@@ -483,9 +483,16 @@ async def test_us_buy_dual_writes_open_position():
 
 
 @pytest.mark.asyncio
-async def test_us_mirror_failures_keep_buy_and_sell_legacy_commits(monkeypatch):
+@pytest.mark.parametrize("owned_exit", [False, True])
+async def test_us_mirror_failures_keep_buy_and_sell_legacy_commits(monkeypatch, owned_exit):
     """US shadow failures must stay observable and never block legacy writes."""
     from prism_core.positions import PositionStore
+    if owned_exit:
+        import prism_core.oneil_routing as routing
+        def mark_owned(agent, stock, reason):
+            stock["_oneil_owned_exit"] = True
+            return True
+        monkeypatch.setattr(routing, "route_exit", mark_owned)
 
     agent = USStockTrackingAgent.__new__(USStockTrackingAgent)
     agent.conn = sqlite3.connect(":memory:")
@@ -755,8 +762,13 @@ def _install_us_trading_module(monkeypatch):
 @pytest.mark.asyncio
 async def test_process_reports_analyzes_once_and_dedupes_signals(
     monkeypatch, caplog, tmp_path, entry_quality_capture, micro_split_shadow, scenario_capture,
-    real_strategy_write=False, broker_failure=False, adaptive_sidecar="0",
+    real_strategy_write=False, broker_failure=False, adaptive_sidecar="0", owned_initial=False,
 ):
+    if owned_initial:
+        import prism_core.oneil_routing as routing
+        async def intercept(*args, **kwargs):
+            return dict(handled=True, strategy_recorded=False, reason="OWNED_INITIAL_UNAVAILABLE")
+        monkeypatch.setattr(routing, "route_initial", intercept)
     from prism_core import oneil_batch_setup
     monkeypatch.setenv("ONEIL_AUTO_REVIEW_CAPTURE_ENABLED", "0" if adaptive_sidecar == "0" else "1")
     sidecar_calls = []
@@ -911,6 +923,11 @@ async def test_process_reports_analyzes_once_and_dedupes_signals(
 
     buy_count, sell_count = await USStockTrackingAgent.process_reports(agent, ["report-a.pdf"])
 
+    if owned_initial:
+        assert buy_count == sell_count == 0
+        assert buy_calls == broker_calls == link_calls == redis_calls == gcp_calls == []
+        assert core_calls == ["report-a.pdf"]
+        return
     assert buy_count == 2
     assert sell_count == 0
     assert core_calls == ["report-a.pdf"]
@@ -1024,6 +1041,12 @@ async def test_process_reports_analyzes_once_and_dedupes_signals(
 async def test_scenario_capture_real_strategy_commit_parity(monkeypatch, caplog, tmp_path, capture_mode):
     await test_process_reports_analyzes_once_and_dedupes_signals(
         monkeypatch, caplog, tmp_path, "1", "0", capture_mode, real_strategy_write=True)
+
+
+@pytest.mark.asyncio
+async def test_owned_initial_unavailable_cannot_fall_through_full_buy(monkeypatch, caplog, tmp_path):
+    await test_process_reports_analyzes_once_and_dedupes_signals(
+        monkeypatch, caplog, tmp_path, "0", "0", "0", owned_initial=True)
 
 
 @pytest.mark.asyncio
@@ -1325,7 +1348,8 @@ async def test_process_reports_returns_zero_for_empty_accounts(caplog):
 
 
 @pytest.mark.asyncio
-async def test_update_holdings_masks_sold_account_payload(monkeypatch, tmp_path):
+@pytest.mark.parametrize("owned_exit", [False, True])
+async def test_update_holdings_masks_sold_account_payload(monkeypatch, tmp_path, owned_exit):
     agent = USStockTrackingAgent.__new__(USStockTrackingAgent)
     agent.db_path = str(tmp_path / "us_stock_tracking.sqlite")
     agent.conn = sqlite3.connect(":memory:")
@@ -1388,6 +1412,8 @@ async def test_update_holdings_masks_sold_account_payload(monkeypatch, tmp_path)
         return True, "Take profit"
 
     async def fake_sell_stock(stock, reason, exit_kind=None):
+        if owned_exit:
+            stock["_oneil_owned_exit"] = True
         return True
 
     agent._get_current_stock_price = fake_get_current_stock_price
@@ -1398,12 +1424,16 @@ async def test_update_holdings_masks_sold_account_payload(monkeypatch, tmp_path)
     gcp_calls = []
     _install_signal_modules(monkeypatch, redis_calls, gcp_calls)
     _install_us_trading_module(monkeypatch)
+    if owned_exit:
+        monkeypatch.setattr(us_agent_module.ExecutionService, "us", MagicMock(side_effect=AssertionError("legacy broker forbidden")))
 
     sold = await USStockTrackingAgent.update_holdings(agent)
 
     assert len(sold) == 1
     assert sold[0]["account_label"] == "us-primary (vps:12****78:01)"
     assert "account_key" not in sold[0]
+    if owned_exit:
+        us_agent_module.ExecutionService.us.assert_not_called()
 
 
 def test_safe_account_log_label_masks_account_key():

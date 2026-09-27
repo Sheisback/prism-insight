@@ -1,30 +1,47 @@
-"""Truthful activation boundary and read-only account sizing preparedness.
+"""Technical readiness and explicit activation authority, kept separate.
 
-No broker dispatcher is installed. Flags and caller attestations cannot unlock
-LIVE. The projection below is arithmetic, not authenticated fill reconciliation.
+The real dispatcher is oneil_dispatcher; this legacy projection helper never
+submits orders. Arbitrary environment flags are not LIVE authorization.
 """
 from prism_core.oneil_adaptive_policy import _hash, _num, _ref, _time
 from prism_core.strategy_ledger_execution import project_account_target
+from prism_core.oneil_config import load, require_live_approval
 
-LIVE_BLOCKERS = (
-    "INITIAL_SCOUT_ORDER_ROUTING_NOT_IMPLEMENTED",
-    "ACCOUNT_CAMPAIGN_OWNERSHIP_NOT_IMPLEMENTED",
-    "CONFIRMED_FILL_RECONCILIATION_NOT_IMPLEMENTED",
-    "DURABLE_ORDER_RESERVATION_NOT_IMPLEMENTED",
-    "ORIGINAL_EXIT_COORDINATION_NOT_IMPLEMENTED",
-    "LIVE_BROKER_DISPATCH_NOT_IMPLEMENTED",
+IMPLEMENTED = (
+    "INITIAL_MAX_50_REPLACES_LEGACY_FULL_BUY",
+    "ATOMIC_ACCOUNT_CAMPAIGN_OWNERSHIP",
+    "EXACT_ORDER_FILL_AND_PENDING_RECONCILIATION",
+    "DURABLE_ORDER_RESERVATION",
+    "OWNED_EXIT_COORDINATION",
+    "EXECUTION_SERVICE_BROKER_DISPATCH",
 )
 
 
-def readiness():
-    return dict(contract_version="oneil-live-boundary-v1", supported_modes=["OFF", "SHADOW"],
-                live_ready=False, broker_execution=False, blockers=list(LIVE_BLOCKERS))
+def readiness(config=None, *, now=None):
+    blockers = []
+    try:
+        config = config or load(protection_only=True)
+        if config["mode"] != "LIVE":
+            blockers.append("LIVE_MODE_NOT_SELECTED")
+        try:
+            require_live_approval(config, now=now)
+        except (ValueError, KeyError, TypeError):
+            blockers.append("EXPLICIT_CURRENT_LIVE_APPROVAL_REQUIRED")
+    except (ValueError, KeyError, TypeError):
+        blockers.append("CONFIGURATION_UNAVAILABLE")
+    return dict(contract_version="oneil-live-boundary-v2", supported_modes=["OFF", "SHADOW", "LIVE"],
+                technical_switch_ready=True, implemented=list(IMPLEMENTED),
+                live_ready=not blockers, broker_execution=False, blockers=blockers,
+                performance_validated=False)
 
 
 def assert_mode(mode):
-    if mode not in ("OFF", "SHADOW"):
-        raise ValueError("LIVE_UNAVAILABLE:" + ",".join(LIVE_BLOCKERS)
-                         if mode == "LIVE" else "UNSUPPORTED_MODE")
+    if mode not in ("OFF", "SHADOW", "LIVE"):
+        raise ValueError("UNSUPPORTED_MODE")
+    if mode == "LIVE":
+        status = readiness()
+        if not status["live_ready"]:
+            raise ValueError("LIVE_UNAVAILABLE:" + ",".join(status["blockers"]))
     return mode
 
 

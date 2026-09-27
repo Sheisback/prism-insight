@@ -7,6 +7,7 @@ does not relabel a batch regime or an undated database row as a current snapshot
 
 from copy import deepcopy
 from datetime import datetime, timezone
+from decimal import Decimal
 import importlib.util
 import multiprocessing
 from pathlib import Path
@@ -90,7 +91,7 @@ def fetch_quote(symbol, timeout=15):
             process.join(1)
 
 
-def current_gates(*, plan, position_id, scenario, quote, portfolio, market, now):
+def current_gates(*, plan, position_id, scenario, quote, portfolio, market, now, phase="ADD"):
     """Recompute existing underwriting, slot and held-name sector rules.
 
     risk is the existing stop-width/arithmetic gate, not broker buying power.
@@ -106,15 +107,19 @@ def current_gates(*, plan, position_id, scenario, quote, portfolio, market, now)
     held = [row for row in portfolio["positions"]
             if row.get("position_id") == position_id and row.get("symbol") == plan["symbol"]
             and row.get("account_key") == portfolio["account_key"]]
-    if len(held) != 1 or held[0].get("source_decision_ref") != plan["source_decision_ref"]:
+    if phase not in {"NEW", "ADD"}:
+        raise ValueError("UNKNOWN_CAMPAIGN_PHASE")
+    if phase == "ADD" and (len(held) != 1 or held[0].get("source_decision_ref") != plan["source_decision_ref"]):
         raise ValueError("POSITION_OWNERSHIP_UNAVAILABLE")
+    if phase == "NEW" and any(row.get("symbol") == plan["symbol"] for row in portfolio["positions"]):
+        raise ValueError("INITIAL_POSITION_ALREADY_HELD")
     if type(market.get("pilot_reexposure_active")) is not bool:
         raise ValueError("PILOT_STATE_UNAVAILABLE")
     if market.get("market_pulse") not in {"UPTREND", "UNDER_PRESSURE", "CORRECTION"}:
         raise ValueError("PULSE_UNAVAILABLE")
     slots = _num(portfolio["slots_used"])
     hard_max = _num(portfolio["max_slots"], True)
-    if slots < 1 or int(slots) != slots or slots != len(portfolio["positions"]) or int(hard_max) != hard_max:
+    if slots < (1 if phase == "ADD" else 0) or int(slots) != slots or slots != len(portfolio["positions"]) or int(hard_max) != hard_max:
         raise ValueError("PORTFOLIO_CAP_INVALID")
     # Same fallback/cap as US _scenario_slot_limit. No new slot allowance.
     try:
@@ -126,29 +131,44 @@ def current_gates(*, plan, position_id, scenario, quote, portfolio, market, now)
     if module.normalize_regime(market.get("regime")) is None:
         raise ValueError("REGIME_UNAVAILABLE")
     context = scenario.get("_decision_context") or {}
+    normalized_decision = str(context.get("decision") or scenario.get("decision") or "").strip().lower()
+    if normalized_decision in {"진입", "매수", "enter", "entry", "buy", "yes"}:
+        normalized_decision = "entry"
+    evaluated_scenario = dict(scenario, decision=normalized_decision)
     score_override = context.get("adjusted_score")
     if score_override is not None:
         score_override = float(_num(score_override))
     result = module.evaluate_production_buy_gate(
-        deepcopy(scenario), current_price=float(_num(quote["price"], True)),
+        deepcopy(evaluated_scenario), current_price=float(_num(quote["price"], True)),
         market_regime=market["regime"], market_pulse=market["market_pulse"],
         distribution_days=market.get("distribution_days"),
         score_override=score_override,
-        is_add=True, pilot_budget_available=False,
+        is_add=phase == "ADD", pilot_budget_available=False,
     )
     codes = {row["code"] for row in result["hard_findings"]}
     risk_codes = {"invalid_current_price", "missing_stop", "invalid_stop", "stop_exceeds_regime_limit",
                   "risk_arithmetic_mismatch", "stop_below_volatility_noise_floor", "missing_regime_rule"}
     rr_codes = {"invalid_current_price", "missing_target", "invalid_target", "missing_stop", "invalid_stop",
                 "rr_below_floor", "rr_arithmetic_mismatch", "missing_regime_rule"}
-    return dict(identity, observed_at=now, source_ref=_hash([quote, portfolio, market, scenario, result]),
+    sector_ok = True
+    if phase == "NEW":
+        sector = scenario.get("sector")
+        sectors = portfolio["scenario_sectors"]
+        if not isinstance(sectors, list) or len(sectors) > len(portfolio["positions"]):
+            raise ValueError("SECTOR_COUNTS_UNAVAILABLE")
+        if sector and str(sector).lower() != "unknown":
+            same = sum(1 for s in sectors if s and str(s).lower() == str(sector).lower())
+            sector_ok = same < _num(portfolio["max_same_sector"], True) and not (
+                len(sectors) >= _num(portfolio["minimum_holdings_for_ratio"], True)
+                and Decimal(same) / len(sectors) >= _num(portfolio["sector_concentration_ratio"], True))
+    return dict(identity, observed_at=now, source_ref=_hash([quote, portfolio, market, scenario, result, phase]),
                 quote_source_ref=quote["source_ref"], price=quote["price"],
-                admission=result["allowed"] and scenario.get("decision") == "entry" and not market["pilot_reexposure_active"],
+                admission=result["allowed"] and normalized_decision == "entry" and not market["pilot_reexposure_active"],
                 risk=not bool(codes & risk_codes), RR=not bool(codes & rr_codes),
                 # This lane grows the verified existing campaign; unlike the
                 # legacy pyramid path it creates no additional holding row.
                 # Its own row is already included in the portfolio count.
-                sector=True, slot=slots - 1 < limit, market_pulse=market["market_pulse"],
+                sector=sector_ok, slot=slots - (1 if phase == "ADD" else 0) < limit, market_pulse=market["market_pulse"],
                 regime=result["effective_regime"], findings=sorted(codes),
                 market_source_ref=market["source_ref"],
                 market_source_asof=deepcopy(market.get("source_asof")),

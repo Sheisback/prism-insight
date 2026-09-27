@@ -6,7 +6,6 @@ import asyncio
 import json
 import logging
 import os
-from pathlib import Path
 
 _EXIT_QUEUE = ContextVar("oneil_exit_capture_queue", default=None)
 _MAX_PENDING_EXITS = 1000
@@ -43,16 +42,17 @@ def _flush_exits(pending):
 
 
 def enabled():
-    return os.getenv("ONEIL_TAPE_CAPTURE_ENABLED", "false").strip().lower() in {
+    from prism_core.oneil_config import capture_enabled
+    return capture_enabled() or os.getenv("ONEIL_TAPE_CAPTURE_ENABLED", "false").strip().lower() in {
         "true", "1", "yes", "on",
     }
 
 
 def _tape():
     from prism_core.oneil_capture_tape import OneilCaptureTape
+    from prism_core.oneil_config import load
 
-    path = os.getenv("ONEIL_TAPE_CAPTURE_DB", str(
-        Path(__file__).resolve().parents[1] / "runtime/oneil-capture-tape.sqlite"))
+    path = os.getenv("ONEIL_TAPE_CAPTURE_DB", load(protection_only=True)["tape_db"])
     return OneilCaptureTape(path, timeout=.05)
 
 

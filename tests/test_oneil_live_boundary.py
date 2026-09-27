@@ -23,12 +23,14 @@ def inputs(tmp_path):
     return runtime, intent["intent_id"], dict(plan_hash=intent["plan_hash"], receipt=receipt, quote=quote, now=args["now"])
 
 
-def test_environment_cannot_unlock_unimplemented_live(monkeypatch):
+def test_environment_cannot_replace_explicit_live_approval(monkeypatch):
     monkeypatch.setenv("ONEIL_MODE", "LIVE")
     monkeypatch.setenv("ONEIL_LIVE_APPROVED", "true")
     assert assert_mode("SHADOW") == "SHADOW"
     assert assert_mode("OFF") == "OFF"
     assert not readiness()["live_ready"]
+    assert readiness()["technical_switch_ready"]
+    assert not any("NOT_IMPLEMENTED" in code for code in readiness()["blockers"])
     with pytest.raises(ValueError, match="LIVE_UNAVAILABLE"):
         assert_mode("LIVE")
     with pytest.raises(ValueError, match="UNSUPPORTED"):

@@ -16,7 +16,8 @@ BASIS = "yfinance-unadjusted-5m-actions-checked-v1"
 
 
 def enabled():
-    return os.getenv("ONEIL_AUTO_REVIEW_CAPTURE_ENABLED", "").strip().lower() in {
+    from prism_core.oneil_config import capture_enabled
+    return capture_enabled() or os.getenv("ONEIL_AUTO_REVIEW_CAPTURE_ENABLED", "").strip().lower() in {
         "1",
         "true",
         "yes",

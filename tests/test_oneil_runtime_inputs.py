@@ -114,6 +114,22 @@ def test_duplicate_campaign_ownership_is_rejected():
         current_gates(**kwargs)
 
 
+def test_new_phase_uses_real_empty_portfolio_and_normal_sector_slot_rules():
+    _, _, kwargs = fixtures()
+    kwargs["portfolio"].update(positions=[], slots_used=0, scenario_sectors=[], max_same_sector=3,
+                               sector_concentration_ratio=.3, minimum_holdings_for_ratio=4)
+    kwargs["scenario"]["sector"] = "Technology"
+    kwargs["scenario"]["decision"] = "Enter"
+    gate = current_gates(**kwargs, phase="NEW")
+    assert gate["sector"] and gate["slot"] and gate["admission"]
+    kwargs["portfolio"].update(positions=[dict(symbol=f"OTHER{i}") for i in range(3)],
+                               slots_used=3, scenario_sectors=["Technology"] * 3)
+    assert not current_gates(**kwargs, phase="NEW")["sector"]
+    kwargs["portfolio"]["positions"][0]["symbol"] = "TEST"
+    with pytest.raises(ValueError, match="ALREADY_HELD"):
+        current_gates(**kwargs, phase="NEW")
+
+
 def test_original_adjusted_score_is_authoritative_not_raw_score():
     _, _, kwargs = fixtures()
     kwargs["scenario"]["_decision_context"] = {"adjusted_score": 0}

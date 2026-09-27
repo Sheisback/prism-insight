@@ -95,9 +95,37 @@ def _connect(path):
     return connection
 
 
+def capture_enabled():
+    from prism_core.oneil_config import capture_enabled as operational_enabled
+    return operational_enabled() or os.getenv("SCENARIO_SHADOW_CAPTURE_ENABLED", "false").strip().lower() in {
+        "true", "1", "yes", "on"}
+
+
+def _initial_underwriting(scenario):
+    # Freeze only fields actually consumed by the deterministic gate. Never
+    # copy rationale, reports, credentials, account identity or broker payloads.
+    fields = ("decision", "buy_score", "macro_adjustment", "effective_score", "min_score",
+              "target_price", "stop_loss", "entry_price", "_analysis_entry_price",
+              "risk_reward_ratio", "expected_return_pct", "expected_loss_pct",
+              "momentum_signal_count", "additional_confirmation_count", "max_portfolio_size",
+              "sector", "_decision_id", "_deterministic_trend_facts")
+    result = {key: scenario[key] for key in fields if key in scenario
+              and type(scenario[key]) in (str, int, float, bool, type(None))}
+    if len(_json(result).encode()) > 8192:
+        return None
+    fundamental = scenario.get("fundamental_check")
+    if isinstance(fundamental, dict) and type(fundamental.get("all_passed")) is bool:
+        result["fundamental_check"] = {"all_passed": fundamental["all_passed"]}
+    context = scenario.get("_decision_context") or {}
+    score = context.get("adjusted_score")
+    if type(score) in (int, float):
+        result["_decision_context"] = {"adjusted_score": score}
+    return result
+
+
 def emit_initial_capture(*, market, ticker, decision_id, position_id, scenario,
                          current_price, entry_eligible, is_add,
-                         trigger_type=None, trigger_mode=None, adaptive_review=None):
+                         trigger_type=None, trigger_mode=None, adaptive_review=None, account_id=None):
     """Capture an eligible committed US strategy entry before broker execution.
 
     All I/O is fail-open. Retry on a later invocation only, never synchronously.
@@ -105,8 +133,7 @@ def emit_initial_capture(*, market, ticker, decision_id, position_id, scenario,
     until the identical position is explicitly presented again by the caller.
     No scenario text, account identifiers, or broker fill assumptions are stored.
     """
-    if os.getenv("SCENARIO_SHADOW_CAPTURE_ENABLED", "false").strip().lower() not in {
-            "true", "1", "yes", "on"}:
+    if not capture_enabled():
         return None
     try:
         if (market != "US" or entry_eligible is not True or is_add is not False
@@ -136,7 +163,11 @@ def emit_initial_capture(*, market, ticker, decision_id, position_id, scenario,
             "phase": "POST_STRATEGY_COMMIT_PRE_BROKER", "trading_impact": "none",
             "execution_provenance": "NOT_REQUESTED", "fill_status": "VIRTUAL_NOT_FILLED",
             "confirmed_fill": False,
+            "initial_underwriting": _initial_underwriting(scenario),
         }
+        if isinstance(account_id, str) and account_id:
+            from observability.trading_context import execution_profile_ref
+            attributes["execution_profile_ref"] = execution_profile_ref(account_id)
         if adaptive_review is not None:
             attributes["adaptive_setup"] = _adaptive_setup(
                 adaptive_review, ticker=ticker, decision_id=decision_id,
@@ -154,7 +185,9 @@ def emit_initial_capture(*, market, ticker, decision_id, position_id, scenario,
             "position_id": position_id, "attributes": attributes,
             "event_time": captured.isoformat(),
         }
-        path = Path(os.getenv("SCENARIO_SHADOW_CAPTURE_DB", str(_DEFAULT_DB)))
+        from prism_core.oneil_config import load as load_execution_config
+        configured = load_execution_config(protection_only=True)
+        path = Path(os.getenv("SCENARIO_SHADOW_CAPTURE_DB", configured.get("capture_db", str(_DEFAULT_DB))))
         connection = _connect(path)
         try:
             with connection:

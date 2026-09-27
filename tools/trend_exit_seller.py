@@ -901,6 +901,19 @@ async def _act_on_trigger(conn, market: str, ticker: str, stock_data: Dict[str, 
             release_lock(conn, ticker, market, run_id, new_state="HOLDING")
             return
 
+        if market == "US" and stock_data.get("_oneil_owned_exit") is True:
+            # Ownership-specific cancellation/reconciliation belongs to the
+            # shared execution journal, not a second whole-account SELL.
+            record_inflight(conn, ticker, market, run_id, 0, "OWNED_EXIT_PENDING", reason, None)
+            release_lock(conn, ticker, market, run_id, new_state="SOLD")
+            summary["sold"] += 1
+            summary["owned_exit_delegated"] = summary.get("owned_exit_delegated", 0) + 1
+            try:
+                await ag.send_telegram_message(CHAT_ID, await_broadcast=True)
+            except Exception:
+                logger.warning("owned strategy exit notification unavailable")
+            return
+
         # 2) real KIS market order on the holding's own account; reconcile qty first.
         order_no, ok, sold_qty = None, False, 0
         outcome_unknown = False

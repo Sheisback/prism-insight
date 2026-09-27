@@ -148,7 +148,9 @@ async def test_real_failed_holdings_review_excludes_only_failed_account(monkeypa
     reviews = []
 
     def query(sql, params=()):
-        if "FROM us_stock_holdings" in sql:
+        # Count the full holdings review, not the independent ownership lookup
+        # used to keep adaptive campaigns out of legacy pyramid admission.
+        if "FROM us_stock_holdings" in sql and "buy_price" in sql:
             reviews.append(params[0])
             if params[0] == "vps:primary:01":
                 raise sqlite3.OperationalError("incomplete primary holdings review")
