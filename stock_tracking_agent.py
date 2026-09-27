@@ -1124,11 +1124,14 @@ class StockTrackingAgent:
             # Get trading journal context for informed decisions
             journal_context = ""
             trend_facts = ""
+            decision_facts = ""
             score_adjustment_info = ""
             adjustment, reasons = 0, []
             if ticker:
                 # Deterministic individual-stock trend facts for the 1.5단계 trend gate (fail-open)
                 trend_facts = self._get_trend_facts(ticker)
+                from observability.decision_inputs import prompt_facts
+                decision_facts = prompt_facts(self, ticker, market="KR", language=self.language)
                 journal_context = self._get_relevant_journal_context(
                     ticker=ticker,
                     sector=sector,
@@ -1201,6 +1204,7 @@ class StockTrackingAgent:
                 {rank_change_msg}
                 {score_adjustment_info}
                 {trend_facts}
+                {decision_facts}
                 {journal_context}
 
                 ### Report Content:
@@ -1217,6 +1221,7 @@ class StockTrackingAgent:
                 {rank_change_msg}
                 {score_adjustment_info}
                 {trend_facts}
+                {decision_facts}
                 {journal_context}
 
                 ### Report Content:
@@ -1307,6 +1312,8 @@ class StockTrackingAgent:
                 # final pre-buy gate validates the exact same as-of snapshot.
                 if trend_facts:
                     scenario_json["_deterministic_trend_facts"] = trend_facts
+                if decision_facts:
+                    scenario_json["_decision_input_facts"] = decision_facts
                 if isinstance(sector_profile, dict):
                     scenario_json["_sector_profile"] = {
                         **sector_stamp, "f2_rule": f2_rule(sector_profile, sector_mode)}
