@@ -65,6 +65,22 @@ def test_current_memory_and_future_improvements_are_reported_separately(report, 
     assert '검토 안 된 지시' not in message
 
 
+def test_memory_highlights_do_not_repeat_one_market_and_stage(report, tmp_path):
+    path = tmp_path / 'memory-stage-diversity.sqlite'
+    make_db(path)
+    holding = {'version': 1, 'status': 'current_pipeline', 'market': 'KR',
+               'stage': 'position_management', 'required_capabilities': ['position_review'],
+               'reason': 'Preserve the existing protective position policy.'}
+    with sqlite3.connect(path) as conn:
+        conn.execute("INSERT INTO trading_intuitions VALUES ('보유 관리 대표', '기존 손절 정책 준수', .99, NULL, 'KR', 1, '2026-01-01', ?)", (json.dumps(holding),))
+        conn.execute("INSERT INTO trading_intuitions VALUES ('보유 관리 반복', '손절 규율 유지', .98, NULL, 'KR', 1, '2026-01-01', ?)", (json.dumps(holding),))
+    message = asyncio.run(report.generate_weekly_report(str(path)))
+    assert '조건 → 직관' in message
+    assert '보유 관리 대표' in message
+    assert '보유 관리 반복' not in message
+    assert message.index('[KR·진입 판단]') < message.index('[KR·보유 관리]')
+
+
 def test_report_observations_do_not_imply_strategy_quality(report, tmp_path):
     path = tmp_path / "report.sqlite"
     make_db(path)

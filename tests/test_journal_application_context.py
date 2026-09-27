@@ -19,15 +19,14 @@ def context(market, **changes):
                 reason="Check only supplied evidence against existing entry policy.", **changes)
 
 
-@pytest.fixture(params=["KR", "US"])
-def manager(request):
-    market = request.param
+def make_manager(market, application_metadata=True):
     conn = sqlite3.connect(":memory:")
     for schema in (TABLE_TRADING_INTUITIONS, TABLE_TRADING_JOURNAL, TABLE_TRADING_PRINCIPLES):
         conn.execute(schema)
     for table in ("trading_intuitions", "trading_journal", "trading_principles"):
         conn.execute(f"ALTER TABLE {table} ADD COLUMN market TEXT DEFAULT 'KR'")
-    ensure_application_columns(conn)
+    if application_metadata:
+        ensure_application_columns(conn)
     if market == "KR":
         cls = JournalManager
     else:
@@ -38,8 +37,15 @@ def manager(request):
         cls = module.USJournalManager
     mgr = cls(conn.cursor(), conn, enable_journal=True)
     mgr.get_performance_tracker_stats = lambda trigger_type=None: {}
+    return mgr
+
+
+@pytest.fixture(params=["KR", "US"])
+def manager(request):
+    market = request.param
+    mgr = make_manager(market)
     yield mgr, market
-    conn.close()
+    mgr.conn.close()
 
 
 def seed(mgr, market, label, metadata):
@@ -114,12 +120,12 @@ def test_new_journal_proposal_cannot_self_authorize(manager):
     assert data["lessons"][0]["application_context"] == proposed
 
 
-def test_read_only_legacy_schema_keeps_facts_without_migration(manager):
-    mgr, market = manager
+@pytest.mark.parametrize("market", ["KR", "US"])
+def test_read_only_legacy_schema_keeps_facts_without_migration(market):
+    # Construct the legacy schema directly: production SQLite predates DROP COLUMN.
+    mgr = make_manager(market, application_metadata=False)
     mgr._save_to_database("SAME", "Same candidate", 100, "2026-01-01", "{}", {},
                           98, "Historical stop", -2, 3, {"one_line_summary": "Historical sale fact"})
-    mgr.conn.execute("ALTER TABLE trading_principles DROP COLUMN application_context")
-    mgr.conn.execute("ALTER TABLE trading_intuitions DROP COLUMN application_context")
     mgr.conn.commit()
     mgr.conn.execute("PRAGMA query_only=ON")
     readonly = type(mgr)(mgr.conn.cursor(), mgr.conn, enable_journal=True)
@@ -127,6 +133,7 @@ def test_read_only_legacy_schema_keeps_facts_without_migration(manager):
     output = readonly.get_context_for_ticker("SAME")
     assert "Historical sale fact" in output and "-2.0%" in output
     assert "application_context" not in {r[1] for r in mgr.conn.execute("PRAGMA table_info(trading_intuitions)")}
+    mgr.conn.close()
 
 
 def test_principle_evidence_is_idempotent_and_preserves_review(manager):

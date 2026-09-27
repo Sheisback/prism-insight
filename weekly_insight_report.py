@@ -244,7 +244,15 @@ def _get_ai_intuitions(cursor, week_start_str: str) -> str:
     ]
     if current:
         lines.append("\n💡 현재 시스템에서 참고할 직관:")
-        for index, row in enumerate(current[:3], 1):
+        representatives = []
+        represented = set()
+        for row in sorted(current, key=lambda item: item['application_context']['stage'] != 'batch_buy'):
+            context = row['application_context']
+            key = (context['market'], context['stage'])
+            if key not in represented:
+                representatives.append(row)
+                represented.add(key)
+        for index, row in enumerate(representatives[:3], 1):
             confidence = row.get('confidence')
             confidence_text = f"{confidence * 100:.0f}%" if confidence is not None else "미확인"
             context = row['application_context']

@@ -71,5 +71,7 @@ BUY의 세 입력 경로(원칙, 누적 직관, 동일 종목 lesson)에는 검�
 
 양국 `get_score_adjustment`, `get_performance_tracker_stats`, `_format_performance_context`의
 AST가 기준선과 같음을 확인했다. 이 사실은 LLM 참고 입력의 영향까지 불변이라는 뜻은 아니다.
-실제 모델 분류·운영 적용·정규 배치 결과는 별도 확인한다. 이 문서는 수익성 검증이나
-전체 전략 궁합이 개선됐다는 증거가 아니다.
+실제 모델 분류와 운영 적용 결과는
+[주간 인사이트 점검 기록](WEEKLY_INSIGHT_MEMORY_AUDIT_20260927_ko.md)에 기록했다.
+정규 배치 결과는 아직 미관측이다. 이 문서는 수익성 검증이나 전체 전략 궁합이
+개선됐다는 증거가 아니다.
