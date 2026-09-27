@@ -18,13 +18,14 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from trading import kis_auth as ka
+from trading_memory_policy import normalize_application_context
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 DB_PATH = str(Path(__file__).parent / "stock_tracking_db.sqlite")
 
 
-def _safe_query(cursor, query: str, params=(), default=(0, 0)):
+def _safe_query(cursor, query: str, params=(), default=None):
     """Execute query with error handling, return default on failure."""
     try:
         cursor.execute(query, params)
@@ -32,17 +33,17 @@ def _safe_query(cursor, query: str, params=(), default=(0, 0)):
         return result if result else default
     except sqlite3.Error as e:
         logger.warning(f"Query failed: {e}")
-        return default
+        return None
 
 
-def _safe_query_all(cursor, query: str, params=()) -> list:
-    """Execute query and return all results, empty list on failure."""
+def _safe_query_all(cursor, query: str, params=()) -> list | None:
+    """Execute query and return all results, None on failure."""
     try:
         cursor.execute(query, params)
         return cursor.fetchall()
     except sqlite3.Error as e:
         logger.warning(f"Query failed: {e}")
-        return []
+        return None
 
 
 def _format_percentage(value: float) -> str:
@@ -53,19 +54,20 @@ def _format_percentage(value: float) -> str:
 
 
 def _sell_verdict(change_pct: float) -> str:
-    """Determine sell evaluation verdict based on price change after selling."""
-    if change_pct < -1:
-        return "✅ 잘 팔았습니다"
-    elif change_pct > 3:
-        return "😅 더 기다릴 수 있었습니다"
-    else:
-        return "👌 적절한 매도"
+    """Describe the observed price movement without judging the sell decision."""
+    if not float("-inf") < change_pct < float("inf"):
+        return "매도 후 가격 변화 미확인"
+    if change_pct > 0:
+        return "매도 후 상승"
+    if change_pct < 0:
+        return "매도 후 하락"
+    return "매도 후 보합"
 
 
 def _get_primary_account_key(market: str) -> str | None:
-    default_mode = str(ka.getEnv().get("default_mode", "demo")).strip().lower()
-    svr = "vps" if default_mode == "demo" else "prod"
     try:
+        default_mode = str(ka.getEnv().get("default_mode", "demo")).strip().lower()
+        svr = "vps" if default_mode == "demo" else "prod"
         return ka.resolve_account(svr=svr, market=market)["account_key"]
     except Exception as exc:
         logger.warning(f"Primary {market} account resolution failed: {exc}")
@@ -79,24 +81,32 @@ def _get_weekly_trades(cursor, week_start_str: str) -> str:
     kr_sells = _safe_query_all(cursor, """
         SELECT ticker, company_name, buy_price, sell_price, profit_rate, holding_days
         FROM trading_history WHERE sell_date >= ? AND account_key = ? ORDER BY sell_date DESC
-    """, (week_start_str, kr_account_key)) if kr_account_key else []
+    """, (week_start_str, kr_account_key)) if kr_account_key else None
     kr_buys = _safe_query_all(cursor, """
         SELECT ticker, company_name, buy_price, buy_date, current_price
         FROM stock_holdings WHERE buy_date >= ? AND account_key = ?
-    """, (week_start_str, kr_account_key)) if kr_account_key else []
+    """, (week_start_str, kr_account_key)) if kr_account_key else None
     us_sells = _safe_query_all(cursor, """
         SELECT ticker, company_name, buy_price, sell_price, profit_rate, holding_days
         FROM us_trading_history WHERE sell_date >= ? AND account_key = ? ORDER BY sell_date DESC
-    """, (week_start_str, us_account_key)) if us_account_key else []
+    """, (week_start_str, us_account_key)) if us_account_key else None
     us_buys = _safe_query_all(cursor, """
         SELECT ticker, company_name, buy_price, buy_date, current_price
         FROM us_stock_holdings WHERE buy_date >= ? AND account_key = ?
-    """, (week_start_str, us_account_key)) if us_account_key else []
-
-    if not (kr_sells or kr_buys or us_sells or us_buys):
-        return "이번 주 매매 없음"
+    """, (week_start_str, us_account_key)) if us_account_key else None
 
     lines = []
+    for market, kind, rows in (
+        ("한국시장", "매도", kr_sells), ("한국시장", "매수", kr_buys),
+        ("미국시장", "매도", us_sells), ("미국시장", "매수", us_buys),
+    ):
+        if rows is None:
+            lines.append(f"{market} {kind} 내역 조회 실패 또는 계좌 미확인")
+    kr_sells, kr_buys = kr_sells or [], kr_buys or []
+    us_sells, us_buys = us_sells or [], us_buys or []
+
+    if not (kr_sells or kr_buys or us_sells or us_buys):
+        return "\n".join(lines) if lines else "이번 주 매매 없음"
 
     if kr_buys or kr_sells:
         lines.append("🇰🇷 한국시장")
@@ -135,16 +145,21 @@ async def _get_sell_evaluation(cursor, week_start_str: str) -> str | None:
     kr_sells = _safe_query_all(cursor, """
         SELECT ticker, company_name, sell_price
         FROM trading_history WHERE sell_date >= ? AND account_key = ?
-    """, (week_start_str, kr_account_key)) if kr_account_key else []
+    """, (week_start_str, kr_account_key)) if kr_account_key else None
     us_sells = _safe_query_all(cursor, """
         SELECT ticker, company_name, sell_price
         FROM us_trading_history WHERE sell_date >= ? AND account_key = ?
-    """, (week_start_str, us_account_key)) if us_account_key else []
-
-    if not kr_sells and not us_sells:
-        return None
+    """, (week_start_str, us_account_key)) if us_account_key else None
 
     lines = []
+    if kr_sells is None:
+        lines.append("한국시장 매도 내역 조회 실패 또는 계좌 미확인")
+        kr_sells = []
+    if us_sells is None:
+        lines.append("미국시장 매도 내역 조회 실패 또는 계좌 미확인")
+        us_sells = []
+    if not kr_sells and not us_sells:
+        return "\n".join(lines) if lines else None
 
     # DB access remains on its owning thread; only KIS reads run off-thread.
     if kr_sells:
@@ -155,14 +170,17 @@ async def _get_sell_evaluation(cursor, week_start_str: str) -> str | None:
             )
 
             for ticker, name, sell_price in kr_sells:
-                if ticker in prices and sell_price:
-                    current_price = prices[ticker]
+                current_price = prices.get(ticker)
+                if all(value is not None and 0 < value < float("inf")
+                       for value in (sell_price, current_price)):
                     change_pct = (current_price - sell_price) / sell_price * 100
                     verdict = _sell_verdict(change_pct)
                     lines.append(
                         f"  {name}: 매도가 {sell_price:,.0f}원 → "
                         f"현재가 {current_price:,.0f}원 ({change_pct:+.1f}%) {verdict}"
                     )
+                else:
+                    lines.append(f"  {name}: 매도 후 가격 변화 미확인 (유효한 가격 없음)")
         except Exception as e:
             logger.warning(f"KR price lookup failed: {e}")
 
@@ -175,12 +193,14 @@ async def _get_sell_evaluation(cursor, week_start_str: str) -> str | None:
 
             for ticker, name, sell_price in us_sells:
                 try:
-                    if not sell_price:
-                        continue
                     if len(tickers_list) == 1:
                         current_price = float(data['Close'].iloc[-1])
                     else:
                         current_price = float(data['Close'][ticker].iloc[-1])
+                    if not all(value is not None and 0 < value < float("inf")
+                               for value in (sell_price, current_price)):
+                        lines.append(f"  {ticker}: 매도 후 가격 변화 미확인 (유효한 가격 없음)")
+                        continue
                     change_pct = (current_price - sell_price) / sell_price * 100
                     verdict = _sell_verdict(change_pct)
                     lines.append(
@@ -188,56 +208,128 @@ async def _get_sell_evaluation(cursor, week_start_str: str) -> str | None:
                         f"현재가 ${current_price:,.2f} ({change_pct:+.1f}%) {verdict}"
                     )
                 except Exception:
-                    pass
+                    lines.append(f"  {ticker}: 매도 후 가격 변화 미확인 (유효한 가격 없음)")
         except Exception as e:
             logger.warning(f"US price lookup failed: {e}")
 
-    return "\n".join(lines) if lines else None
+    return "\n".join(lines) if lines else "매도 후 가격 조회 실패: 가격 변화를 확인할 수 없습니다."
 
 
 def _get_ai_intuitions(cursor, week_start_str: str) -> str:
-    """Get AI long-term learning intuitions section."""
-    new_count = _safe_query(cursor, f"""
-        SELECT COUNT(*) FROM trading_intuitions
-        WHERE is_active=1 AND created_at >= '{week_start_str}'
-    """, default=(0,))[0] or 0
-
-    kr_intuitions = _safe_query_all(cursor, """
-        SELECT condition, insight, confidence
-        FROM trading_intuitions WHERE is_active=1 AND (market='KR' OR market IS NULL)
-        ORDER BY confidence DESC LIMIT 3
+    """Keep current references, development ideas and unreviewed memory distinct."""
+    rows = _safe_query_all(cursor, """
+        SELECT * FROM trading_intuitions WHERE is_active=1 ORDER BY confidence DESC
     """)
-
-    us_intuitions = _safe_query_all(cursor, """
-        SELECT condition, insight, confidence
-        FROM trading_intuitions WHERE is_active=1 AND market='US'
-        ORDER BY confidence DESC LIMIT 3
-    """)
-
-    stats = _safe_query(cursor, """
-        SELECT COUNT(*), AVG(confidence), AVG(success_rate)
-        FROM trading_intuitions WHERE is_active=1
-    """, default=(0, 0, 0))
-    total_count = stats[0] or 0
-    avg_conf = stats[1] or 0
-
-    if total_count == 0:
+    if rows is None:
+        return "장기 학습 데이터 조회 실패: 누적 직관과 신뢰도를 확인할 수 없습니다."
+    if not rows:
         return "아직 데이터 축적 중입니다. 매매 기록이 쌓이면 AI가 패턴을 학습합니다."
-
-    new_count_str = f"{new_count}개" if new_count > 0 else "없음"
-    avg_conf_str = f"{avg_conf * 100:.0f}%" if avg_conf else "집계 중"
+    columns = [column[0] for column in cursor.description]
+    records = [dict(zip(columns, row)) for row in rows]
+    current, improvements = [], []
+    new_count = sum(str(row.get('created_at') or '') >= week_start_str for row in records)
+    for row in records:
+        market = 'KR' if row.get('market') is None else row['market']
+        context = normalize_application_context(row.get('application_context'), market)
+        row['application_context'] = context
+        if context['status'] == 'current_pipeline':
+            current.append(row)
+        elif context['status'] == 'improvement':
+            improvements.append(row)
     lines = [
-        f"이번 주 신규: {new_count_str} | 누적 활성 직관: {total_count}개 | 평균 신뢰도: {avg_conf_str}"
+        f"이번 주 신규 활성: {new_count}개 | 누적 활성 직관: {len(records)}개",
+        f"현재 적용 참고: {len(current)}개 | 개선 제안: {len(improvements)}개 | "
+        f"적용성 검토 대기: {len(records) - len(current) - len(improvements)}개",
+        "※ 신뢰도는 검증된 적중률이 아닌 모델 자체 평가입니다.",
     ]
+    if current:
+        lines.append("\n💡 현재 시스템에서 참고할 직관:")
+        for index, row in enumerate(current[:3], 1):
+            confidence = row.get('confidence')
+            confidence_text = f"{confidence * 100:.0f}%" if confidence is not None else "미확인"
+            context = row['application_context']
+            stage = '진입 판단' if context['stage'] == 'batch_buy' else '보유 관리'
+            lines.append(f"  {index}. [{context['market']}·{stage}] {row['condition']} → {row['insight']} (신뢰도 {confidence_text})")
+    else:
+        lines.append("현재 시스템 적용성 검토를 통과한 직관이 아직 없습니다.")
+    if improvements:
+        row = improvements[0]
+        lines.append("\n🔧 향후 시스템 개선 검토 (매매 판단에는 전달하지 않음):")
+        lines.append(f"  {row['condition']} → {row['insight']}")
+    return "\n".join(lines)
 
-    all_intuitions = kr_intuitions + us_intuitions
-    if all_intuitions:
-        lines.append("")
-        lines.append("💡 주요 직관:")
-        for i, (condition, insight, confidence) in enumerate(all_intuitions[:5], 1):
-            conf_pct = (confidence or 0) * 100
-            lines.append(f"  {i}. {condition} = {insight} (신뢰도 {conf_pct:.0f}%)")
 
+def _get_trigger_section(cursor, market: str, week_start_str: str) -> str:
+    """Render cumulative observations; absent data and query failures stay distinct."""
+    if market == "KR":
+        stats_query = """
+            SELECT
+                SUM(CASE WHEN was_traded=0 AND tracked_30d_return < -0.05 THEN 1 ELSE 0 END),
+                AVG(CASE WHEN was_traded=0 AND tracked_30d_return < -0.05 THEN tracked_30d_return * 100 END),
+                SUM(CASE WHEN was_traded=0 AND tracked_30d_return > 0.10 THEN 1 ELSE 0 END),
+                MAX(CASE WHEN was_traded=0 AND tracked_30d_return > 0.10 THEN tracked_30d_return * 100 END),
+                MIN(analyzed_date), MAX(analyzed_date), COUNT(*),
+                SUM(CASE WHEN was_traded IS NULL THEN 1 ELSE 0 END)
+            FROM analysis_performance_tracker
+            WHERE tracking_status='completed' AND tracked_30d_return IS NOT NULL
+        """
+        best_query = """
+            SELECT trigger_type, COUNT(*) AS samples,
+                   SUM(CASE WHEN tracked_30d_return > 0 THEN 1 ELSE 0 END) AS wins
+            FROM analysis_performance_tracker
+            WHERE tracking_status='completed' AND tracked_30d_return IS NOT NULL
+              AND trigger_type IS NOT NULL
+            GROUP BY trigger_type HAVING COUNT(*) >= 3
+            ORDER BY (wins * 1.0 / samples) DESC, samples DESC, trigger_type LIMIT 1
+        """
+    else:
+        stats_query = """
+            SELECT
+                SUM(CASE WHEN was_traded=0 AND return_30d < -0.05 THEN 1 ELSE 0 END),
+                AVG(CASE WHEN was_traded=0 AND return_30d < -0.05 THEN return_30d * 100 END),
+                SUM(CASE WHEN was_traded=0 AND return_30d > 0.10 THEN 1 ELSE 0 END),
+                MAX(CASE WHEN was_traded=0 AND return_30d > 0.10 THEN return_30d * 100 END),
+                MIN(analysis_date), MAX(analysis_date), COUNT(*),
+                SUM(CASE WHEN was_traded IS NULL THEN 1 ELSE 0 END)
+            FROM us_analysis_performance_tracker WHERE return_30d IS NOT NULL
+        """
+        best_query = """
+            SELECT trigger_type, COUNT(*) AS samples,
+                   SUM(CASE WHEN return_30d > 0 THEN 1 ELSE 0 END) AS wins
+            FROM us_analysis_performance_tracker
+            WHERE return_30d IS NOT NULL AND trigger_type IS NOT NULL
+            GROUP BY trigger_type HAVING COUNT(*) >= 3
+            ORDER BY (wins * 1.0 / samples) DESC, samples DESC, trigger_type LIMIT 1
+        """
+
+    stats = _safe_query(cursor, stats_query)
+    best = _safe_query_all(cursor, best_query)
+    principles = _safe_query(cursor, """
+        SELECT SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END), COUNT(*)
+        FROM trading_principles WHERE is_active=1 AND market=?
+    """, (week_start_str, market))
+    lines = []
+    if stats is None or best is None:
+        lines.append("트리거 데이터 조회 실패: 누적 통계를 확인할 수 없습니다.")
+    else:
+        down, avg, up, maximum, start, end, count, unknown = stats
+        if count:
+            lines.append(f"📅 누적 표본의 분석일: {start} ~ {end} | 30일 수익률 확인: 분석 기록 {count}건")
+        else:
+            lines.append("📅 30일 수익률이 확인된 누적 표본이 없습니다.")
+        lines.append(f"📉 미매수 후 하락: {down or 0}건 (평균 {_format_percentage(avg)})")
+        lines.append(f"📈 미매수 후 상승: {up or 0}건 (최고 {_format_percentage(maximum)})")
+        if unknown:
+            lines.append(f"※ 매매 여부 미확인 {unknown}건은 미매수 등락 집계에서 제외했습니다.")
+        if best:
+            trigger, samples, wins = best[0]
+            lines.append(f"📊 관측 상승 비율 상위: {trigger} ({wins}/{samples}건, {wins / samples * 100:.0f}%)")
+        else:
+            lines.append("📊 관측 상승 비율: 트리거별 표본 3건 미만")
+    if principles is None:
+        lines.append("📌 교훈 조회 실패")
+    else:
+        lines.append(f"📌 이번 주 등록 교훈: {principles[0] or 0}개 (누적 활성 {principles[1]}개, 적용성 별도 검토)")
     return "\n".join(lines)
 
 
@@ -259,205 +351,41 @@ async def generate_weekly_report(db_path: str = DB_PATH) -> str:
     # ========== NEW: Sell Evaluation ==========
     sell_eval = await _get_sell_evaluation(cursor, week_start_str)
 
-    # ========== KOREAN MARKET (trigger performance) ==========
-    kr_avoided_count, kr_avoided_avg = 0, None
-    kr_missed_count, kr_missed_best = 0, None
-    kr_best_trigger_name, kr_best_trigger_rate = "데이터 없음", 0
-    kr_new_principles, kr_total_principles = 0, 0
-
-    try:
-        query = """
-            SELECT COUNT(*), AVG(tracked_30d_return * 100)
-            FROM analysis_performance_tracker
-            WHERE tracking_status='completed'
-              AND was_traded=0
-              AND tracked_30d_return < -0.05
-        """
-        count, avg = _safe_query(cursor, query)
-        kr_avoided_count = count or 0
-        kr_avoided_avg = avg
-
-        query = """
-            SELECT COUNT(*), MAX(tracked_30d_return * 100)
-            FROM analysis_performance_tracker
-            WHERE tracking_status='completed'
-              AND was_traded=0
-              AND tracked_30d_return > 0.10
-        """
-        count, max_return = _safe_query(cursor, query)
-        kr_missed_count = count or 0
-        kr_missed_best = max_return
-
-        query = """
-            SELECT
-                trigger_type,
-                SUM(CASE WHEN tracking_status='completed' THEN 1 ELSE 0 END) as completed,
-                SUM(CASE WHEN tracking_status='completed' AND tracked_30d_return > 0 THEN 1 ELSE 0 END) as wins
-            FROM analysis_performance_tracker
-            WHERE trigger_type IS NOT NULL
-            GROUP BY trigger_type
-            HAVING completed >= 3
-            ORDER BY (wins * 1.0 / completed) DESC
-            LIMIT 1
-        """
-        result = _safe_query(cursor, query, default=(None, 0, 0))
-        if result[0]:
-            kr_best_trigger_name = result[0]
-            completed, wins = result[1], result[2]
-            kr_best_trigger_rate = (wins / completed * 100) if completed > 0 else 0
-
-        query = f"""
-            SELECT COUNT(*)
-            FROM trading_principles
-            WHERE is_active=1 AND market='KR' AND created_at >= '{week_start_str}'
-        """
-        kr_new_principles = _safe_query(cursor, query, default=(0,))[0] or 0
-
-        query = "SELECT COUNT(*) FROM trading_principles WHERE is_active=1 AND market='KR'"
-        kr_total_principles = _safe_query(cursor, query, default=(0,))[0] or 0
-
-    except sqlite3.Error as e:
-        logger.warning(f"KR market query error: {e}")
-
-    # ========== US MARKET (trigger performance) ==========
-    us_avoided_count, us_avoided_avg = 0, None
-    us_missed_count, us_missed_best = 0, None
-    us_best_trigger_name, us_best_trigger_rate = "데이터 없음", 0
-    us_new_principles = 0
-    us_total_principles = 0
-
-    try:
-        query = """
-            SELECT COUNT(*), AVG(return_30d * 100)
-            FROM us_analysis_performance_tracker
-            WHERE return_30d IS NOT NULL
-              AND COALESCE(was_traded, 0) = 0
-              AND return_30d < -0.05
-        """
-        count, avg = _safe_query(cursor, query)
-        us_avoided_count = count or 0
-        us_avoided_avg = avg
-
-        query = """
-            SELECT COUNT(*), MAX(return_30d * 100)
-            FROM us_analysis_performance_tracker
-            WHERE return_30d IS NOT NULL
-              AND COALESCE(was_traded, 0) = 0
-              AND return_30d > 0.10
-        """
-        count, max_return = _safe_query(cursor, query)
-        us_missed_count = count or 0
-        us_missed_best = max_return
-
-        query = """
-            SELECT
-                trigger_type,
-                SUM(CASE WHEN return_30d IS NOT NULL THEN 1 ELSE 0 END) as completed,
-                SUM(CASE WHEN return_30d > 0 THEN 1 ELSE 0 END) as wins
-            FROM us_analysis_performance_tracker
-            WHERE trigger_type IS NOT NULL
-            GROUP BY trigger_type
-            HAVING completed >= 3
-            ORDER BY (wins * 1.0 / completed) DESC
-            LIMIT 1
-        """
-        result = _safe_query(cursor, query, default=(None, 0, 0))
-        if result[0]:
-            us_best_trigger_name = result[0]
-            completed, wins = result[1], result[2]
-            us_best_trigger_rate = (wins / completed * 100) if completed > 0 else 0
-
-        # US 신규/누적 매매 원칙 (그동안 하드코딩 0 → 실제 집계). market='US' 분리.
-        query = f"""
-            SELECT COUNT(*) FROM trading_principles
-            WHERE is_active=1 AND market='US' AND created_at >= '{week_start_str}'
-        """
-        us_new_principles = _safe_query(cursor, query, default=(0,))[0] or 0
-        query = "SELECT COUNT(*) FROM trading_principles WHERE is_active=1 AND market='US'"
-        us_total_principles = _safe_query(cursor, query, default=(0,))[0] or 0
-
-    except sqlite3.Error as e:
-        logger.warning(f"US market query error: {e}")
-
-    # ========== NEW: AI Intuitions ==========
+    kr_section = _get_trigger_section(cursor, "KR", week_start_str)
+    us_section = _get_trigger_section(cursor, "US", week_start_str)
     intuitions_section = _get_ai_intuitions(cursor, week_start_str)
-
     conn.close()
 
-    # ========== GENERATE MESSAGE ==========
-
-    # Summary line
-    if kr_best_trigger_rate > 0 or us_best_trigger_rate > 0:
-        best_market = "한국" if kr_best_trigger_rate >= us_best_trigger_rate else "미국"
-        best_trigger = kr_best_trigger_name if kr_best_trigger_rate >= us_best_trigger_rate else us_best_trigger_name
-        best_rate = max(kr_best_trigger_rate, us_best_trigger_rate)
-        summary = f"{best_market} '{best_trigger}' 트리거가 승률 {best_rate:.0f}%로 가장 안정적"
-    else:
-        summary = "데이터 축적 중 — 30일 추적 완료 후 인사이트 제공 예정"
-
-    # Format avoided/missed stats
-    def _avoided_detail(count, avg):
-        if count == 0:
-            return "0건 — AI가 매수를 건너뛴 종목 중 하락한 종목 없음"
-        return f"{count}건 (평균 {_format_percentage(avg)}) — 매수하지 않아 손실을 피한 종목"
-
-    def _missed_detail(count, best):
-        if count == 0:
-            return "0건 — 놓친 상승 종목 없음"
-        return f"{count}건 (최고 {_format_percentage(best)}) — 매수하지 않았으나 크게 오른 종목"
-
-    kr_avoided_str = _avoided_detail(kr_avoided_count, kr_avoided_avg)
-    kr_missed_str = _missed_detail(kr_missed_count, kr_missed_best)
-    kr_trigger_str = f"{kr_best_trigger_name} (승률 {kr_best_trigger_rate:.0f}%)" if kr_best_trigger_rate > 0 else "데이터 축적 중"
-    kr_principles_str = f"{kr_new_principles}개 추가 (총 {kr_total_principles}개)"
-
-    us_avoided_str = _avoided_detail(us_avoided_count, us_avoided_avg)
-    us_missed_str = _missed_detail(us_missed_count, us_missed_best)
-    us_trigger_str = f"{us_best_trigger_name} (승률 {us_best_trigger_rate:.0f}%)" if us_best_trigger_rate > 0 else "데이터 축적 중"
-    us_principles_str = f"{us_new_principles}개 추가 (총 {us_total_principles}개)"
-
-    # Actionable insights
-    insights = []
-    if kr_best_trigger_rate >= 60 or us_best_trigger_rate >= 60:
-        insights.append("승률 60%+ 트리거가 있습니다. 해당 트리거 종목을 우선 검토하세요.")
-    if kr_missed_count + us_missed_count >= 3:
-        insights.append("놓친 기회가 3건 이상입니다. 매수 기준을 약간 완화하는 것을 고려해보세요.")
-    if kr_avoided_count + us_avoided_count >= 5:
-        insights.append("회피한 손실이 5건 이상입니다. AI의 관망 판단이 잘 작동하고 있습니다.")
-    if not insights:
-        insights.append("이번 주는 큰 변동 없이 안정적으로 운영되었습니다.")
-
-    insights_str = '\n'.join(f"  → {i}" for i in insights)
+    summary = "누적 가격 관측만으로 매매 판단의 우수성이나 전략 변경 필요성을 판단할 수 없습니다."
+    insights_str = (
+        "  → 트리거 통계는 이번 주 실적이 아닌 누적 30일 추적 결과입니다.\n"
+        "  → 표본 수와 관측 기간이 다르므로 상승 비율만으로 트리거의 안정성을 비교할 수 없습니다.\n"
+        "  → 미매수 종목의 등락은 실제 회피 손익이 아니며, 매수 기준 완화의 근거가 되지 않습니다."
+    )
 
     # Conditional sell evaluation section
     sell_eval_block = ""
     if sell_eval:
         sell_eval_block = f"""
-🔍 매도 후 평가
+🔍 매도 후 가격 관측
 ━━━━━━━━━━━━━━━━━━━━
 {sell_eval}
 """
 
     message = f"""📋 PRISM 주간 인사이트 ({start_display} ~ {end_display})
-이번 주 AI 매매 판단의 성과를 돌아봅니다.
+이번 주 매매 내역과 누적 학습·가격 관측을 정리합니다.
 
 📈 이번 주 매매 요약
 ━━━━━━━━━━━━━━━━━━━━
 {trades_summary}
 {sell_eval_block}
-🇰🇷 한국시장 (트리거 성과)
+🇰🇷 한국시장 (누적 트리거 관측)
 ━━━━━━━━━━━━━━━━━━━━
-🛡️ 회피한 손실: {kr_avoided_str}
-❌ 놓친 기회: {kr_missed_str}
-📊 가장 정확한 트리거: {kr_trigger_str}
-📌 새 매매 원칙: {kr_principles_str}
+{kr_section}
 
-🇺🇸 미국시장 (트리거 성과)
+🇺🇸 미국시장 (누적 트리거 관측)
 ━━━━━━━━━━━━━━━━━━━━
-🛡️ 회피한 손실: {us_avoided_str}
-❌ 놓친 기회: {us_missed_str}
-📊 가장 정확한 트리거: {us_trigger_str}
-📌 새 매매 원칙: {us_principles_str}
+{us_section}
 
 🧠 AI 장기 학습 인사이트
 ━━━━━━━━━━━━━━━━━━━━
@@ -470,11 +398,11 @@ async def generate_weekly_report(db_path: str = DB_PATH) -> str:
 
 ℹ️ 용어 안내
 • 트리거 = AI가 종목을 발견한 이유 (급등, 거래량 급증 등)
-• 회피한 손실 = 매수하지 않았는데 30일 뒤 -5% 이상 하락한 종목
-• 놓친 기회 = 매수하지 않았는데 30일 뒤 +10% 이상 상승한 종목
-• 승률 = 해당 트리거로 분석한 종목 중 30일 후 수익이 난 비율
-• 매매 원칙 = AI가 과거 매매 경험에서 스스로 학습한 규칙
-• 직관 = AI가 반복 패턴에서 추출한 매매 원칙"""
+• 미매수 후 하락/상승 = 미매수로 기록된 분석 건의 30일 수익률이 -5% 미만/+10% 초과인 경우
+• 상승 비율 = 30일 수익률이 확인된 분석 건 중 양수인 비율(실제 매매 승률 아님)
+• 분석 건은 같은 종목의 반복 분석을 포함할 수 있으며, 가격·기업행사 조정 품질은 별도 검증이 필요합니다.
+• 교훈·직관 = 과거 거래와 반복 패턴에서 추출한 참고사항이며, 기존 매매 규칙을 바꾸는 권한은 아닙니다.
+• 개선 제안 = 기능 구현과 별도 검증이 필요한 내용으로, 현재 매매 판단에는 전달하지 않습니다."""
 
     return message
 

@@ -326,10 +326,20 @@ def create_memory_compressor_agent(language: str = "ko"):
            - **market**: 시장 상황별 (강세장/약세장/횡보장)
         """
 
+    instruction += """
+    ## Applicability boundary
+    Preserve the original condition and action. Do not rewrite a future feature requirement
+    into an executable trading rule. Distinguish current batch advisory observations from
+    data/automation/strategy improvements; proposed application_context is not approval.
+    Newly generated memory stays unreviewed until an independent offline pipeline-fit review.
+    """
+
     return Agent(
         name="memory_compressor_agent",
         instruction=instruction,
-        server_names=["sqlite"]
+        # Compression receives its records in the prompt. Database changes must
+        # pass CompressionManager's evidence and reconciliation checks.
+        server_names=[]
     )
 
 

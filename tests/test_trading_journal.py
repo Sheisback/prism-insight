@@ -473,7 +473,7 @@ class TestCompression:
 
         agent.cursor.execute("SELECT supporting_trades FROM trading_intuitions")
         updated = agent.cursor.fetchone()
-        assert updated['supporting_trades'] > 3  # Should be increased
+        assert updated['supporting_trades'] == 3  # Unique journal IDs, not repeated model estimates.
 
         agent.conn.close()
 
@@ -740,7 +740,7 @@ class TestTradingPrinciples:
         saved = agent.cursor.fetchall()
 
         assert len(saved) == 2
-        assert saved[0]['scope'] == 'universal'  # high priority -> universal
+        assert saved[0]['scope'] == 'sector'  # Importance alone does not establish universal scope.
         assert saved[0]['priority'] == 'high'
         assert saved[1]['scope'] == 'sector'  # medium priority -> sector
         assert saved[1]['priority'] == 'medium'
@@ -748,8 +748,8 @@ class TestTradingPrinciples:
         agent.conn.close()
 
     @pytest.mark.asyncio
-    async def test_high_priority_lessons_become_universal(self):
-        """Test that high priority lessons are classified as universal"""
+    async def test_high_priority_lessons_do_not_become_universal(self):
+        """Importance does not authorize universal application."""
         agent = StockTrackingAgent(db_path=self.db_path)
         agent.trading_agent = MagicMock()
         await agent.initialize(language="ko")
@@ -771,7 +771,7 @@ class TestTradingPrinciples:
         """)
         result = agent.cursor.fetchone()
 
-        assert result['scope'] == 'universal', "High priority should be universal scope"
+        assert result['scope'] == 'sector', "High priority must not imply universal scope"
         agent.conn.close()
 
     @pytest.mark.asyncio
@@ -789,9 +789,9 @@ class TestTradingPrinciples:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             'universal',
-            '대량거래 급락 시',
-            '즉시 전량 정리',
-            '시나리오 무효',
+            '보고서상 추세 확인 시',
+            '제공된 추세 근거 확인',
+            '기존 매수 판단 참고',
             'high',
             0.8,
             3,
@@ -815,11 +815,18 @@ class TestTradingPrinciples:
         ))
         agent.conn.commit()
 
+        from trading_memory_policy import ensure_application_columns
+        ensure_application_columns(agent.conn)
+        agent.cursor.execute("UPDATE trading_principles SET application_context=? WHERE scope='universal'", (
+            json.dumps({"version": 1, "market": "KR", "status": "current_pipeline", "stage": "batch_buy",
+                        "required_capabilities": ["batch_report", "entry_advisory"],
+                        "reason": "Independently reviewed current report check."}),))
+
         # Get universal principles
         principles = agent._get_universal_principles()
 
         assert len(principles) == 1, "Should only return universal scope principles"
-        assert "대량거래 급락 시" in principles[0]
+        assert "보고서상 추세 확인 시" in principles[0]
         assert "🔴" in principles[0]  # High priority emoji
 
         agent.conn.close()
@@ -856,8 +863,8 @@ class TestTradingPrinciples:
             sector="Semiconductor"
         )
 
-        assert "Core Trading Principles" in context or "핵심 매매 원칙" in context, "Context should include principles section"
-        assert "테스트 조건" in context, "Context should include principle content"
+        assert "Core Trading Principles" not in context, "Legacy principle is not approved BUY guidance"
+        assert "테스트 조건" not in context
 
         agent.conn.close()
 
@@ -971,7 +978,7 @@ class TestMigrationScript:
             WHERE scope = 'universal' AND priority = 'high'
         """)
         universal_count = agent.cursor.fetchone()[0]
-        assert universal_count == 2, f"Expected 2 universal high-priority, got {universal_count}"
+        assert universal_count == 0, "Legacy high-priority lessons must not acquire universal scope"
 
         agent.conn.close()
 

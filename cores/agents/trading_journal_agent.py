@@ -11,7 +11,10 @@ Key Features:
 4. Context compression for long-term memory
 """
 
+import json
+
 from mcp_agent.agents.agent import Agent
+from trading_memory_policy import memory_contract
 
 
 def create_trading_journal_agent(language: str = "ko", market: str = "KR"):
@@ -80,7 +83,7 @@ def create_trading_journal_agent(language: str = "ko", market: str = "KR"):
 
         ## Tool Usage
         - Use kospi_kosdaq tools to fetch current market data for context
-        - Use sqlite to query related past trades if needed
+        - Use only the supplied past-trade records; do not access or modify memory storage
         - Use time tool to get accurate timestamps
 
         ## Response Format (JSON)
@@ -105,7 +108,13 @@ def create_trading_journal_agent(language: str = "ko", market: str = "KR"):
                     "condition": "In this kind of situation...",
                     "action": "I should do this...",
                     "reason": "Because...",
-                    "priority": "high/medium/low"
+                    "priority": "high/medium/low",
+                    "scope": "universal/market/sector/ticker",
+                    "application_context": {
+                        "version": 1, "status": "current_pipeline", "market": "KR",
+                        "stage": "batch_buy", "required_capabilities": ["batch_report", "entry_advisory"],
+                        "reason": "Explain the supplied evidence and the existing capability"
+                    }
                 }
             ],
             "pattern_tags": ["tag1", "tag2", "tag3"],
@@ -120,9 +129,8 @@ def create_trading_journal_agent(language: str = "ko", market: str = "KR"):
         4. Tag patterns consistently for future retrieval
         5. The one_line_summary should capture the essence for long-term memory
         6. **Lesson Priority Classification**:
-           - **high**: Universal principles applicable to ALL trades (e.g., "Never hold positions with stop-loss beyond 7%")
-           - **medium**: Sector or market-condition specific lessons
-           - **low**: Stock-specific observations
+           - **high/medium/low**: Importance of the observation, independent of its scope or applicability.
+           - Set scope explicitly; one trade does not establish a universal trading rule.
         """
     else:  # Korean (default)
         instruction = """## 🎯 당신의 정체성
@@ -173,7 +181,7 @@ def create_trading_journal_agent(language: str = "ko", market: str = "KR"):
 
         ## 도구 사용
         - kospi_kosdaq 도구로 현재 시장 데이터 조회
-        - sqlite로 관련 과거 거래 조회 가능
+        - 과거 거래는 제공된 기록만 사용하며 메모리 저장소를 직접 조회하거나 수정하지 않습니다
         - time 도구로 정확한 시간 확인
 
         ## 응답 형식 (JSON)
@@ -198,7 +206,13 @@ def create_trading_journal_agent(language: str = "ko", market: str = "KR"):
                     "condition": "이런 상황에서는...",
                     "action": "이렇게 해야 한다...",
                     "reason": "왜냐하면...",
-                    "priority": "high/medium/low"
+                    "priority": "high/medium/low",
+                    "scope": "universal/market/sector/ticker",
+                    "application_context": {
+                        "version": 1, "status": "current_pipeline", "market": "KR",
+                        "stage": "batch_buy", "required_capabilities": ["batch_report", "entry_advisory"],
+                        "reason": "제공된 근거와 현재 가능한 판단을 설명합니다"
+                    }
                 }
             ],
             "pattern_tags": ["태그1", "태그2", "태그3"],
@@ -213,18 +227,51 @@ def create_trading_journal_agent(language: str = "ko", market: str = "KR"):
         4. 일관된 태그 부여로 미래 검색 용이하게
         5. one_line_summary는 장기 기억용 핵심 요약
         6. **교훈 우선순위 분류**:
-           - **high**: 모든 매매에 적용되는 범용 원칙 (예: "손절가 7% 초과 시 보유 금지")
-           - **medium**: 섹터/시장상황별 교훈
-           - **low**: 종목 특화 관찰
+           - **high/medium/low**는 관찰의 중요도입니다. 적용 범위나 현재 실행 가능성과는 별개입니다.
+           - scope는 별도로 명시하세요. 한 거래의 결과를 모든 매매에 적용할 규칙으로 일반화하지 마세요.
         """
+
+    instruction += """
+        ## Current pipeline applicability / 현재 파이프라인 적용 가능성
+        Most lessons must concern checks practicable NOW using the supplied batch report,
+        trigger, regime and portfolio evidence under existing entry policy. Keep at most
+        one distinct engineering or strategy improvement proposal; do not pad the output
+        with speculative instructions. If the evidence supports no lesson, return none.
+        교훈은 현재 입력으로 확인할 수 있는 조건과 기존 매매 절차 안에서 가능한 판단을
+        중심으로 작성하세요. 미래 개발·전략 제안은 별도로 구분하고 최대 한 개만 남기세요.
+        현재 입력에 없는 확인을 했다고 가정하거나 구현되지 않은 동작을 지시하지 마세요.
+
+        Each lesson.application_context must be an object with version, status, market,
+        stage, required_capabilities and reason. Use the exact version, market and capability
+        IDs below. status is current_pipeline, improvement or unreviewed; stage is batch_buy,
+        position_management or system_design. Explain the supplied evidence and existing
+        capability in reason. Your classification is only a PROPOSAL: stored new lessons
+        remain unreviewed until an independent offline review confirms applicability.
+
+        Current BUY advice can check supplied support/trend, catalyst and price context now
+        and advise Enter/NoEntry under existing gates. It cannot promise an automatic entry
+        after future confirmation, arbitrary smaller sizing, a new fixed numeric threshold,
+        or a new exit rule. Those are improvement proposals. Existing controlled rebound
+        pilot and pyramiding remain possible only through their established gates.
+        Position-management observations belong to position_management, not a BUY veto.
+        Screening risk/reward may intentionally be missing; later authoritative BUY gates
+        calculate it. Do not fabricate it or add a duplicate screening penalty.
+        US institutional ownership does not establish daily institutional flows.
+        one_line_summary and historical descriptions must describe the completed trade,
+        without hiding future executable instructions in the historical summary.
+        CONTRACT:
+        """ + json.dumps(memory_contract(market), ensure_ascii=False, sort_keys=True)
 
     # US 시장은 kospi_kosdaq 대신 yahoo_finance 데이터 서버를 사용한다.
     # (그동안 US 저널이 market 인자 미지원으로 TypeError 나며 미동작했던 버그 수정)
     if market == "US":
         instruction = instruction.replace("kospi_kosdaq", "yahoo_finance")
-        data_servers = ["yahoo_finance", "sqlite", "time"]
+        instruction = instruction.replace('"market": "KR"', '"market": "US"')
+        instruction = instruction.replace("KOSPI/KOSDAQ trend, foreign/institutional flow", "S&P 500/Nasdaq trend and supplied ownership context")
+        instruction = instruction.replace("KOSPI/KOSDAQ 추세, 외인/기관 동향", "S&P 500/Nasdaq 추세와 제공된 기관 보유 정보")
+        data_servers = ["yahoo_finance", "time"]
     else:
-        data_servers = ["kospi_kosdaq", "sqlite", "time"]
+        data_servers = ["kospi_kosdaq", "time"]
 
     return Agent(
         name="trading_journal_agent",

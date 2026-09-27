@@ -6,6 +6,7 @@ Fix 2: get_context_for_ticker must inject diverse categories (per-category cap +
 TDD flow: run pre-fix to confirm failures, implement fixes, run again to confirm passes.
 """
 
+import json
 import sqlite3
 import sys
 from pathlib import Path
@@ -14,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tracking.compression import CompressionManager
 from tracking.journal import JournalManager
+from trading_memory_policy import ensure_application_columns
 
 # Import constants added by Fix 2.  Fall back to spec values so Fix 1 tests
 # can be run independently before Fix 2 is implemented (ImportError expected pre-fix).
@@ -104,6 +106,7 @@ def _setup_db() -> tuple:
     conn = sqlite3.connect(":memory:")
     cur = conn.cursor()
     cur.executescript(_SCHEMA_SQL)
+    ensure_application_columns(conn)
     conn.commit()
     return conn, cur
 
@@ -118,9 +121,12 @@ def _insert_intuition(
     cur.execute(
         """INSERT INTO trading_intuitions
            (category, condition, insight, confidence, supporting_trades,
-            success_rate, source_journal_ids, created_at, last_validated_at, is_active)
-           VALUES (?, ?, ?, ?, 2, 0.6, '[]', ?, ?, 1)""",
-        (category, f"{category}_cond_{idx}", f"{category}_ins_{idx}", confidence, now, now),
+            success_rate, source_journal_ids, created_at, last_validated_at, is_active, application_context)
+           VALUES (?, ?, ?, ?, 2, 0.6, '[]', ?, ?, 1, ?)""",
+        (category, f"{category}_cond_{idx}", f"{category}_ins_{idx}", confidence, now, now,
+         json.dumps({"version": 1, "market": "KR", "status": "current_pipeline", "stage": "batch_buy",
+                     "required_capabilities": ["batch_report", "entry_advisory"],
+                     "reason": "Reviewed current report check."})),
     )
 
 
