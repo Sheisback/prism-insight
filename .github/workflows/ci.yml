@@ -137,7 +137,7 @@ jobs:
             tests/test_third_slot*.py -q
           python -m pytest tests/test_stopout_reentry.py tests/test_reentry_shadow.py \
             tests/test_reentry_evidence_packet.py tests/test_decision_inputs.py \
-            tests/test_decision_inputs_packet.py -q
+            tests/test_decision_inputs_packet.py tests/test_replay_buy_decision_facts.py -q
 
       - name: KIS-only provider and consumer boundary
         env:

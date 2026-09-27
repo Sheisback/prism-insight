@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import contextlib
 import json
 import os
 import sqlite3
@@ -91,9 +90,8 @@ def bars_before(market, ticker, session):
                                          adjusted=True)
     else:
         import yfinance as yf
-        with contextlib.redirect_stdout(sys.stderr):
-            frame = yf.download(ticker, start=start.strftime("%Y-%m-%d"), end=session, auto_adjust=False,
-                                progress=False, multi_level_index=False)
+        frame = yf.download(ticker, start=start.strftime("%Y-%m-%d"), end=session, auto_adjust=False,
+                            progress=False, multi_level_index=False)
     from prism_core.decision_input_features import bars_from_frame
     return [b for b in bars_from_frame(frame, limit=120) if b["date"] < session]
 
@@ -101,8 +99,7 @@ def bars_before(market, ticker, session):
 def us_earnings_asof(ticker, session):
     try:
         import yfinance as yf
-        with contextlib.redirect_stdout(sys.stderr):
-            dates = yf.Ticker(ticker).get_earnings_dates(limit=16)
+        dates = yf.Ticker(ticker).get_earnings_dates(limit=16)
         day = datetime.fromisoformat(session).date()
         upcoming = sorted(d.date() for d in dates.index if d.date() >= day)
         if not upcoming:
@@ -254,7 +251,9 @@ def main(argv=None):
         return 0
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     records = asyncio.run(replay(items, args.market, args.language, args.out, args.concurrency))
-    print(json.dumps(report_summary(records), ensure_ascii=False, indent=1))
+    summary = json.dumps(report_summary(records), ensure_ascii=False, indent=1)
+    Path(args.out + ".summary.json").write_text(summary + "\n", encoding="utf-8")
+    print(summary)
     return 0
 
 
