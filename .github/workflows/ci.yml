@@ -123,6 +123,8 @@ jobs:
           python -m pytest tests/test_oneil_capture_tape.py tests/test_oneil_current_capture.py \
             tests/test_oneil_capture_comparison.py tests/test_oneil_comparison_cases.py \
             tests/test_oneil_runtime_capture.py -q
+          python -m pytest tests/test_oneil_runtime.py tests/test_oneil_runtime_inputs.py \
+            tests/test_oneil_shadow_runner.py tests/test_oneil_live_boundary.py -q
           # Existing bootstrap creates only a fake example.com KIS config, removes it at exit.
           python -m pytest tests/test_multi_account_domestic.py \
             tests/test_astra_kr_safety.py tests/test_kr_buy_quote_validation.py \

@@ -237,6 +237,9 @@ class StrategyLedger:
         fee_rate, slippage_rate = Decimal(payload["fee_rate"]), Decimal(payload["slippage_rate"])
         policy_version, reason = payload["policy_version"], payload["reason"]
         book = self._get(db, "books", book_id)
+        if str(book.get("cohort") or "").startswith("oneil-adaptive-v1:") and (
+                owner != "oneil-adaptive-v1" or book["mode"] != "SHADOW"):
+            raise LedgerError("adaptive-owned book rejects direct target")
         if book.get("cohort") == "scenario-shadow-v1" and (
                 owner != "scenario-shadow-v1" or book["mode"] != "SHADOW"):
             raise LedgerError("scenario-owned book rejects direct target")
@@ -279,7 +282,16 @@ class StrategyLedger:
             Decimal(campaign["normalized_units"]),
             Decimal(campaign["remaining_allocation"]),
         )
-        if row and quantity == 0:
+        pending_adaptive = (
+            owner == "oneil-adaptive-v1"
+            and str(book.get("cohort") or "").startswith("oneil-adaptive-v1:")
+            and book["mode"] == "SHADOW"
+            and (campaign.get("oneil_runtime") or {}).get("initial_arm") == "INITIAL_POLICY_50"
+            and (campaign.get("oneil_runtime") or {}).get("closed") is False
+            and Decimal(campaign["cumulative_deployed_allocation"]) == 0
+            and old_target == 0 and cost == 0
+        )
+        if row and quantity == 0 and not pending_adaptive:
             raise LedgerError("closed campaign cannot reopen")
         if target < old_target:
             raise LedgerError("cumulative target cannot decrease; use sell")
@@ -528,6 +540,9 @@ class StrategyLedger:
         campaign = self._get(db, "campaigns", campaign_id)
         book_id = campaign["book_id"]
         book = self._get(db, "books", book_id)
+        if str(book.get("cohort") or "").startswith("oneil-adaptive-v1:") and (
+                owner != "oneil-adaptive-v1" or book["mode"] != "SHADOW"):
+            raise LedgerError("adaptive-owned book rejects direct sell")
         if book.get("cohort") == "scenario-shadow-v1" and (
                 owner != "scenario-shadow-v1" or book["mode"] != "SHADOW"):
             raise LedgerError("scenario-owned book rejects direct sell")
@@ -605,6 +620,9 @@ class StrategyLedger:
         }
         with self._transaction() as db:
             campaign = self._get(db, "campaigns", campaign_id)
+            book = self._get(db, "books", campaign["book_id"])
+            if str(book.get("cohort") or "").startswith("oneil-adaptive-v1:"):
+                raise LedgerError("adaptive-owned book rejects direct mark")
             applied = self._event(db, event_id, payload)
             if applied:
                 book = self._get(db, "books", campaign["book_id"])
