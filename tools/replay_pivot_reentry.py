@@ -36,6 +36,16 @@ STOP_SQL = {
     "KR": "SELECT ticker, sell_date, sell_price, profit_rate, exit_kind, scenario FROM trading_history",
     "US": "SELECT ticker, sell_date, sell_price, profit_rate, exit_kind, scenario FROM us_trading_history",
 }
+SKIP_SQL = {
+    "KR": """SELECT p.ticker, p.analyzed_date, p.analyzed_price, p.decision, p.buy_score, p.min_score, w.scenario,
+                    p.decision_id, p.skip_reason
+             FROM analysis_performance_tracker p LEFT JOIN watchlist_history w ON w.id = p.watchlist_id
+             WHERE COALESCE(p.was_traded, 0) = 0""",
+    # Older US tracker rows carry no decision_id, so the skip list itself is the source.
+    "US": """SELECT ticker, analyzed_date, current_price, decision, buy_score, min_score, scenario,
+                    json_extract(scenario, '$._decision_id'), skip_reason
+             FROM us_watchlist_history WHERE COALESCE(was_traded, 0) = 0""",
+}
 
 
 def load_bars(raw):
@@ -52,22 +62,16 @@ def _scenario(text):
 
 
 def enrolments(db_path, market):
-    """(source, ticker, date, price, fundamentals) rows from the trade DB, read-only."""
+    """Enrolment dicts from the trade DB, read-only, oldest first."""
     rows = []
     with sqlite3.connect("file:" + str(db_path) + "?mode=ro", uri=True) as conn:
         for ticker, sell_date, sell_price, pnl, kind, scenario in conn.execute(STOP_SQL[market]):
             if kind == "stop" or (kind is None and pnl is not None and pnl <= -3):
-                passed = (_scenario(scenario).get("fundamental_check") or {}).get("all_passed")
-                rows.append(("STOP_EXIT", str(ticker), session_date(sell_date, market), sell_price, passed))
-        if market == "KR":
-            sql = """SELECT p.ticker, p.analyzed_date, p.analyzed_price, p.decision, p.buy_score, p.min_score, w.scenario
-                     FROM analysis_performance_tracker p LEFT JOIN watchlist_history w ON w.id = p.watchlist_id
-                     WHERE COALESCE(p.was_traded, 0) = 0"""
-        else:
-            # Older US tracker rows carry no decision_id, so the skip list itself is the source.
-            sql = """SELECT ticker, analyzed_date, current_price, decision, buy_score, min_score, scenario
-                     FROM us_watchlist_history WHERE COALESCE(was_traded, 0) = 0"""
-        for ticker, stamp, price, decision, score, minimum, scenario in conn.execute(sql):
+                scen = _scenario(scenario)
+                rows.append({"source": "STOP_EXIT", "ticker": str(ticker), "date": session_date(sell_date, market),
+                             "price": sell_price, "fundamentals": (scen.get("fundamental_check") or {}).get("all_passed"),
+                             "decision_id": scen.get("_decision_id"), "reason": f"stopped out ({pnl:.1f}%)"})
+        for ticker, stamp, price, decision, score, minimum, scenario, decision_id, skip in conn.execute(SKIP_SQL[market]):
             passed = (_scenario(scenario).get("fundamental_check") or {}).get("all_passed")
             entered = str(decision or "").strip().lower() in {"enter", "진입", "entry"}
             if entered:
@@ -76,8 +80,10 @@ def enrolments(db_path, market):
                 source = "LOCATION_SKIP"
             else:
                 continue
-            rows.append((source, str(ticker), session_date(stamp, market), price, passed))
-    rows.sort(key=lambda r: (r[2], r[1], r[0]))
+            rows.append({"source": source, "ticker": str(ticker), "date": session_date(stamp, market), "price": price,
+                         "fundamentals": passed, "decision_id": decision_id, "reason": skip,
+                         "score": score, "min_score": minimum})
+    rows.sort(key=lambda r: (r["date"], r["ticker"], r["source"]))
     return rows
 
 
@@ -99,12 +105,29 @@ def bench_return(bench_by_date, bars, entry_index, exit_index, entry_at_open=Tru
     return b["close"] / (a["open"] if entry_at_open else a["close"]) - 1
 
 
-def replay(db_path, market, bars_by_ticker, bench_bars):
+def bull_fn(bench_bars):
+    """Live-regime proxy for the trailing band: benchmark close above its MA50 = bull."""
+    closes, flags = [], {}
+    for bar in bench_bars:
+        closes.append(bar["close"])
+        flags[bar["date"]] = len(closes) >= 50 and closes[-1] > sum(closes[-50:]) / 50
+    return lambda day: flags.get(day, True)
+
+
+def replay(db_path, market, bars_by_ticker, bench_bars, exit_mode="production", **exit_kwargs):
     gate = pulse_gate(bench_bars)
+    if exit_mode == "production":
+        bull = bull_fn(bench_bars)
+
+        def exit_fn(bars, i, entry, intraday=True):
+            return P.simulate_production(bars, i, entry, intraday=intraday, bull=bull, **exit_kwargs)
+    else:
+        exit_fn = P.simulate
     bench_by_date = {b["date"]: b for b in bench_bars}
     live_until = {}
     results = []
-    for source, ticker, day, price, passed in enrolments(db_path, market):
+    for item in enrolments(db_path, market):
+        source, ticker, day, price, passed = item["source"], item["ticker"], item["date"], item["price"], item["fundamentals"]
         bars = bars_by_ticker.get(ticker)
         if not bars:
             results.append({"source": source, "ticker": ticker, "status": "MISSING", "reason": "no_bars"})
@@ -119,22 +142,25 @@ def replay(db_path, market, bars_by_ticker, bench_bars):
         key = (source, ticker)
         if live_until.get(key, "") >= day:
             continue                     # an earlier watch of this name/source was still live
-        watch = P.run_watch(bars, start, market, market_ok=gate)
+        watch = P.run_watch(bars, start, market, market_ok=gate, exit_fn=exit_fn)
         live_until[key] = bars[watch["index"]]["date"]
         row = {"source": source, "ticker": ticker, "date": day, "fundamentals": passed, "status": watch["status"],
-               "events": watch["events"]}
+               "events": watch["events"], "decision_id": item.get("decision_id"), "reason": item.get("reason"),
+               "score": item.get("score"), "min_score": item.get("min_score")}
         if watch["status"] == "TRIGGERED":
             trade = watch["trade"]
-            row.update(trigger=watch["day"]["trigger"], trade=trade)
+            row.update(trigger=watch["day"]["trigger"], trade=trade, trigger_index=watch["index"],
+                       trigger_date=bars[watch["index"]]["date"], entry=watch["day"]["entry"],
+                       pivot=watch["day"].get("pivot"))
             if trade.get("status") == "CLOSED":
                 bench = bench_return(bench_by_date, bars, watch["index"], trade["exit_index"])
                 row["excess"] = None if bench is None else trade["ret"] - bench
         controls = {}
         if source != "STOP_EXIT" and start + 1 < len(bars):
-            controls["ORIGINAL"] = (start, P.simulate(bars, start, bars[start]["open"], intraday=False))
+            controls["ORIGINAL"] = (start, exit_fn(bars, start, bars[start]["open"], intraday=False))
         if watch.get("ready_control"):
             i = watch["ready_control"]["index"]
-            controls["READY_OPEN"] = (i, P.simulate(bars, i, bars[i]["open"], intraday=False))
+            controls["READY_OPEN"] = (i, exit_fn(bars, i, bars[i]["open"], intraday=False))
         row["controls"] = {}
         for name, (i, trade) in controls.items():
             if trade.get("status") == "CLOSED":
@@ -184,11 +210,12 @@ def main(argv=None):
     parser.add_argument("--bench", required=True)
     parser.add_argument("--bench-code", default=None)
     parser.add_argument("--out")
+    parser.add_argument("--exit", choices=["production", "v1"], default="production")
     args = parser.parse_args(argv)
     bars = {t: load_bars(v) for t, v in json.loads(Path(args.bars).read_text()).items()}
     bench_raw = json.loads(Path(args.bench).read_text())["bars"]
     bench = load_bars(bench_raw[args.bench_code or next(iter(bench_raw))])
-    results = replay(args.db, args.market, bars, bench)
+    results = replay(args.db, args.market, bars, bench, exit_mode=args.exit)
     if args.out:
         Path(args.out).write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in results) + "\n")
     print(json.dumps(summarize(results), ensure_ascii=False, indent=1))
