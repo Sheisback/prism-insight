@@ -329,7 +329,9 @@ def create_memory_compressor_agent(language: str = "ko"):
     return Agent(
         name="memory_compressor_agent",
         instruction=instruction,
-        server_names=["sqlite"]
+        # Compression receives its records in the prompt. Database changes must
+        # pass CompressionManager's evidence and reconciliation checks.
+        server_names=[]
     )
 
 

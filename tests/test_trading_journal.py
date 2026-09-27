@@ -473,7 +473,7 @@ class TestCompression:
 
         agent.cursor.execute("SELECT supporting_trades FROM trading_intuitions")
         updated = agent.cursor.fetchone()
-        assert updated['supporting_trades'] > 3  # Should be increased
+        assert updated['supporting_trades'] == 3  # Unique journal IDs, not repeated model estimates.
 
         agent.conn.close()
 

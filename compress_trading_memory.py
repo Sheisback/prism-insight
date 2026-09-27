@@ -244,6 +244,7 @@ async def run_compression(
         try:
             refresh = await agent.compression_manager.refresh_intuitions()
             logger.info(f"💡 Intuitions Refreshed (corpus): generated={refresh.get('intuitions_generated', 0)} "
+                        f"consolidated={refresh.get('intuitions_consolidated', 0)} "
                         f"corpus={refresh.get('corpus', 0)} extracted={refresh.get('extracted', 0)}")
         except Exception as _re:
             logger.warning(f"Intuition refresh skipped: {_re}")
