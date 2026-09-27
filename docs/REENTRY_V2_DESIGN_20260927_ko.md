@@ -245,7 +245,9 @@ LIVE 승격은 7절 기준과 사용자 승인이 필요하다.
   돌파 이후 시세를 읽을 수 있음). 실패(ERROR/PARSE_ERROR)는 다음 실행에서 1회만 재시도, 같은 날 재실행은 호출 안 함.
 - 결과: `runtime/reentry_v2_recheck_results_{kr,us}.jsonl`(append-only, 시나리오 전체), 이벤트
   `reentry_v2.shadow_recheck`, 실행 요약의 `llm_calls`.
-- 끄기: 정책 `llm_recheck: false`, 환경 `REENTRY_V2_LLM_RECHECK=false`, CLI `--no-llm`. dry-run은 호출하지 않는다.
+- 켜기(opt-in, #815): `REENTRY_V2_LLM_RECHECK=true`(.env 또는 환경변수). **기본 off**라 오픈소스 사용자는 LLM을 쓰지 않는다.
+  운영서버는 `.env`에 켰다(백업 `/root/prism-server-backups/env.before-reentry-v2-llm.20260927`).
+  끄기: 이 값을 false로, 또는 정책 `llm_recheck: false`, CLI `--no-llm`. dry-run은 호출하지 않는다.
 - 운영: cron 두 줄에 BUY와 같은 Codex 환경(모델·effort·timeout·bin·home·auth)을 붙였다.
   백업 `/root/prism-server-backups/crontab.before-reentry-v2-llm.20260927`.
   배포 후 점검: 스위치 켜짐, 기존 트리거 대상 없음 → 호출 0회. 실제 LLM 호출은 첫 전방 트리거에서 처음 일어난다.
