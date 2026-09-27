@@ -39,7 +39,7 @@ DB_PATH = ROOT / "stock_tracking_db.sqlite"
 ARCHIVE_DB = ROOT / "archive.db"
 LOOKBACK_DAYS = 70          # enrolment window; a watch lives up to 30 sessions (~45 calendar days)
 ARCHIVE_AFTER_DAYS = 150    # finished watches (incl. 60-bar exit horizon) move to the archive
-INPUT_CONTRACT = "reentry_v2_recheck_input_v2"
+INPUT_CONTRACT = "reentry_v2_recheck_input_v3"
 REPORT_MAX_AGE_DAYS = 30     # older reports are flagged stale, not regenerated (user decision 2026-09-27)
 
 
@@ -170,7 +170,7 @@ def freeze_inputs(market, watch, result, bars, bench_rows, reports_root, archive
                                                                   (f"stopped out ({row.get('realized_pct')}%)"
                                                                    if watch["source"] == "STOP_EXIT" else None)),
                          "buy_score": row.get("buy_score"), "min_score": row.get("min_score"),
-                         "decision_id": row.get("decision_id")},
+                         "decision_id": row.get("decision_id"), "key_levels": row.get("key_levels")},
             "llm_recheck": "NOT_EVALUATED", "frozen_at": datetime.now(timezone.utc).isoformat()}
 
 
@@ -253,6 +253,11 @@ def advance(state, rows, frames, completed, market, reports_root=ROOT, archive_d
     started = state.setdefault("started_session", completed)
     frozen = []
     live = {"CLOSED", "MISSING_FINAL"}
+    # Watches enrolled before key_levels were captured pick them up from today's read of the same row.
+    fresh = {_watch_id(market, row): row for row in rows}
+    for wid, watch in watches.items():
+        if "key_levels" not in watch["row"] and wid in fresh:
+            watch["row"]["key_levels"] = fresh[wid].get("key_levels")
     for watch in list(watches.values()):
         if watch["status"] not in live:
             item = _refresh(watch, frames, completed, market, reports_root, archive_db)
