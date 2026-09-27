@@ -327,6 +327,104 @@ async def test_model_approved_merge_cannot_drop_observed_support_qualifier(monke
     assert mgr._consolidate_intuitions([group]) == 2
 
 
+@pytest.mark.asyncio
+async def test_semantic_review_allows_conditional_numeric_union(monkeypatch):
+    mgr = manager()
+    first, second = rule(), rule()
+    first.update(condition='추세 실패 시', insight='원래 손절 계획을 지킨다')
+    second.update(condition='50일선 지지가 깨진 추세 실패 시', insight='손절 계획을 지키며 재진입 전 지지 회복을 확인한다')
+    mgr._save_intuition(first, [1, 2])
+    mgr._save_intuition(second, [2, 3])
+    group = {'canonical_id': 1, 'duplicate_ids': [2], 'canonical_condition': '추세 실패 시',
+             'canonical_insight': '원래 손절 계획을 지킨다. 50일선 지지가 깨진 경우에는 재진입 전 지지 회복을 확인한다.'}
+    review = {'reviews': [{'canonical_id': 1, 'approved': True, 'reason': 'Same stop-plan discipline, condition retained.',
+                           'source_coverage': [
+                               {'source_id': 1, 'canonical_excerpt': '원래 손절 계획을 지킨다'},
+                               {'source_id': 2, 'canonical_excerpt': '50일선 지지가 깨진 경우에는 재진입 전 지지 회복을 확인한다'},
+                           ]}]}
+    reviewer = SimpleNamespace(generate_str=AsyncMock(return_value=json.dumps(review)))
+    stub_llm_dependencies(monkeypatch, reviewer)
+    proposer = SimpleNamespace(generate_str=AsyncMock(side_effect=AssertionError('Verifier must be independent')))
+    approved = await mgr._verify_duplicate_groups(proposer, [group])
+    assert approved == [group]
+    assert mgr._consolidate_intuitions(approved) == 2
+    assert mgr.conn.execute('SELECT source_journal_ids FROM trading_intuitions WHERE is_active=1').fetchone()[0] == '[1, 2, 3]'
+
+
+@pytest.mark.asyncio
+async def test_approval_binds_exact_canonical_text_and_source_snapshot(monkeypatch):
+    mgr = manager()
+    first, second = rule(), rule()
+    second['condition'] = '변동성 높은 구간 추격 진입'
+    mgr._save_intuition(first, [1, 2])
+    mgr._save_intuition(second, [2, 3])
+    group = {'canonical_id': 1, 'duplicate_ids': [2], 'canonical_insight': '정렬된 추세를 확인한 뒤 진입한다'}
+    review = {'reviews': [{'canonical_id': 1, 'approved': True, 'reason': 'Equivalent paraphrase.', 'source_coverage': [
+        {'source_id': 1, 'canonical_excerpt': '정렬된 추세를 확인한 뒤 진입한다'},
+        {'source_id': 2, 'canonical_excerpt': '정렬된 추세를 확인한 뒤 진입한다'}]}]}
+    llm = SimpleNamespace(generate_str=AsyncMock(return_value=json.dumps(review)))
+    stub_llm_dependencies(monkeypatch, llm)
+    assert await mgr._verify_duplicate_groups(llm, [group]) == [group]
+    tampered = dict(group, canonical_insight='추세 확인 없이 진입한다')
+    assert mgr._consolidate_intuitions([tampered]) == 0
+    mgr.conn.execute("UPDATE trading_intuitions SET insight='추격을 허용한다' WHERE id=2")
+    assert mgr._consolidate_intuitions([group]) == 0
+
+
+@pytest.mark.asyncio
+async def test_semantic_review_rejects_conflicting_thresholds_and_incomplete_coverage(monkeypatch):
+    mgr = manager()
+    first, second = rule(), rule()
+    first.update(condition='추세 실패 시', insight='손절선 5%를 적용한다')
+    second.update(condition='추세 실패 시', insight='손절선 10%를 적용한다')
+    mgr._save_intuition(first, [1, 2])
+    mgr._save_intuition(second, [2, 3])
+    group = {'canonical_id': 1, 'duplicate_ids': [2], 'canonical_insight': '손절선은 5% 또는 10%를 적용한다'}
+    llm = SimpleNamespace(generate_str=AsyncMock(return_value=json.dumps({'reviews': [
+        {'canonical_id': 1, 'approved': False, 'reason': 'Same condition has incompatible thresholds, not synonymous advice.'}]})))
+    stub_llm_dependencies(monkeypatch, llm)
+    assert await mgr._verify_duplicate_groups(None, [group]) == []
+    llm.generate_str.return_value = json.dumps({'reviews': [
+        {'canonical_id': 1, 'approved': True, 'reason': 'Incomplete source audit.',
+         'source_coverage': [{'source_id': 1, 'canonical_excerpt': '5%'}]}]})
+    assert await mgr._verify_duplicate_groups(None, [group]) == []
+    assert mgr.conn.execute('SELECT COUNT(*) FROM trading_intuitions WHERE is_active=1').fetchone()[0] == 2
+
+
+@pytest.mark.asyncio
+async def test_semantic_approval_still_requires_all_source_numbers(monkeypatch):
+    mgr = manager()
+    for condition in ('추세 실패', '50일선 이탈 후 추세 실패'):
+        mgr._save_intuition(dict(rule(), condition=condition), [1, 2])
+    group = {'canonical_id': 1, 'duplicate_ids': [2], 'canonical_insight': '추세 정렬 전 진입을 피한다'}
+    llm = SimpleNamespace(generate_str=AsyncMock(return_value=json.dumps({'reviews': [
+        {'canonical_id': 1, 'approved': True, 'reason': 'Model overlooked a timeframe.', 'source_coverage': [
+            {'source_id': 1, 'canonical_excerpt': '추세 정렬 전 진입을 피한다'},
+            {'source_id': 2, 'canonical_excerpt': '추세 정렬 전 진입을 피한다'}]}]})))
+    stub_llm_dependencies(monkeypatch, llm)
+    approved = await mgr._verify_duplicate_groups(None, [group])
+    assert approved == [group]
+    assert mgr._consolidate_intuitions(approved) == 0
+
+
+@pytest.mark.asyncio
+async def test_reconcile_prepares_legacy_columns_before_binding_snapshot(monkeypatch):
+    mgr = manager()
+    mgr.conn.execute('ALTER TABLE trading_intuitions ADD COLUMN application_context TEXT')
+    metadata = {'version': 1, 'status': 'current_pipeline', 'market': 'KR', 'stage': 'batch_buy',
+                'required_capabilities': ['batch_report', 'entry_advisory'], 'reason': 'Reviewed legacy records.'}
+    for condition in ('조건', '같은 조건'):
+        mgr.conn.execute("INSERT INTO trading_intuitions(category,condition,insight,created_at,application_context) VALUES ('pattern',?,'원칙','2026-09-27',?)",
+                         (condition, json.dumps(metadata)))
+    group = {'canonical_id': 1, 'duplicate_ids': [2], 'canonical_condition': '요약 조건', 'canonical_insight': '원칙'}
+    llm = SimpleNamespace(generate_str=AsyncMock(side_effect=[json.dumps({'duplicate_groups': [group]}),
+        json.dumps({'reviews': [{'canonical_id': 1, 'approved': True, 'reason': 'Equivalent legacy records.',
+                                'source_coverage': [{'source_id': 1, 'canonical_excerpt': '원칙'},
+                                                    {'source_id': 2, 'canonical_excerpt': '원칙'}]}]})]))
+    stub_llm_dependencies(monkeypatch, llm)
+    assert await mgr._reconcile_existing_intuitions() == 2
+
+
 @pytest.mark.parametrize('missing', ['첫 진입', '비중 축소 또는 관망', '당일성 FOMO'])
 def test_material_source_qualifiers_cannot_be_silently_removed(missing):
     mgr = manager()
