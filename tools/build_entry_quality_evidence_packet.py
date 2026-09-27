@@ -161,6 +161,22 @@ def _entry_price_evidence(event: Mapping[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _exit_price_evidence(event: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Only the exact linked exit event; no return inversion or nearby joins."""
+    attrs = _mapping(event.get("attributes")) if event else {}
+    decision = _mapping(attrs.get("decision_context"))
+    recorded = bool(event and event.get("event_type") == "exit.executed")
+    price = _number(decision.get("sell_price")) if recorded else None
+    price = price if price is not None and price > 0 else None
+    return {
+        "schema_version": 1,
+        "basis": "ORIGINAL_STRATEGY_EVENT_NOT_BROKER_FILL",
+        "source_event_ref": _ref(event.get("event_id")) if event else None,
+        "reference_price": price,
+        "status": "OK" if price is not None else "MISSING",
+    }
+
+
 def _rounded(value: float | None, digits: int = 4) -> float | None:
     return round(value, digits) if value is not None else None
 
@@ -807,6 +823,9 @@ def build_evidence_packet(
                     "price_evidence": _entry_price_evidence(entry_event),
                 },
                 "outcomes": {
+                    "exit_price_evidence": _exit_price_evidence(
+                        actual_event if strategy_return is not None else None
+                    ),
                     "candidate": candidate_result,
                     "strategy_entry_at": _iso(entry_at),
                     "strategy_closed_at": (
