@@ -205,3 +205,9 @@ KR 벤치마크는 종목 시장 구분을 확보하지 못해 KOSPI로 대체�
   - 동종업계 중앙값은 판단 시점 값을 복원할 수 없어 재실행에서 빠졌고, 실적 5일 이내 사례는 표본에 없었다.
 - 결론: 블록은 비어 있던 채점 칸을 정확히 채우고 오진입을 만들지 않았다. 수익 개선은 이 재실행으로 입증되지 않는다
   (진입 0건, 단일 실행, LLM 편차가 효과보다 큼). 효과 관측은 SHADOW 이벤트의 `prompt_flags`와 성과 추적으로 계속한다.
+
+### 배포 (2026-09-27)
+- PR #807 병합(5df1128b), db-server ff 배포 완료. 운영 Python 스모크: KR·US BUY 지시문에 계약이 붙었고, KR 실제 일봉으로 블록이 생성된다.
+- 재실행 원본: `/root/prism-server-backups/facts-replay-20260927/`.
+- **미관측:** 블록이 들어간 첫 정규 판단(KR 2026-09-28 09:30, US 10:15 ET). 확인 방법은 시나리오의
+  `_decision_input_facts`, 이벤트 `decision_inputs.shadow_captured`의 `prompt_impact=facts_block_included`다.
