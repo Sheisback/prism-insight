@@ -170,3 +170,46 @@ def test_concurrent_run_is_skipped_cleanly(tmp_path):
         fcntl.flock(lock, fcntl.LOCK_EX)
         summary = S.run("KR", "2026-09-25", collector=lambda *a: {}, db_path=tmp_path / "none.sqlite", path=path)
     assert summary["skipped"] == "lock_held"
+
+
+def test_run_summary_and_signal_payload_survive_event_sanitizer(tmp_path, monkeypatch):
+    from observability.events import build_event
+    bars, row = _stopped_setup()
+    db = tmp_path / "t.sqlite"
+    _db(db, stop_rows=[("acct", "000001", "A", row["entry_date"] + " 09:40:00", 100,
+                        row["exit_date"] + " 10:00:00", 93, -7, "t", "stop")])
+    events = []
+    monkeypatch.setattr(S, "_emit", lambda name, market, **kw: events.append(kw["attributes"]) or {"ok": 1})
+    S.run("KR", bars[-1]["date"], collector=lambda *a: {"000001": bars, "__benchmark_rows": {"000001": bars}},
+          db_path=db, path=tmp_path / "s.json")
+    for attributes in events:
+        assert "[REDACTED]" not in json.dumps(build_event("x", service="s", attributes=attributes)["attributes"])
+    assert events[-1]["completed_market_day"] == bars[-1]["date"]
+
+
+def test_kr_collector_spaces_and_retries(tmp_path, monkeypatch):
+    import pandas as pd
+
+    from tools import run_reentry_shadow as T
+    monkeypatch.setattr(T.time, "sleep", lambda s: None)
+    bars, _ = _stopped_setup()
+    frame = pd.DataFrame([{"Open": b["open"], "High": b["high"], "Low": b["low"], "Close": b["close"],
+                           "Volume": b["volume"]} for b in bars], index=pd.to_datetime([b["date"] for b in bars]))
+    calls = []
+
+    class Source:
+        def price_history(self, symbol, start, end, adjusted=True):
+            calls.append(symbol)
+            if calls.count(symbol) == 1:
+                raise RuntimeError("EGW00201")
+            return frame
+
+        def index_history(self, symbol, start, end):
+            return frame
+
+    class Master:
+        markets = {"000001": "KOSPI"}
+
+    out = T.collect_kr(["000001"], bars[-1]["date"], source=Source(), master=Master(), cache_dir=tmp_path)
+    assert out["000001"][-1]["date"] == bars[-1]["date"] and calls == ["000001", "000001"]
+    assert out["__benchmark_rows"]["000001"]

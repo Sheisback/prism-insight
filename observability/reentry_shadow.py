@@ -316,7 +316,8 @@ def run(market, completed, *, collector, db_path=DB_PATH, path=None, dry_run=Fal
         for watch in state["watches"]:
             counts[watch["status"]] = counts.get(watch["status"], 0) + 1
         summary = {"mode": "SHADOW", "trading_impact": "none", "policy_version": R.POLICY_VERSION,
-                   "completed_session": completed, "enrol_rows": len(rows), "symbols": len(tickers),
+                   # Event keys containing "session" are redacted by the sanitizer.
+                   "completed_market_day": completed, "enrol_rows": len(rows), "symbols": len(tickers),
                    "collected": len([t for t in tickers if frames.get(t)]), "new_signals": len(fresh),
                    "signals_emitted": sent, "status_counts": counts, "archived": archived, "dry_run": dry_run}
         if not dry_run:
