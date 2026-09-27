@@ -183,6 +183,10 @@ async def analyze_stock(company_code: str = "000660", company_name: str = "SK하
             f"reason={peer_packet.get('skip_reason') or '-'}")
         if peer_packet.get('ready'):
             prefetched['peer_comparison'] = peer_packet
+        if report_meta is not None:
+            # SHADOW measurement only (decision_inputs_v1); not a BUY prompt input.
+            from observability.decision_inputs import peer_valuation_summary
+            report_meta['peer_valuation'] = peer_valuation_summary(peer_packet)
         cache_key = market_cache_key(prefetched, reference_date, language)
         # 5. Get agents (with prefetched data)
         agents = get_agent_directory(company_name, company_code, reference_date, base_sections, language, prefetched_data=prefetched)

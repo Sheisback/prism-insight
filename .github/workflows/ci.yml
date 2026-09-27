@@ -134,6 +134,9 @@ jobs:
             tests/test_kr_batch_watch_integration.py \
             tests/test_exit_effect_*.py tests/test_micro_split*.py \
             tests/test_third_slot*.py -q
+          python -m pytest tests/test_stopout_reentry.py tests/test_reentry_shadow.py \
+            tests/test_reentry_evidence_packet.py tests/test_decision_inputs.py \
+            tests/test_decision_inputs_packet.py -q
 
       - name: KIS-only provider and consumer boundary
         env:

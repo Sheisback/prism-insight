@@ -238,13 +238,24 @@ def evaluate_production_buy_gate(
             if rule is not None and expected_loss > float(rule["max_loss_pct"]) + 0.25:
                 findings.append(_finding("stop_exceeds_regime_limit", f"loss width {expected_loss:.2f}% > {rule['max_loss_pct']:.2f}%"))
 
+            # Arithmetic consistency is checked at the price the scenario was written
+            # for: its reported entry_price (kept as _analysis_entry_price once the
+            # scenario contract refreshes entry_price). Quote drift since then is
+            # judged by the floors above at the fresh price, not misreported as
+            # fabricated arithmetic.
+            basis = next((value for value in (_number(data.get("_analysis_entry_price")),
+                                              _number(data.get("entry_price")))
+                          if value is not None and stop < value < target), price)
+            basis_return = (target - basis) / basis * 100.0
+            basis_loss = (basis - stop) / basis * 100.0
+            basis_rr = basis_return / basis_loss
             reported_rr = _number(data.get("risk_reward_ratio"))
             if reported_rr is not None:
-                tolerance = max(0.15, abs(recomputed_rr) * 0.10)
-                if abs(reported_rr - recomputed_rr) > tolerance:
-                    findings.append(_finding("rr_arithmetic_mismatch", f"reported R/R {reported_rr:.2f} != {recomputed_rr:.2f}"))
+                tolerance = max(0.15, abs(basis_rr) * 0.10)
+                if abs(reported_rr - basis_rr) > tolerance:
+                    findings.append(_finding("rr_arithmetic_mismatch", f"reported R/R {reported_rr:.2f} != {basis_rr:.2f}"))
 
-            for field, expected in (("expected_return_pct", expected_return), ("expected_loss_pct", expected_loss)):
+            for field, expected in (("expected_return_pct", basis_return), ("expected_loss_pct", basis_loss)):
                 reported = _number(data.get(field))
                 if reported is not None and abs(reported - expected) > max(0.25, abs(expected) * 0.10):
                     findings.append(_finding("risk_arithmetic_mismatch", f"{field} {reported:.2f} != {expected:.2f}"))

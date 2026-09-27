@@ -950,6 +950,8 @@ class StockTrackingAgent:
             # Observe existing inputs only, without inserting research into prompts.
             from observability.trend_research import cache_snapshot
             cache_snapshot(self, ticker, df, locals().get("idf"), market="KR", source="existing_adjusted_kr_trend_frames")
+            from observability.decision_inputs import capture_frame
+            capture_frame(self, ticker, df, market="KR")
 
             # 게이트 판정 (deterministic)
             # T1: 종가가 50일선(오닐 10주선) 아래 = 핵심 라인 이탈. 기울기 무관 —
@@ -1703,6 +1705,9 @@ class StockTrackingAgent:
                     source="kr_batch_watchlist",
                     research_context=getattr(self, "_trend_research_snapshots", {}).get(ticker),
                 )
+                from observability.decision_inputs import emit_decision_inputs
+                emit_decision_inputs(self, market="KR", ticker=ticker, decision_id=decision_id, scenario=scenario,
+                                     current_price=current_price, decision=decision, source="kr_batch_watchlist")
             except EffectsFailure:
                 raise
             except Exception as context_error:
@@ -4536,6 +4541,10 @@ class StockTrackingAgent:
                             source="kr_batch_decision",
                             research_context=getattr(self, "_trend_research_snapshots", {}).get(ticker),
                         )
+                        from observability.decision_inputs import emit_decision_inputs
+                        emit_decision_inputs(self, market="KR", ticker=ticker, decision_id=source_decision_id,
+                                             scenario=scenario, current_price=current_price, decision="Enter",
+                                             source="kr_batch_decision")
 
                     if entry_eligible:
                         try:

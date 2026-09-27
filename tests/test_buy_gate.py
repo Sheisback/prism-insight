@@ -93,3 +93,50 @@ def test_stop_volatility_noise_floor_is_shadow_only(monkeypatch):
         item["code"] == "stop_below_volatility_noise_floor"
         for item in result["shadow_findings"]
     )
+
+
+def _codes(result):
+    return {item["code"] for item in result["hard_findings"]}
+
+
+def test_quote_drift_is_not_reported_as_arithmetic_mismatch():
+    # Production case 2026-09-09 (지엔씨에너지): scenario written at 49,350, fresh quote 48,850.
+    scenario = _scenario(target_price=56270.0, stop_loss=46000.0, risk_reward_ratio=2.1,
+                         expected_return_pct=14.0, expected_loss_pct=6.8, _analysis_entry_price=49350.0)
+    result = evaluate_production_buy_gate(scenario, current_price=48850.0, market_regime="moderate_bull")
+    codes = _codes(result)
+    assert not codes & {"rr_arithmetic_mismatch", "risk_arithmetic_mismatch"}
+    assert round(result["recomputed_rr"], 2) == 2.6  # floors still judge the fresh price
+
+
+def test_wrong_arithmetic_at_its_own_price_still_blocks():
+    # Production case 2026-09-10 (리노공업): entry basis equals the quote, reported numbers do not.
+    scenario = _scenario(target_price=103500.0, stop_loss=67500.0, risk_reward_ratio=11.9,
+                         expected_return_pct=47.23, expected_loss_pct=3.98, _analysis_entry_price=71300.0)
+    result = evaluate_production_buy_gate(scenario, current_price=71300.0, market_regime="moderate_bull")
+    assert {"rr_arithmetic_mismatch", "risk_arithmetic_mismatch"} <= _codes(result)
+
+
+def test_without_or_with_invalid_basis_the_fresh_price_is_used():
+    scenario = _scenario(target_price=7900.0, stop_loss=6000.0, risk_reward_ratio=4.4)
+    result = evaluate_production_buy_gate(scenario, current_price=6380.0, market_regime="moderate_bull")
+    assert "rr_arithmetic_mismatch" in _codes(result)
+    scenario["_analysis_entry_price"] = 5000.0  # below the stop: not a usable basis
+    result = evaluate_production_buy_gate(scenario, current_price=6380.0, market_regime="moderate_bull")
+    assert "rr_arithmetic_mismatch" in _codes(result)
+
+
+def test_drift_that_breaks_the_floor_still_blocks():
+    scenario = _scenario(target_price=110.0, stop_loss=95.0, risk_reward_ratio=2.0,
+                         expected_return_pct=10.0, expected_loss_pct=5.0, _analysis_entry_price=100.0)
+    result = evaluate_production_buy_gate(scenario, current_price=104.0, market_regime="moderate_bear")
+    codes = _codes(result)
+    assert "rr_below_floor" in codes
+    assert not codes & {"rr_arithmetic_mismatch", "risk_arithmetic_mismatch"}
+
+
+def test_reported_entry_price_is_the_basis_before_the_contract_refresh():
+    scenario = _scenario(target_price=56270.0, stop_loss=46000.0, risk_reward_ratio=2.1,
+                         expected_return_pct=14.0, expected_loss_pct=6.8, entry_price=49350.0)
+    result = evaluate_production_buy_gate(scenario, current_price=48850.0, market_regime="moderate_bull")
+    assert not _codes(result) & {"rr_arithmetic_mismatch", "risk_arithmetic_mismatch"}

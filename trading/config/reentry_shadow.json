@@ -1,0 +1,6 @@
+{
+  "mode": "SHADOW",
+  "policy_version": "stopout_reentry_v1",
+  "markets": ["KR", "US"],
+  "enabled": true
+}
