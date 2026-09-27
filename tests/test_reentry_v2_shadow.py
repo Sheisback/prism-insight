@@ -80,7 +80,8 @@ def test_fresh_levels_math():
 def _db(path, bars):
     conn = sqlite3.connect(path)
     conn.execute("CREATE TABLE trading_history (account_key TEXT, ticker TEXT, company_name TEXT, buy_date TEXT, "
-                 "buy_price REAL, sell_date TEXT, sell_price REAL, profit_rate REAL, trigger_type TEXT, exit_kind TEXT)")
+                 "buy_price REAL, sell_date TEXT, sell_price REAL, profit_rate REAL, trigger_type TEXT, "
+                 "exit_kind TEXT, scenario TEXT)")
     conn.execute("CREATE TABLE watchlist_history (id INTEGER PRIMARY KEY, ticker TEXT, company_name TEXT, "
                  "analyzed_date TEXT, current_price REAL, buy_score INTEGER, min_score INTEGER, decision TEXT, "
                  "skip_reason TEXT, trigger_type TEXT, scenario TEXT, was_traded INTEGER DEFAULT 0)")
@@ -88,7 +89,10 @@ def _db(path, bars):
     conn.execute("INSERT INTO watchlist_history (ticker, company_name, analyzed_date, current_price, buy_score, "
                  "min_score, decision, skip_reason, trigger_type, scenario) VALUES (?,?,?,?,?,?,?,?,?,?)",
                  ("000001", "A", day["date"] + " 09:40:00", day["close"], 7, 7, "Enter", "게이트 차단", "t",
-                  json.dumps({"fundamental_check": {"all_passed": True}})))
+                  json.dumps({"fundamental_check": {"all_passed": True},
+                              "trading_scenarios": {"key_levels": {"primary_support": 104, "secondary_support": "102",
+                                                                   "primary_resistance": "110", "secondary_resistance":
+                                                                   "114~116"}}})))
     conn.commit()
     conn.close()
 
@@ -197,6 +201,10 @@ def test_forward_trigger_is_rechecked_once_with_frozen_inputs(tmp_path, monkeypa
     assert summary["llm_calls"] == 1 and summary["recheck_status"] == {"OK": 1}
     system, user = calls[0]
     assert system == "SYS" and "📏 트리거 시점 가격 수준" in user and "REPORT" in user and "게이트 차단" in user
+    assert "1차 지지 104.00 / 2차 지지 102.00 / 1차 저항 110.00 / 2차 저항 115.00" in user
+    frozen = json.loads((root / "reentry_v2_recheck_inputs_kr.jsonl").read_text())
+    assert frozen["contract"] == "reentry_v2_recheck_input_v3"
+    assert frozen["original"]["key_levels"]["secondary_resistance"] == 115.0
     result = json.loads((root / "reentry_v2_recheck_results_kr.jsonl").read_text())
     assert result["approved"] is True and result["buy_score"] == 8 and result["report_stale"] is False
     assert "reentry_v2.shadow_recheck" in [n for n, _ in sent]
@@ -246,6 +254,30 @@ def test_llm_recheck_switches(tmp_path, monkeypatch):
     monkeypatch.setattr(V2, "POLICY_PATH", path)
     assert not V2.llm_recheck_enabled()
     path.write_text(json.dumps(V2.POLICY))
+    monkeypatch.delenv("REENTRY_V2_LLM_RECHECK", raising=False)
+    assert not V2.llm_recheck_enabled()                 # opt-in: off unless the env turns it on
+    monkeypatch.setenv("REENTRY_V2_LLM_RECHECK", "true")
     assert V2.llm_recheck_enabled()
     monkeypatch.setenv("REENTRY_V2_LLM_RECHECK", "0")
     assert not V2.llm_recheck_enabled()
+
+
+def test_scenario_key_levels_parsing():
+    from observability.reentry_shadow import scenario_key_levels
+    levels = scenario_key_levels({"trading_scenarios": {"key_levels": {
+        "primary_support": 1700, "secondary_support": "1,650", "primary_resistance": "1800~1900",
+        "secondary_resistance": "n/a", "volume_baseline": "평균 30만주"}}})
+    assert levels == {"primary_support": 1700.0, "secondary_support": 1650.0, "primary_resistance": 1850.0,
+                      "secondary_resistance": None}
+    assert scenario_key_levels({}) is None and scenario_key_levels({"trading_scenarios": {"key_levels": {}}}) is None
+
+
+def test_existing_watch_backfills_key_levels_from_todays_row(tmp_path):
+    bars = _series()
+    row = _row(bars)
+    state, _ = V2.advance(_state(), [row], {}, bars[72]["date"], "KR", archive_db=None)
+    assert "key_levels" not in state["watches"][0]["row"]
+    levels = {"primary_support": 104.0, "secondary_support": 102.0, "primary_resistance": 110.0,
+              "secondary_resistance": 115.0}
+    state, _ = V2.advance(state, [dict(row, key_levels=levels)], {}, bars[72]["date"], "KR", archive_db=None)
+    assert state["watches"][0]["row"]["key_levels"] == levels and len(state["watches"]) == 1

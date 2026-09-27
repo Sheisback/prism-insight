@@ -48,6 +48,15 @@ def load_report(item, reports_root, archive_db):
     return text, None
 
 
+def _levels_line(levels):
+    if not levels:
+        return "- 원래 시나리오 가격 수준: 미제공\n"
+    fmt = lambda v: "미제공" if v is None else f"{v:,.2f}"  # noqa: E731
+    return (f"- 원래 시나리오 가격 수준(원래 판단 당시): 1차 지지 {fmt(levels.get('primary_support'))} / "
+            f"2차 지지 {fmt(levels.get('secondary_support'))} / 1차 저항 {fmt(levels.get('primary_resistance'))} / "
+            f"2차 저항 {fmt(levels.get('secondary_resistance'))}\n")
+
+
 def user_prompt(item, report_text):
     original = item["original"]
     ref = item["report_ref"]
@@ -55,7 +64,8 @@ def user_prompt(item, report_text):
     return ("재진입 재점검 요청입니다.\n\n### 원래 판단\n"
             f"- 출처: {item['source']} / 원래 판단일 {original['decided_on']}\n"
             f"- 원래 점수/최소점수: {original.get('buy_score')}/{original.get('min_score')}\n"
-            f"- 원래 사유: {str(original.get('reason') or '')[:500]}\n\n"
+            f"- 원래 사유: {str(original.get('reason') or '')[:500]}\n"
+            f"{_levels_line(original.get('key_levels'))}\n"
             f"### 시장 국면(결정론적 계산): {regime}\n\n{item['facts_text']}\n"
             f"### 보고서 작성일: {ref['report_date']} (트리거일까지 {ref['age_days']}일 경과)\n\n"
             f"### Report Content:\n{report_text}\n")
