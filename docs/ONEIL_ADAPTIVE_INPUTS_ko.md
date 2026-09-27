@@ -109,5 +109,8 @@ Ruff·compileall·diff check 통과. 원격 CI 및 운영 배포·정규 배치 
 분기 성장·SPY 대비 가격 성과를 계산해 보조 보고서/검토 JSON을 생성한다.
 기존 보고서의 긍정 문구를 판독해 통과시키는 방식이 아니며 기존 보고서를 수정하지 않는다.
 상세 규칙·제한은 [자동 검토 계약](entry-quality-experiments/oneil-auto-review-v1.md)을 따른다.
-실제 보고서 파이프라인 연결, fresh quote/현재 게이트 공급, 원장 ingestion과 주기 실행은 후속이다.
+실제 보고서의 수치 입력→별도 PDF-bound sidecar→전략 진입 후 최초 계획 연결을 추가했다.
+`ONEIL_AUTO_REVIEW_CAPTURE_ENABLED` 기본 OFF이며 기존 최초 캡처 flag도 필요하다.
+관련 계약과 검증은 [배치 연결 검증](entry-quality-experiments/oneil-batch-link-v1-validation.md)을 따른다.
+fresh quote/현재 게이트 공급, 원장 ingestion과 주기 실행은 아직 후속이다.
 이번 단계 때문에 새로운 매수 기준을 운영에 넣거나 SHADOW flag를 켜지 않았다.

@@ -151,6 +151,9 @@ class USDataClient:
                 "country": info.get("country", ""),
                 "exchange": info.get("exchange", ""),
                 "currency": info.get("currency", "USD"),
+                "provider_currency": info.get("currency"),
+                "financial_currency": info.get("financialCurrency"),
+                "provider_symbol": info.get("symbol"),
 
                 # Market data
                 "market_cap": info.get("marketCap", 0),

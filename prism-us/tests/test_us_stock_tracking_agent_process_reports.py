@@ -723,8 +723,18 @@ def _install_us_trading_module(monkeypatch):
 @pytest.mark.asyncio
 async def test_process_reports_analyzes_once_and_dedupes_signals(
     monkeypatch, caplog, tmp_path, entry_quality_capture, micro_split_shadow, scenario_capture,
-    real_strategy_write=False, broker_failure=False,
+    real_strategy_write=False, broker_failure=False, adaptive_sidecar="0",
 ):
+    from prism_core import oneil_batch_setup
+    monkeypatch.setenv("ONEIL_AUTO_REVIEW_CAPTURE_ENABLED", "0" if adaptive_sidecar == "0" else "1")
+    sidecar_calls = []
+    def load_sidecar(path, **kwargs):
+        sidecar_calls.append((path, kwargs))
+        if adaptive_sidecar == "failure":
+            raise RuntimeError("synthetic sidecar failure")
+        return dict(contract_version="oneil-batch-linked-review-v1", market="US",
+                    symbol=kwargs["symbol"], decision_ref=kwargs["decision_ref"], status="MISSING")
+    monkeypatch.setattr(oneil_batch_setup, "load_review_sidecar", load_sidecar)
     monkeypatch.setenv("ENTRY_QUALITY_CAPTURE_ENABLED", entry_quality_capture)
     monkeypatch.setenv("MICRO_SPLIT_SHADOW_ENABLED", micro_split_shadow)
     monkeypatch.setenv("SCENARIO_SHADOW_CAPTURE_ENABLED", "0" if scenario_capture == "0" else "1")
@@ -953,6 +963,15 @@ async def test_process_reports_analyzes_once_and_dedupes_signals(
         assert len(scenario_events) == 2
         assert {event["position_id"] for event in scenario_events} == {"legacy:US:1", "legacy:US:2"}
         assert {event["decision_id"] for event in scenario_events} == {"report:report-a.pdf"}
+        if adaptive_sidecar != "0":
+            assert len(sidecar_calls) == 2
+            assert all(kwargs["decision_ref"] == "report:report-a.pdf"
+                       and kwargs["symbol"] == "AAPL" for _, kwargs in sidecar_calls)
+            assert all(event["attributes"]["adaptive_setup"]["status"] == "MISSING"
+                       for event in scenario_events)
+        else:
+            assert sidecar_calls == []
+            assert all("adaptive_setup" not in event["attributes"] for event in scenario_events)
     else:
         assert scenario_events == []
         assert not (tmp_path / "capture.sqlite").exists()
@@ -979,6 +998,17 @@ async def test_scenario_capture_real_strategy_commit_parity(monkeypatch, caplog,
 async def test_scenario_capture_preserves_rejected_broker_strategy(monkeypatch, caplog, tmp_path):
     await test_process_reports_analyzes_once_and_dedupes_signals(
         monkeypatch, caplog, tmp_path, "1", "0", "1", real_strategy_write=True, broker_failure=True)
+
+
+@pytest.mark.parametrize("sidecar_mode", ["0", "1", "failure"])
+@pytest.mark.parametrize("broker_failure", [False, True])
+@pytest.mark.asyncio
+async def test_adaptive_sidecar_real_strategy_and_broker_parity(
+    monkeypatch, caplog, tmp_path, sidecar_mode, broker_failure,
+):
+    await test_process_reports_analyzes_once_and_dedupes_signals(
+        monkeypatch, caplog, tmp_path, "1", "0", "1", real_strategy_write=True,
+        broker_failure=broker_failure, adaptive_sidecar=sidecar_mode)
 
 
 @pytest.mark.parametrize("configured_budget", [None, 0, 1, 2000.0])

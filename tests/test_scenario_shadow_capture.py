@@ -223,3 +223,101 @@ def test_concurrent_calls_only_one_delivery(setup_capture):
     assert len(spool.read_text().splitlines()) == 1
     with sqlite3.connect(path) as db:
         assert db.execute("SELECT COUNT(*) FROM captures").fetchone()[0] == 1
+
+
+def _linked_review():
+    from prism_core.oneil_auto_review_output import build_review_bundle
+    from test_oneil_auto_review import AS_OF, valid_snapshot
+    source = valid_snapshot()
+    source["decision_ref"] = "decision-1"
+    return dict(contract_version="oneil-batch-linked-review-v1", market="US",
+                symbol="TEST", decision_ref="decision-1", report_sha256="a" * 64,
+                status="OK", bundle=build_review_bundle(source, reviewed_at=AS_OF))
+
+
+def test_adaptive_plan_bound_without_changing_original(setup_capture, monkeypatch):
+    from datetime import datetime, timezone
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 9, 27, 13, tzinfo=timezone.utc)
+    monkeypatch.setattr(capture, "datetime", Clock)
+    args, path, spool = setup_capture
+    args["current_price"] = 105.1
+    args["adaptive_review"] = _linked_review()
+    original = deepcopy(args)
+    first = capture.emit_initial_capture(**args)
+    assert args == original
+    attrs = first["attributes"]
+    assert attrs["plan"]["policy_version"] == "scenario-shadow-v1"
+    adaptive = attrs["adaptive_setup"]
+    assert adaptive["status"] == "OK"
+    assert adaptive["plan"]["source_decision_ref"] == "decision-1"
+    assert adaptive["plan"]["entry_reference"] == "105.1"
+    assert adaptive["plan"]["initial_stop"] == "90"
+    assert adaptive["plan"]["mode"] == "RESEARCH_ONLY"
+    assert "report_text" not in spool.read_text()
+    assert "Automated research supplement" not in spool.read_text()
+    args["adaptive_review"]["bundle"]["report_text"] = "later replacement"
+    assert capture.emit_initial_capture(**args) is None
+    with sqlite3.connect(path) as db:
+        stored = json.loads(db.execute("SELECT payload FROM captures").fetchone()[0])
+    assert stored["attributes"] == attrs
+
+
+@pytest.mark.parametrize("fault", ["identity", "future", "tamper", "missing", "rejected", "band"])
+def test_bad_adaptive_review_cannot_suppress_original_capture(setup_capture, monkeypatch, fault):
+    from datetime import datetime, timezone
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 9, 27, 13, tzinfo=timezone.utc)
+    monkeypatch.setattr(capture, "datetime", Clock)
+    args, _, _ = setup_capture
+    linked = _linked_review()
+    args.update(current_price=105.1, adaptive_review=linked)
+    if fault == "identity":
+        linked["decision_ref"] = "other"
+    elif fault == "future":
+        linked["bundle"]["review"]["reviewed_at"] = "2026-09-28T13:00:00Z"
+    elif fault == "tamper":
+        linked["bundle"]["report_text"] += "modified"
+    elif fault == "missing":
+        linked["status"] = "MISSING"
+    elif fault == "rejected":
+        linked["bundle"]["review"]["base"]["status"] = "REJECTED"
+    else:
+        args["current_price"] = 120
+    event = capture.emit_initial_capture(**args)
+    assert event is not None
+    assert event["attributes"]["plan"]["initial_stop"] == "90"
+    assert event["attributes"]["adaptive_setup"]["status"] != "OK"
+    assert "plan" not in event["attributes"]["adaptive_setup"]
+
+
+def test_pdf_sidecar_to_frozen_position_exact_link(setup_capture, monkeypatch, tmp_path):
+    from datetime import datetime, timezone
+    from prism_core import oneil_batch_setup as batch
+    from test_oneil_auto_review import AS_OF, valid_snapshot
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 9, 27, 13, tzinfo=timezone.utc)
+    monkeypatch.setattr(capture, "datetime", Clock)
+    md, pdf = tmp_path / "TEST_report.md", tmp_path / "TEST_report.pdf"
+    md.write_text("public report unchanged")
+    pdf.write_bytes(b"frozen report artifact")
+    batch.write_sidecar(md, dict(snapshot=valid_snapshot(), reviewed_at=AS_OF))
+    batch.bind_pdf_sidecar(md, pdf)
+    decision = "report:TEST_report.pdf"
+    linked = batch.load_review_sidecar(pdf, symbol="TEST", decision_ref=decision,
+                                       as_of=Clock.now().isoformat())
+    assert linked["status"] == "OK"
+    args, _, _ = setup_capture
+    args.update(current_price=105.1, decision_id=decision, adaptive_review=linked)
+    event = capture.emit_initial_capture(**args)
+    assert event["position_id"] == "position-1"
+    plan = event["attributes"]["adaptive_setup"]["plan"]
+    assert plan["source_decision_ref"] == event["decision_id"] == decision
+    assert plan["symbol"] == event["ticker"] == "TEST"
+    assert event["attributes"]["adaptive_setup"]["report_sha256"] == linked["report_sha256"]

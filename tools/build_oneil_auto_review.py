@@ -5,9 +5,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import inspect
 import json
-import math
 import multiprocessing
-from numbers import Real
 import os
 from pathlib import Path
 import re
@@ -16,6 +14,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from prism_core.oneil_auto_review_output import build_review_bundle  # noqa: E402
+from prism_core.oneil_batch_setup import financial_frame_records  # noqa: E402
 from tools.collect_trend_replay_data import EXCHANGES, fetch, iso, stamp  # noqa: E402
 from tools.build_oneil_adaptive_inputs import BASIS  # noqa: E402
 
@@ -26,37 +25,6 @@ def digest(value):
             value, sort_keys=True, separators=(",", ":"), allow_nan=False
         ).encode()
     ).hexdigest()
-
-
-def financial_frame_records(frame):
-    """Exact actual rows only; no basic EPS, estimates, TTM or invented quarters."""
-    if (
-        frame is None
-        or frame.empty
-        or not frame.index.is_unique
-        or not frame.columns.is_unique
-    ):
-        return []
-    records = []
-    for column in frame.columns:
-        if not isinstance(column, datetime):
-            return []
-        period = column.date().isoformat()  # provider columns must be actual datetimes
-        record = {"period_end": period}
-        for output, label in [("eps", "Diluted EPS"), ("revenue", "Total Revenue")]:
-            value = frame.loc[label, column] if label in frame.index else None
-            try:
-                record[output] = (
-                    float(value)
-                    if isinstance(value, Real)
-                    and not isinstance(value, bool)
-                    and math.isfinite(value)
-                    else None
-                )
-            except (ValueError, OverflowError):
-                record[output] = None
-        records.append(record)
-    return records
 
 
 def _financial_child(symbol, connection):
@@ -249,6 +217,7 @@ def build_packet(source):
             ("assembler", build_review_bundle),
             ("collector", build_packet),
             ("price_fetcher", fetch),
+            ("financial_parser", financial_frame_records),
         ]
     }
     out["packet_id"] = digest(out)

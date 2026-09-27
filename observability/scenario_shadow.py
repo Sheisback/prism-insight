@@ -97,7 +97,7 @@ def _connect(path):
 
 def emit_initial_capture(*, market, ticker, decision_id, position_id, scenario,
                          current_price, entry_eligible, is_add,
-                         trigger_type=None, trigger_mode=None):
+                         trigger_type=None, trigger_mode=None, adaptive_review=None):
     """Capture an eligible committed US strategy entry before broker execution.
 
     All I/O is fail-open. Retry on a later invocation only, never synchronously.
@@ -137,6 +137,12 @@ def emit_initial_capture(*, market, ticker, decision_id, position_id, scenario,
             "execution_provenance": "NOT_REQUESTED", "fill_status": "VIRTUAL_NOT_FILLED",
             "confirmed_fill": False,
         }
+        if adaptive_review is not None:
+            attributes["adaptive_setup"] = _adaptive_setup(
+                adaptive_review, ticker=ticker, decision_id=decision_id,
+                current_price=current_price, initial_stop=scenario.get("stop_loss"),
+                captured_at=captured.isoformat(),
+            )
         if isinstance(trigger_type, str):
             attributes["trigger_type_hash"] = _hash(trigger_type)
         if trigger_mode in {"morning", "afternoon"}:
@@ -176,3 +182,48 @@ def emit_initial_capture(*, market, ticker, decision_id, position_id, scenario,
             connection.close()
     except Exception:  # noqa: BLE001 - observer must never interrupt trading
         return None
+
+
+def _adaptive_setup(linked, *, ticker, decision_id, current_price, initial_stop, captured_at):
+    """Freeze a separate research plan, not a revision of the original v1 plan.
+
+    The trusted caller loads and verifies the PDF-bound sidecar. Revalidate the
+    source spans here and export only strict policy fields, never report prose.
+    Missing or rejected setup must not prevent the original capture/protection.
+    """
+    result = {"policy_version": "oneil-adaptive-v1", "status": "MISSING",
+              "reason": "LINKED_REVIEW_UNAVAILABLE", "broker_execution": False}
+    try:
+        from prism_core.oneil_adaptive_policy import create_plan as adaptive_plan
+        from prism_core.oneil_setup_inputs import build_setup_input
+
+        if (not isinstance(linked, dict)
+                or linked.get("contract_version") != "oneil-batch-linked-review-v1"
+                or linked.get("market") != "US" or linked.get("symbol") != ticker
+                or linked.get("decision_ref") != decision_id):
+            return dict(result, status="INVALID", reason="LINKED_IDENTITY_MISMATCH")
+        if linked.get("status") != "OK":
+            return result
+        report_hash = linked.get("report_sha256")
+        if (not isinstance(report_hash, str) or len(report_hash) != 64
+                or any(c not in "0123456789abcdef" for c in report_hash)):
+            return dict(result, status="INVALID", reason="REPORT_HASH_INVALID")
+        bundle = linked["bundle"]
+        review = bundle["review"]
+        setup = build_setup_input(
+            report_text=bundle["report_text"], review=review, symbol=ticker,
+            decision_ref=decision_id, as_of=captured_at,
+            price_basis_ref=review["price_basis_ref"],
+        )
+        result["report_sha256"] = report_hash
+        result["review_sha256"] = _hash(review)
+        if setup["status"] != "OK":
+            return dict(result, status=setup["status"], reason="SETUP_NOT_CONFIRMED")
+        plan = adaptive_plan(
+            symbol=ticker, entry_reference=current_price, initial_stop=initial_stop,
+            source_decision_ref=decision_id, created_at=captured_at,
+            setup=setup["setup"], entry_eligible=True,
+        )
+        return dict(result, status="OK", reason="PLAN_FROZEN_NOT_EXECUTED", plan=plan)
+    except Exception:  # noqa: BLE001 - optional evidence cannot suppress v1 capture
+        return dict(result, status="INVALID", reason="REVIEW_OR_PLAN_INVALID")

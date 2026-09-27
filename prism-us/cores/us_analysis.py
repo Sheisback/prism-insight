@@ -202,6 +202,7 @@ async def analyze_us_stock(
     include_news: bool = True,
     macro_context: dict = None,
     market_report_cache: MarketReportCache | None = None,
+    research_metadata: dict | None = None,
 ) -> str:
     """
     Generate comprehensive stock analysis report for US stock.
@@ -266,6 +267,11 @@ async def analyze_us_stock(
         except Exception as e:
             logger.warning(f"US data prefetch failed, falling back to MCP: {e}")
             prefetched = {}
+
+        # Private numeric sidecar never reaches agent instructions or public report.
+        oneil_source = prefetched.pop('_oneil_batch_source', None)
+        if research_metadata is not None and oneil_source is not None:
+            research_metadata['oneil_source'] = oneil_source
 
         # Deterministic competitor table (one Perplexity candidate call + yfinance
         # numbers), overlapped with the non-yfinance collection below. Optional

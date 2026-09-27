@@ -88,6 +88,13 @@ def prefetch_us_stock_ohlcv(ticker: str, period: str = "1y", metadata: dict | No
         # Report-only raw OHLCV: preserve raw O/H/L when adjustment factors are
         # missing. Shared screening/trading callers retain provider defaults.
         df = client.get_ohlcv(ticker, period=period, interval="1d", auto_adjust=False)
+        if metadata is not None:
+            from prism_core.oneil_batch_setup import enabled, frame_source
+            if enabled():
+                try:
+                    metadata['_oneil_prices'] = frame_source(df, ticker)
+                except Exception:
+                    logger.warning('Optional oneil price input unavailable')
 
         if df is None or df.empty:
             logger.warning(f"No OHLCV data for {ticker}")
@@ -272,6 +279,12 @@ def prefetch_stock_info(ticker: str, metadata: dict | None = None) -> str:
 
         if metadata is not None:
             metadata['company_website'] = info.get('website')
+            from prism_core.oneil_batch_setup import enabled
+            if enabled():
+                metadata['_oneil_company'] = {
+                    key: info.get(key) for key in
+                    ('provider_symbol', 'provider_currency', 'financial_currency', 'exchange')
+                }
 
         def _fmt(val, fmt_type="default"):
             if (val is None or val is pd.NA or isinstance(val, (bool, np.bool_))
@@ -596,7 +609,7 @@ def prefetch_company_profile(ticker: str) -> str:
         return ""
 
 
-def prefetch_financial_statements(ticker: str) -> str:
+def prefetch_financial_statements(ticker: str, metadata: dict | None = None) -> str:
     """Prefetch financial statements (income statement, balance sheet, cash flow) via yfinance.
 
     Replaces SEC EDGAR get_financials/get_key_metrics calls.
@@ -644,6 +657,12 @@ def prefetch_financial_statements(ticker: str) -> str:
         # Quarterly income statement (latest 4 quarters)
         try:
             q_income = stock.quarterly_income_stmt
+            if metadata is not None:
+                try:
+                    from prism_core.oneil_batch_setup import financial_source
+                    metadata['_oneil_financials'] = financial_source(q_income, ticker)
+                except Exception:
+                    logger.warning('Optional oneil financial input unavailable')
             if q_income is not None and not q_income.empty:
                 result += _df_to_markdown(q_income, f"Quarterly Income Statement: {ticker}")
                 result += "\n"
@@ -988,9 +1007,23 @@ def prefetch_us_analysis_data(ticker: str) -> dict:
         result['analysis_estimates_status'] = analysis_status
 
     # 8. Financial statements (for company_status - replaces SEC EDGAR financials)
-    financial_statements = prefetch_financial_statements(ticker)
+    from prism_core.oneil_batch_setup import enabled
+    financial_statements = (prefetch_financial_statements(ticker, metadata=result)
+                            if enabled() else prefetch_financial_statements(ticker))
     if financial_statements:
         result["financial_statements"] = financial_statements
+    if enabled():
+        try:
+            from prism_core.oneil_batch_setup import assemble_batch_source
+            result['_oneil_batch_source'] = assemble_batch_source(
+                ticker, result.pop('_oneil_prices', None),
+                result.pop('_oneil_financials', None),
+                company_metadata.pop('_oneil_company', {}))
+        except Exception:
+            logger.warning('Optional oneil batch input unavailable')
+        finally:
+            result.pop('_oneil_prices', None)
+            result.pop('_oneil_financials', None)
 
     # 9. Segment revenue (for company_overview - parsed from 10-K XBRL via Yahoo Finance CDN)
     try:

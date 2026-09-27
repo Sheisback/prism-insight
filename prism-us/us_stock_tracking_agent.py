@@ -34,7 +34,7 @@ import time
 import threading
 import traceback
 import importlib.util as _ilu
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional
 
@@ -4463,6 +4463,24 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
                             # broker funding/quantity can influence capture. The
                             # observer is opt-in and never changes the BUY scenario.
                             try:
+                                adaptive_review = None
+                                if (os.getenv("SCENARIO_SHADOW_CAPTURE_ENABLED", "false").strip().lower()
+                                        in {"true", "1", "yes", "on"}
+                                        and os.getenv("ONEIL_AUTO_REVIEW_CAPTURE_ENABLED", "false").strip().lower()
+                                        in {"true", "1", "yes", "on"}):
+                                    from prism_core.oneil_batch_setup import load_review_sidecar
+                                    try:
+                                        adaptive_review = await asyncio.to_thread(
+                                            load_review_sidecar, state["report_path"],
+                                            symbol=ticker, decision_ref=source_decision_id,
+                                            as_of=datetime.now(timezone.utc).isoformat(),
+                                        )
+                                    except Exception:  # sidecar failure must not suppress original capture
+                                        adaptive_review = {
+                                            "contract_version": "oneil-batch-linked-review-v1",
+                                            "market": "US", "symbol": ticker,
+                                            "decision_ref": source_decision_id, "status": "MISSING",
+                                        }
                                 observe_or_emit(self, emit_scenario_shadow_capture,
                                     market="US", ticker=ticker,
                                     decision_id=scenario.get("_decision_id"),
@@ -4471,6 +4489,7 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
                                     entry_eligible=entry_eligible, is_add=is_add,
                                     trigger_type=trigger_type,
                                     trigger_mode=trigger_info.get("trigger_mode"),
+                                    adaptive_review=adaptive_review,
                                 )
                             except Exception:  # noqa: BLE001 - optional capture cannot fail trading
                                 logger.warning("[SCENARIO_SHADOW] initial capture unavailable")
