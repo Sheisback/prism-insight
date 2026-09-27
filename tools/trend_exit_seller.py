@@ -80,6 +80,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import sqlite3
@@ -250,6 +251,30 @@ def load_holdings_by_ticker(conn: sqlite3.Connection, market: str) -> Dict[str, 
     except sqlite3.Error as e:
         logger.warning("holdings load failed (%s): %s", market, e)
     return out
+
+
+def holding_highest_price(holding: Dict[str, Any]) -> float:
+    """Post-entry peak for TIER2 trailing.
+
+    Production holdings tables have no highest_price column: the SELL agents keep the
+    peak inside the scenario JSON (the same place oneil_fallback.from_stock_data reads).
+    Reading only the column returned 0, so TIER2 never fired (2026-06-24..09-27).
+    """
+    scenario = holding.get("scenario")
+    if isinstance(scenario, str):
+        try:
+            scenario = json.loads(scenario)
+        except ValueError:
+            scenario = {}
+    peak = (scenario or {}).get("highest_price") if isinstance(scenario, dict) else None
+    for value in (peak, holding.get("highest_price")):
+        try:
+            number = float(value or 0)
+        except (TypeError, ValueError):
+            continue
+        if number > 0:
+            return number
+    return 0.0
 
 
 def has_open_inflight(conn: sqlite3.Connection, ticker: str, market: str) -> bool:
@@ -525,7 +550,7 @@ async def _run_market(market: str, run_id: str) -> Dict[str, Any]:
                         ma50_cache[ticker] = await asyncio.to_thread(_fetch_ma50, market, ticker)
                     ma_50 = ma50_cache[ticker]
 
-                    highest = float(h.get("highest_price", 0) or 0)
+                    highest = holding_highest_price(h)
                     inp = SellInputs(
                         buy_price=buy_price,
                         current_price=cur_price,

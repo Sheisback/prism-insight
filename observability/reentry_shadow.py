@@ -38,6 +38,15 @@ MAX_ACTIVE = 80             # per market, oldest dropped as MISSING(capacity)
 ARCHIVE_AFTER_DAYS = 60     # finished watches beyond the enrolment lookback move to the archive
 SCORE_GAP = 2               # LOCATION_SKIP: min_score - buy_score <= 2
 TABLES = {"KR": ("trading_history", "watchlist_history"), "US": ("us_trading_history", "us_watchlist_history")}
+_STOP_COLUMNS = ("SELECT account_key, ticker, company_name, buy_date, buy_price, sell_date, sell_price, "
+                 "profit_rate, trigger_type, exit_kind FROM {} WHERE exit_kind = 'stop' "
+                 "AND substr(sell_date, 1, 10) >= ? AND substr(sell_date, 1, 10) <= ?")
+_SKIP_COLUMNS = ("SELECT id, ticker, company_name, analyzed_date, current_price, buy_score, min_score, decision, "
+                 "skip_reason, trigger_type, scenario FROM {} WHERE substr(analyzed_date, 1, 10) >= ? "
+                 "AND substr(analyzed_date, 1, 10) <= ? AND COALESCE(was_traded, 0) = 0")
+# Complete statements fixed at import time from the constant table map; no runtime interpolation.
+STOP_SQL = {m: _STOP_COLUMNS.format(t[0]) for m, t in TABLES.items()}
+SKIP_SQL = {m: _SKIP_COLUMNS.format(t[1]) for m, t in TABLES.items()}
 SKIP_CATEGORIES = (
     ("trend_gate", ("T1", "T2", "이동평균", "MA20", "MA50", "MA60", "MA200", "추세", "trend")),
     ("risk_reward", ("R/R", "손익비", "loss width", "expected_loss", "손절", "stop")),
@@ -145,20 +154,19 @@ def _int(value):
         return None
 
 
-def candidates(db_path, market, completed, lookback_days=LOOKBACK_DAYS):
-    """Read-only enrolment rows; the DB is never written."""
-    trades, watch = TABLES[market]
+def candidates(db_path, market, completed, lookback_days=LOOKBACK_DAYS, include_blocked=False):
+    """Read-only enrolment rows; the DB is never written.
+
+    include_blocked adds ENTER_BLOCKED: the BUY agent chose entry but a deterministic gate
+    stopped it (used by re-entry v2; v1 keeps its original sources).
+    """
     since = (date.fromisoformat(completed) - timedelta(days=lookback_days)).isoformat()
     until = (date.fromisoformat(completed) + timedelta(days=1)).isoformat()  # KST stamps of US rows run ahead
     uri = "file:" + str(db_path) + "?mode=ro"
     with sqlite3.connect(uri, uri=True, timeout=10) as conn:
         conn.row_factory = sqlite3.Row
         out = []
-        for row in conn.execute(
-                f"SELECT account_key, ticker, company_name, buy_date, buy_price, sell_date, sell_price, "  # nosec B608
-                f"profit_rate, trigger_type, exit_kind FROM {trades} "
-                "WHERE exit_kind = 'stop' AND substr(sell_date, 1, 10) >= ? AND substr(sell_date, 1, 10) <= ?",
-                (since, until)):
+        for row in conn.execute(STOP_SQL[market], (since, until)):
             # Account identifiers never leave the DB; only a stable one-way reference.
             account_ref = "acct-" + hashlib.sha256(str(row["account_key"]).encode()).hexdigest()[:12]
             out.append({"source": "STOP_EXIT", "account_key": account_ref, "ticker": str(row["ticker"]),
@@ -166,27 +174,27 @@ def candidates(db_path, market, completed, lookback_days=LOOKBACK_DAYS):
                         "entry_price": row["buy_price"], "exit_date": session_date(row["sell_date"], market),
                         "exit_price": row["sell_price"], "trigger_type": row["trigger_type"],
                         "exit_kind": row["exit_kind"], "realized_pct": row["profit_rate"]})
-        for row in conn.execute(
-                f"SELECT id, ticker, company_name, analyzed_date, current_price, buy_score, min_score, "  # nosec B608
-                f"decision, skip_reason, trigger_type, scenario FROM {watch} "
-                "WHERE substr(analyzed_date, 1, 10) >= ? AND substr(analyzed_date, 1, 10) <= ? "
-                "AND COALESCE(was_traded, 0) = 0", (since, until)):
+        for row in conn.execute(SKIP_SQL[market], (since, until)):
             scenario = _scenario(row["scenario"])
             fundamentals = (scenario.get("fundamental_check") or {}).get("all_passed")
             score, minimum = _int(row["buy_score"]), _int(row["min_score"])
-            if fundamentals is not True or score is None or minimum is None or minimum - score > SCORE_GAP:
+            blocked = include_blocked and fundamentals is not False and \
+                str(row["decision"] or "").strip().lower() in {"enter", "진입", "entry"}
+            if not blocked and (fundamentals is not True or score is None or minimum is None
+                                or minimum - score > SCORE_GAP):
                 continue
             price = row["current_price"]
             if not price:
                 continue
-            out.append({"source": "LOCATION_SKIP", "account_key": "analysis", "ticker": str(row["ticker"]),
+            out.append({"source": "ENTER_BLOCKED" if blocked else "LOCATION_SKIP", "account_key": "analysis",
+                        "ticker": str(row["ticker"]),
                         "company_name": row["company_name"], "entry_date": session_date(row["analyzed_date"], market),
                         "entry_price": price, "exit_date": session_date(row["analyzed_date"], market),
                         "exit_price": price,
                         "trigger_type": row["trigger_type"], "exit_kind": None, "analysis_id": row["id"],
                         "decision": row["decision"], "buy_score": score, "min_score": minimum,
                         "skip_categories": skip_category(row["skip_reason"]),
-                        "decision_id": scenario.get("_decision_id")})
+                        "decision_id": scenario.get("_decision_id"), "skip_reason": row["skip_reason"]})
         # Only rows whose session is complete; a forming session is enrolled next run.
         return [r for r in out if r["exit_date"] <= completed]
 
