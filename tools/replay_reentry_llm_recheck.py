@@ -45,6 +45,30 @@ RECHECK_KO = """
 """
 
 
+class ArchivedReport:
+    """Report text from archive.db (read-only), shaped like a Path for the caller."""
+
+    def __init__(self, name, text):
+        self.name, self._text = name, text
+
+    def read_text(self, encoding="utf-8"):
+        return self._text
+
+
+def archived_report(archive_db, market, ticker, day):
+    import sqlite3
+    with sqlite3.connect("file:" + str(archive_db) + "?mode=ro", uri=True) as conn:
+        row = conn.execute(
+            "SELECT report_date, mode, model, content FROM report_archive WHERE market = ? AND ticker = ? "
+            "AND language = 'ko' AND replace(report_date, '-', '') <= ? ORDER BY replace(report_date, '-', '') DESC, "
+            "CASE mode WHEN 'afternoon' THEN 1 ELSE 0 END DESC LIMIT 1",
+            (market.lower(), ticker, day.replace("-", ""))).fetchone()
+    if not row:
+        return None
+    stamp = str(row[0]).replace("-", "")
+    return ArchivedReport(f"{ticker}_archive_{stamp}_{row[1] or 'morning'}_{row[2] or 'na'}.md", row[3])
+
+
 def latest_report(root, market, ticker, day):
     folder = Path(root) / REPORT_DIRS[market]
     stamp = day.replace("-", "")
@@ -129,7 +153,7 @@ def instruction(market):
     return module.create_us_trading_scenario_agent(language="ko").instruction + RECHECK_KO
 
 
-async def run(records, market, bars_by_ticker, bench, reports_root, out, concurrency):
+async def run(records, market, bars_by_ticker, bench, reports_root, out, concurrency, archive_db=None):
     from cores.llm.codex_oauth_fast_backend import generate_codex_fast_async
     from cores.utils import parse_llm_json
     from prism_core.codex_config import resolve_buy_codex_settings
@@ -146,6 +170,8 @@ async def run(records, market, bars_by_ticker, bench, reports_root, out, concurr
                 bars = bars_by_ticker[rec["ticker"]]
                 i = rec["trigger_index"]
                 report = latest_report(reports_root, market, rec["ticker"], rec["trigger_date"])
+                if report is None and archive_db:
+                    report = archived_report(archive_db, market, rec["ticker"], rec["trigger_date"])
                 if report is None:
                     row["status"] = "NO_REPORT"
                     return row
@@ -203,6 +229,7 @@ def main(argv=None):
     parser.add_argument("--bench", required=True)
     parser.add_argument("--bench-code", required=True)
     parser.add_argument("--reports-root", default=str(ROOT))
+    parser.add_argument("--archive-db", help="report_archive database used when the report file is gone")
     parser.add_argument("--out", required=True)
     parser.add_argument("--concurrency", type=int, default=2)
     parser.add_argument("--dry-run", action="store_true")
@@ -212,13 +239,16 @@ def main(argv=None):
     bars = {t: load_bars(v) for t, v in json.loads(Path(args.bars).read_text()).items()}
     bench = load_bars(json.loads(Path(args.bench).read_text())["bars"][args.bench_code])
     if args.dry_run:
-        found = [latest_report(args.reports_root, args.market, r["ticker"], r["trigger_date"]) for r in records]
+        found = [latest_report(args.reports_root, args.market, r["ticker"], r["trigger_date"])
+                 or (archived_report(args.archive_db, args.market, r["ticker"], r["trigger_date"]) if args.archive_db else None)
+                 for r in records]
         print(json.dumps({"triggers": len(records), "with_report": sum(f is not None for f in found)}))
         if records and found[0]:
             print(technical_block(bars[records[0]["ticker"]], records[0]["trigger_index"], records[0]["entry"],
                                   records[0]["pivot"], args.market, bench))
         return 0
-    rows = asyncio.run(run(records, args.market, bars, bench, args.reports_root, args.out, args.concurrency))
+    rows = asyncio.run(run(records, args.market, bars, bench, args.reports_root, args.out, args.concurrency,
+                           archive_db=args.archive_db))
     summary = json.dumps(summarize(rows), ensure_ascii=False, indent=1)
     Path(args.out + ".summary.json").write_text(summary + "\n", encoding="utf-8")
     print(summary)
