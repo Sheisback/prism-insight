@@ -53,6 +53,9 @@ def test_trigger_freezes_recheck_inputs_once_and_is_idempotent(tmp_path):
     watch, item = frozen[0]
     assert watch["status"] in {"TRIGGERED", "CLOSED"} and item["trigger_date"] == bars[73]["date"]
     assert item["llm_recheck"] == "NOT_EVALUATED" and item["report_ref"]["kind"] == "file"
+    assert item["report_ref"]["report_date"] == bars[60]["date"] and item["report_ref"]["age_days"] == (
+        date.fromisoformat(bars[73]["date"]) - date.fromisoformat(bars[60]["date"])).days
+    assert item["report_ref"]["stale"] is False
     assert item["levels"]["support_pivot"] == 110 and item["levels"]["measured_move_target"] > 110
     assert "📏 트리거 시점 가격 수준" in item["facts_text"] and item["original"]["reason"] == "추세 게이트 T1"
     _, again = V2.advance(state, [_row(bars)], frames, completed, "KR", reports_root=tmp_path, archive_db=None)
@@ -126,3 +129,30 @@ def test_enabled_requires_exact_policy(tmp_path, monkeypatch):
     assert V2.enabled("KR") and V2.enabled("US")
     monkeypatch.setenv("REENTRY_V2_SHADOW_ENABLED", "false")
     assert not V2.enabled("KR")
+
+
+def test_report_lookup_is_strictly_before_the_trigger_day(tmp_path):
+    from observability.reentry_recheck_inputs import latest_report
+    folder = tmp_path / "reports"
+    folder.mkdir()
+    for name in ("000001_A_20260820_morning_x.md", "000001_A_20260901_morning_x.md",
+                 "000001_A_20260901_afternoon_x.md", "000001_A_20260831_morning_x_en.md"):
+        (folder / name).write_text("r")
+    assert latest_report(tmp_path, "KR", "000001", "2026-09-01").name == "000001_A_20260820_morning_x.md"
+    assert latest_report(tmp_path, "KR", "000001", "2026-09-02").name == "000001_A_20260901_afternoon_x.md"
+    assert latest_report(tmp_path, "KR", "000001", "2026-08-20") is None
+
+
+def test_archive_lookup_is_strictly_before_the_trigger_day(tmp_path):
+    from observability.reentry_recheck_inputs import archived_report
+    db = tmp_path / "a.db"
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE report_archive (market TEXT, ticker TEXT, language TEXT, report_date TEXT, mode TEXT, "
+                 "model TEXT, content TEXT)")
+    conn.executemany("INSERT INTO report_archive VALUES (?,?,?,?,?,?,?)",
+                     [("us", "AAA", "ko", "2026-07-01", "morning", "m", "old"),
+                      ("us", "AAA", "ko", "2026-08-10", "afternoon", "m", "same-day")])
+    conn.commit()
+    conn.close()
+    report = archived_report(db, "US", "AAA", "2026-08-10")
+    assert report.read_text() == "old" and "_20260701_" in report.name

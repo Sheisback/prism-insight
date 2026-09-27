@@ -18,6 +18,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -34,7 +35,8 @@ DB_PATH = ROOT / "stock_tracking_db.sqlite"
 ARCHIVE_DB = ROOT / "archive.db"
 LOOKBACK_DAYS = 70          # enrolment window; a watch lives up to 30 sessions (~45 calendar days)
 ARCHIVE_AFTER_DAYS = 150    # finished watches (incl. 60-bar exit horizon) move to the archive
-INPUT_CONTRACT = "reentry_v2_recheck_input_v1"
+INPUT_CONTRACT = "reentry_v2_recheck_input_v2"
+REPORT_MAX_AGE_DAYS = 30     # older reports are regenerated before the recheck (user decision 2026-09-27)
 
 
 def enabled(market):
@@ -136,7 +138,11 @@ def freeze_inputs(market, watch, result, bars, bench_rows, reports_root, archive
         kind = "file"
     if report is not None:
         text = report.read_text(encoding="utf-8")
-        report_ref = {"kind": kind, "name": report.name, "sha256": hashlib.sha256(text.encode()).hexdigest()}
+        stamp = re.search(r"_(\d{8})_", report.name).group(1)
+        age = (date.fromisoformat(trigger_date) - date(int(stamp[:4]), int(stamp[4:6]), int(stamp[6:]))).days
+        report_ref = {"kind": kind, "name": report.name, "sha256": hashlib.sha256(text.encode()).hexdigest(),
+                      "report_date": f"{stamp[:4]}-{stamp[4:6]}-{stamp[6:]}", "age_days": age,
+                      "stale": age > REPORT_MAX_AGE_DAYS}
     levels = fresh_levels(entry, base)
     row = watch["row"]
     return {"contract": INPUT_CONTRACT, "policy_version": P.POLICY_VERSION, "market": market,
@@ -300,6 +306,7 @@ def run(market, completed, *, collector, db_path=DB_PATH, root=STATE_DIR, report
                          "enrollment": watch["enrollment"], "watch_ref": watch["watch_id"],
                          "trigger": item["trigger"], "trigger_date": item["trigger_date"], "entry": item["entry"],
                          "levels": item["levels"], "report_available": item["report_ref"] is not None,
+                         "report_stale": (item["report_ref"] or {}).get("stale"),
                          "market_regime_label": item["deterministic_market_regime"]}
                 if emit_event("reentry_v2.shadow_trigger", service=f"prism-{market.lower()}-reentry-v2-shadow",
                               event_id=item["event_id"], market=market, ticker=watch["ticker"],
