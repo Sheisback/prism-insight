@@ -12,13 +12,17 @@ aiohttp~=3.11.13
 python-dateutil~=2.9.0.post0
 email-validator
 # openai bumped from <2.0.0: openai-agents requires >=2.9; verified mcp-agent 0.2.6
-# runs on openai 2.x (2026-06-19 coexistence test). See tasks/mcp_agent_removal_prd.md.
+# runs on openai 2.x (2026-06-19 coexistence test).
 # openai 2.52.0 made InputTokensDetails.cache_write_tokens required, while
 # openai-agents 0.7.0 still constructs it with cached_tokens only. Keep the
 # pair on the production-verified version until agents supports that schema.
 openai==2.43.0
 openai-agents==0.7.0
 anthropic~=0.64.0
+# Directly imported by production code (cores/, trading/); declared so a
+# future transitive removal cannot break us.
+pydantic>=2.0.0
+httpx>=0.27.0
 markdown>=3.3.0
 python-telegram-bot>=20.0
 aiosqlite>=0.17.0
@@ -27,7 +31,6 @@ uvicorn>=0.29.0
 mcp-server-sqlite
 
 # 파일 처리 및 로깅
-pathlib>=1.0.1
 python-dotenv>=1.0.0
 
 
@@ -45,7 +48,6 @@ pycryptodome>=3.19.0  # 웹소켓 암호화
 websockets>=12.0  # 실시간 시세 웹소켓
 
 # JSON 처리
-ujson>=5.8.0
 json-repair>=0.1.0  # JSON 문법 오류 자동 복구
 
 # 이미지 처리 (PDF 변환시 필요)
@@ -55,7 +57,6 @@ holidays~=0.68
 
 python-telegram-bot[job-queue]>=20.0
 
-DateTime~=5.5
 matplotlib~=3.10.1
 seaborn~=0.13.2
 mplfinance~=0.12.10b0
