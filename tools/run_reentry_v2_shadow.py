@@ -1,4 +1,5 @@
-"""After-close re-entry v2 SHADOW runner (pivot breakout). Deterministic: no orders, no LLM calls.
+"""After-close re-entry v2 SHADOW runner (pivot breakout). No orders; one BUY-agent recheck per
+forward trigger unless --no-llm, a dry run, or the policy/env switch turns it off.
 
     python tools/run_reentry_v2_shadow.py --market KR
     python tools/run_reentry_v2_shadow.py --market US --dry-run
@@ -39,6 +40,7 @@ def main(argv=None):
     parser.add_argument("--state-root", default=str(V2.STATE_DIR))
     parser.add_argument("--reports-root", default=str(ROOT))
     parser.add_argument("--archive-db", default=str(V2.ARCHIVE_DB))
+    parser.add_argument("--no-llm", action="store_true", help="skip the LLM recheck of new triggers")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     if not V2.enabled(args.market) and not args.dry_run:
@@ -47,7 +49,7 @@ def main(argv=None):
     completed = collectors.completed_session(args.market)
     summary = V2.run(args.market, completed, collector=lambda t, c: collect(args.market, t, c), db_path=args.db,
                      root=args.state_root, reports_root=args.reports_root, archive_db=args.archive_db,
-                     dry_run=args.dry_run)
+                     dry_run=args.dry_run, llm_recheck=False if args.no_llm else None)
     print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
     return 0
 

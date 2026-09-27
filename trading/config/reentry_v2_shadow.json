@@ -2,5 +2,6 @@
   "mode": "SHADOW",
   "policy_version": "pivot_reentry_v2",
   "markets": ["KR", "US"],
-  "enabled": true
+  "enabled": true,
+  "llm_recheck": true
 }
