@@ -2337,17 +2337,14 @@ class USStockTrackingAgent:
                     initial_stop_loss = scenario_data.get('stop_loss', stop_loss)
                     initial_target_price = scenario_data.get('target_price', target_price)
 
-                    if 'highest_price' in scenario_data:
-                        highest_price = scenario_data['highest_price']
-                    else:
-                        highest_price = max(buy_price, current_price)
-                        highest_price_initialized = True
+                    from prism_core.position_peak import ratchet_highest_price
+                    highest_price_initialized = 'highest_price' not in scenario_data
+                    highest_price, persist_peak = ratchet_highest_price(scenario_data, buy_price, current_price)
+                    if highest_price_initialized:
                         logger.info(f"{ticker} highest_price not in scenario, initialized to ${highest_price:,.2f}")
 
-                    # Update highest_price if current price exceeds it
-                    if current_price > highest_price:
-                        highest_price = current_price
-                        scenario_data['highest_price'] = highest_price
+                    # Persist a raised OR newly initialised peak (initialised peaks were never saved before).
+                    if persist_peak:
                         updated_scenario_str = json.dumps(scenario_data, ensure_ascii=False)
                         # Pyramiding (#288): scope by row id so only THIS row's
                         # scenario is updated. Fall back to ticker when id missing.
