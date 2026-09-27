@@ -7,6 +7,7 @@ from observability.events import build_event, emit_event
 
 
 def test_build_event_has_correlation_and_provenance(monkeypatch):
+    monkeypatch.delenv("SCENARIO_SHADOW_CAPTURE_ENABLED", raising=False)
     monkeypatch.setenv("PRISM_ENV", "test")
     monkeypatch.setenv("TRIGGER_PERFORMANCE_FEEDBACK", "shadow")
     event = build_event(
@@ -47,6 +48,17 @@ def test_sensitive_attributes_are_redacted():
     assert event["attributes"]["nested"]["api_key"] == "[REDACTED]"
     assert event["attributes"]["nested"]["safe"] == "visible"
     assert event["attributes"]["account_key"] == "[REDACTED]"
+
+
+def test_capture_flag_changes_provenance_without_exporting_registry_path(monkeypatch):
+    monkeypatch.setenv("SCENARIO_SHADOW_CAPTURE_ENABLED", "1")
+    monkeypatch.setenv("SCENARIO_SHADOW_CAPTURE_DB", "/private/canary-capture.sqlite")
+    enabled = build_event("test", service="test")
+    monkeypatch.setenv("SCENARIO_SHADOW_CAPTURE_ENABLED", "0")
+    disabled = build_event("test", service="test")
+    assert enabled["config"]["SCENARIO_SHADOW_CAPTURE_ENABLED"] == "1"
+    assert enabled["config_hash"] != disabled["config_hash"]
+    assert "canary" not in json.dumps(enabled)
 
 
 def test_emit_event_appends_json_lines(tmp_path):

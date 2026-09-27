@@ -1,0 +1,178 @@
+"""Opt-in original-plan capture; never orders or alters a trading decision.
+
+The durable original and delivery checkpoint are separate. A crash after spool
+append but before checkpoint can duplicate the same event ID (not exactly-once).
+"""
+from contextlib import closing
+from datetime import datetime, timezone
+import hashlib
+import json
+import os
+from pathlib import Path
+import sqlite3
+import tempfile
+
+from observability.events import emit_event
+from prism_core.scenario_shadow_policy import VERSION, create_plan
+
+_APP_ID = 1396917059
+_DEFAULT_DB = Path(__file__).resolve().parents[1] / "runtime/scenario-shadow-capture.sqlite"
+_SCHEMA = (
+    "CREATE TABLE captures (capture_key TEXT PRIMARY KEY, payload TEXT NOT NULL)",
+    "CREATE TABLE delivered (capture_key TEXT PRIMARY KEY REFERENCES captures(capture_key))",
+    "CREATE TRIGGER frozen_update BEFORE UPDATE ON captures BEGIN SELECT RAISE(ABORT, 'immutable capture'); END",
+    "CREATE TRIGGER frozen_delete BEFORE DELETE ON captures BEGIN SELECT RAISE(ABORT, 'immutable capture'); END",
+    "CREATE TRIGGER frozen_replace BEFORE INSERT ON captures WHEN EXISTS (SELECT 1 FROM captures WHERE capture_key=NEW.capture_key) BEGIN SELECT RAISE(ABORT, 'immutable capture'); END",
+)
+
+
+def _json(value):
+    # No default=str: unknown values must not leak object representations.
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def _hash(value):
+    return hashlib.sha256(_json(value).encode()).hexdigest()
+
+
+def _safe_json(value):
+    if value is None or type(value) in (str, bool, int, float):
+        return
+    if type(value) is list:
+        for item in value:
+            _safe_json(item)
+        return
+    if type(value) is dict and all(type(key) is str for key in value):
+        for item in value.values():
+            _safe_json(item)
+        return
+    raise ValueError("plain JSON original required")
+
+
+def _validate_db(connection):
+    actual = {row[0] for row in connection.execute(
+        "SELECT sql FROM sqlite_master WHERE sql IS NOT NULL")}
+    if (actual != set(_SCHEMA)
+            or connection.execute("PRAGMA application_id").fetchone()[0] != _APP_ID
+            or connection.execute("PRAGMA user_version").fetchone()[0] != 1):
+        raise ValueError("not an owned capture database")
+
+
+def _connect(path):
+    if (path.is_symlink() or path.suffix.lower() not in {".sqlite", ".sqlite3", ".db"}
+            or path.name.lower() in {
+            "stock_tracking.db", "us_stock_tracking.db", "stock_analysis.db",
+            "stock_tracking_db.sqlite", "us_stock_tracking.sqlite",
+            "strategy-ledger.sqlite", "strategy_ledger.db", "scenario-shadow.sqlite"}):
+        raise ValueError("dedicated capture database required")
+    if path.exists():
+        with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=.05)) as check:
+            _validate_db(check)
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary = tempfile.mkstemp(prefix=".scenario-capture-", dir=path.parent)
+        os.close(descriptor)
+        try:
+            with closing(sqlite3.connect(temporary, timeout=.05)) as initialize, initialize:
+                initialize.execute("BEGIN IMMEDIATE")
+                for statement in _SCHEMA:
+                    initialize.execute(statement)
+                initialize.execute(f"PRAGMA application_id={_APP_ID}")
+                initialize.execute("PRAGMA user_version=1")
+            # Publish a fully initialized file without overwriting a racing writer.
+            try:
+                os.link(temporary, path)
+            except FileExistsError:
+                pass
+        finally:
+            os.unlink(temporary)
+    connection = sqlite3.connect(path, timeout=.05)
+    try:
+        _validate_db(connection)
+    except Exception:
+        connection.close()
+        raise
+    return connection
+
+
+def emit_initial_capture(*, market, ticker, decision_id, position_id, scenario,
+                         current_price, entry_eligible, is_add,
+                         trigger_type=None, trigger_mode=None):
+    """Capture an eligible committed US strategy entry before broker execution.
+
+    All I/O is fail-open. Retry on a later invocation only, never synchronously.
+    There is no background delivery: pending originals remain in this registry
+    until the identical position is explicitly presented again by the caller.
+    No scenario text, account identifiers, or broker fill assumptions are stored.
+    """
+    if os.getenv("SCENARIO_SHADOW_CAPTURE_ENABLED", "false").strip().lower() not in {
+            "true", "1", "yes", "on"}:
+        return None
+    try:
+        if (market != "US" or entry_eligible is not True or is_add is not False
+                or not all(isinstance(value, str) and value.strip()
+                           for value in (ticker, decision_id, position_id))
+                or not isinstance(scenario, dict)):
+            return None
+        gates = scenario.get("_decision_context")
+        if (not isinstance(gates, dict)
+                or gates.get("gate_allowed") is not True
+                or gates.get("cooldown_blocked") is not False
+                or gates.get("sector_diverse") is not True
+                or gates.get("rebound_pilot") is not False
+                or "_strategy_projection" in scenario
+                or scenario.get("_strategy_policy")
+                or (scenario.get("regime_entry_policy") or {}).get("mode") == "rebound_pilot"):
+            return None
+        _safe_json(scenario)
+        original_hash = _hash(scenario)
+        captured = datetime.now(timezone.utc)
+        plan = create_plan(entry_price=current_price, initial_stop=scenario.get("stop_loss"),
+                           entry_at=captured.isoformat(), source_decision_ref=decision_id,
+                           entry_eligible=True)
+        attributes = {
+            "capture_schema_version": 1, "mode": "SHADOW", "plan": plan,
+            "original_input_hash": original_hash,
+            "phase": "POST_STRATEGY_COMMIT_PRE_BROKER", "trading_impact": "none",
+            "execution_provenance": "NOT_REQUESTED", "fill_status": "VIRTUAL_NOT_FILLED",
+            "confirmed_fill": False,
+        }
+        if isinstance(trigger_type, str):
+            attributes["trigger_type_hash"] = _hash(trigger_type)
+        if trigger_mode in {"morning", "afternoon"}:
+            attributes["trigger_mode"] = trigger_mode
+        key = _hash([VERSION, position_id])
+        payload = {
+            "event_id": key[:32], "service": "prism-us-scenario-shadow",
+            "market": market, "ticker": ticker, "decision_id": decision_id,
+            "position_id": position_id, "attributes": attributes,
+            "event_time": captured.isoformat(),
+        }
+        path = Path(os.getenv("SCENARIO_SHADOW_CAPTURE_DB", str(_DEFAULT_DB)))
+        connection = _connect(path)
+        try:
+            with connection:
+                connection.execute("BEGIN IMMEDIATE")
+                stored = connection.execute("SELECT payload FROM captures WHERE capture_key=?", (key,)).fetchone()
+                if stored:
+                    payload = json.loads(stored[0])
+                    if any(payload[field] != value for field, value in (
+                            ("market", market), ("ticker", ticker),
+                            ("decision_id", decision_id), ("position_id", position_id))):
+                        return None
+                else:
+                    connection.execute("INSERT INTO captures VALUES (?,?)", (key, _json(payload)))
+            # Serialize cooperating writers. Original is already durable if emit fails.
+            with connection:
+                connection.execute("BEGIN IMMEDIATE")
+                if connection.execute("SELECT 1 FROM delivered WHERE capture_key=?", (key,)).fetchone():
+                    return None
+                payload["event_time"] = datetime.fromisoformat(payload["event_time"])
+                result = emit_event("scenario_shadow.initial_captured", **payload)
+                if result is not None:
+                    connection.execute("INSERT INTO delivered VALUES (?)", (key,))
+                return result
+        finally:
+            connection.close()
+    except Exception:  # noqa: BLE001 - observer must never interrupt trading
+        return None

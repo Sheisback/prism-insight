@@ -66,6 +66,7 @@ from observability.journal_influence import (  # noqa: E402
     build_journal_influence_context,
 )
 from observability.micro_split import emit_initial_shadow as emit_micro_split_shadow  # noqa: E402
+from observability.scenario_shadow import emit_initial_capture as emit_scenario_shadow_capture  # noqa: E402
 from observability.trading_context import (  # noqa: E402
     emit_trading_context,
     execution_profile_ref,
@@ -4452,6 +4453,21 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
                         buy_success = buy_result.success
 
                         if buy_success:
+                            # Freeze only after the strategy position exists, before
+                            # broker funding/quantity can influence capture. The
+                            # observer is opt-in and never changes the BUY scenario.
+                            try:
+                                observe_or_emit(self, emit_scenario_shadow_capture,
+                                    market="US", ticker=ticker,
+                                    decision_id=scenario.get("_decision_id"),
+                                    position_id=legacy_position_id("US", buy_result.legacy_holding_id),
+                                    scenario=scenario, current_price=current_price,
+                                    entry_eligible=entry_eligible, is_add=is_add,
+                                    trigger_type=trigger_type,
+                                    trigger_mode=trigger_info.get("trigger_mode"),
+                                )
+                            except Exception:  # noqa: BLE001 - optional capture cannot fail trading
+                                logger.warning("[SCENARIO_SHADOW] initial capture unavailable")
                             trade_result = {'success': False, 'message': 'Trading not executed'}
 
                             if current_price > 0:
