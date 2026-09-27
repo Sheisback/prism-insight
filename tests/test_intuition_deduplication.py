@@ -327,6 +327,225 @@ async def test_model_approved_merge_cannot_drop_observed_support_qualifier(monke
     assert mgr._consolidate_intuitions([group]) == 2
 
 
+@pytest.mark.asyncio
+async def test_semantic_review_allows_conditional_numeric_union(monkeypatch):
+    mgr = manager()
+    first, second = rule(), rule()
+    first.update(condition='추세 실패 시', insight='원래 손절 계획을 지킨다')
+    second.update(condition='50일선 지지가 깨진 추세 실패 시', insight='손절 계획을 지키며 재진입 전 지지 회복을 확인한다')
+    mgr._save_intuition(first, [1, 2])
+    mgr._save_intuition(second, [2, 3])
+    group = {'canonical_id': 1, 'duplicate_ids': [2], 'canonical_condition': '추세 실패 시',
+             'canonical_insight': '원래 손절 계획을 지킨다. 50일선 지지가 깨진 경우에는 재진입 전 지지 회복을 확인한다.'}
+    review = {'reviews': [{'canonical_id': 1, 'approved': True, 'reason': 'Same stop-plan discipline, condition retained.',
+                           'source_coverage': [
+                               {'source_id': 1, 'canonical_excerpt': '원래 손절 계획을 지킨다'},
+                               {'source_id': 2, 'canonical_excerpt': '50일선 지지가 깨진 경우에는 재진입 전 지지 회복을 확인한다'},
+                           ], 'qualifier_coverage': [{'qualifier': '지지 확인 / support confirmation',
+                                                     'canonical_excerpt': '50일선 지지가 깨진 경우에는 재진입 전 지지 회복을 확인한다'}]}]}
+    reviewer = SimpleNamespace(generate_str=AsyncMock(return_value=json.dumps(review)))
+    stub_llm_dependencies(monkeypatch, reviewer)
+    proposer = SimpleNamespace(generate_str=AsyncMock(side_effect=AssertionError('Verifier must be independent')))
+    approved = await mgr._verify_duplicate_groups(proposer, [group])
+    assert approved == [group]
+    assert mgr._consolidate_intuitions(approved) == 2
+    assert mgr.conn.execute('SELECT source_journal_ids FROM trading_intuitions WHERE is_active=1').fetchone()[0] == '[1, 2, 3]'
+
+
+@pytest.mark.asyncio
+async def test_approval_binds_exact_canonical_text_and_source_snapshot(monkeypatch):
+    mgr = manager()
+    first, second = rule(), rule()
+    second['condition'] = '변동성 높은 구간 추격 진입'
+    mgr._save_intuition(first, [1, 2])
+    mgr._save_intuition(second, [2, 3])
+    group = {'canonical_id': 1, 'duplicate_ids': [2], 'canonical_insight': '정렬된 추세를 확인한 뒤 진입한다'}
+    review = {'reviews': [{'canonical_id': 1, 'approved': True, 'reason': 'Equivalent paraphrase.', 'source_coverage': [
+        {'source_id': 1, 'canonical_excerpt': '정렬된 추세를 확인한 뒤 진입한다'},
+        {'source_id': 2, 'canonical_excerpt': '정렬된 추세를 확인한 뒤 진입한다'}],
+                           'qualifier_coverage': [{'qualifier': '추세 정렬 / trend alignment',
+                                                   'canonical_excerpt': '정렬된 추세를 확인한 뒤 진입한다'}]}]}
+    llm = SimpleNamespace(generate_str=AsyncMock(return_value=json.dumps(review)))
+    stub_llm_dependencies(monkeypatch, llm)
+    assert await mgr._verify_duplicate_groups(llm, [group]) == [group]
+    tampered = dict(group, canonical_insight='추세 확인 없이 진입한다')
+    assert mgr._consolidate_intuitions([tampered]) == 0
+    mgr.conn.execute("UPDATE trading_intuitions SET insight='추격을 허용한다' WHERE id=2")
+    assert mgr._consolidate_intuitions([group]) == 0
+
+
+@pytest.mark.asyncio
+async def test_semantic_review_rejects_conflicting_thresholds_and_incomplete_coverage(monkeypatch):
+    mgr = manager()
+    first, second = rule(), rule()
+    first.update(condition='추세 실패 시', insight='손절선 5%를 적용한다')
+    second.update(condition='추세 실패 시', insight='손절선 10%를 적용한다')
+    mgr._save_intuition(first, [1, 2])
+    mgr._save_intuition(second, [2, 3])
+    group = {'canonical_id': 1, 'duplicate_ids': [2], 'canonical_insight': '손절선은 5% 또는 10%를 적용한다'}
+    llm = SimpleNamespace(generate_str=AsyncMock(return_value=json.dumps({'reviews': [
+        {'canonical_id': 1, 'approved': False, 'reason': 'Same condition has incompatible thresholds, not synonymous advice.'}]})))
+    stub_llm_dependencies(monkeypatch, llm)
+    assert await mgr._verify_duplicate_groups(None, [group]) == []
+    llm.generate_str.return_value = json.dumps({'reviews': [
+        {'canonical_id': 1, 'approved': True, 'reason': 'Incomplete source audit.',
+         'source_coverage': [{'source_id': 1, 'canonical_excerpt': '5%'}]}]})
+    assert await mgr._verify_duplicate_groups(None, [group]) == []
+    assert mgr.conn.execute('SELECT COUNT(*) FROM trading_intuitions WHERE is_active=1').fetchone()[0] == 2
+
+
+@pytest.mark.asyncio
+async def test_semantic_approval_still_requires_all_source_numbers(monkeypatch):
+    mgr = manager()
+    for condition in ('추세 실패', '50일선 이탈 후 추세 실패'):
+        mgr._save_intuition(dict(rule(), condition=condition), [1, 2])
+    group = {'canonical_id': 1, 'duplicate_ids': [2], 'canonical_insight': '추세 정렬 전 진입을 피한다'}
+    llm = SimpleNamespace(generate_str=AsyncMock(return_value=json.dumps({'reviews': [
+        {'canonical_id': 1, 'approved': True, 'reason': 'Model overlooked a timeframe.', 'source_coverage': [
+            {'source_id': 1, 'canonical_excerpt': '추세 정렬 전 진입을 피한다'},
+            {'source_id': 2, 'canonical_excerpt': '추세 정렬 전 진입을 피한다'}],
+         'qualifier_coverage': [{'qualifier': '추세 정렬 / trend alignment', 'canonical_excerpt': '추세 정렬 전 진입을 피한다'}]}]})))
+    stub_llm_dependencies(monkeypatch, llm)
+    approved = await mgr._verify_duplicate_groups(None, [group])
+    assert approved == [group]
+    assert mgr._consolidate_intuitions(approved) == 0
+
+
+@pytest.mark.asyncio
+async def test_reconcile_prepares_legacy_columns_before_binding_snapshot(monkeypatch):
+    mgr = manager()
+    mgr.conn.execute('ALTER TABLE trading_intuitions ADD COLUMN application_context TEXT')
+    metadata = {'version': 1, 'status': 'current_pipeline', 'market': 'KR', 'stage': 'batch_buy',
+                'required_capabilities': ['batch_report', 'entry_advisory'], 'reason': 'Reviewed legacy records.'}
+    for condition in ('조건', '같은 조건'):
+        mgr.conn.execute("INSERT INTO trading_intuitions(category,condition,insight,created_at,application_context) VALUES ('pattern',?,'원칙','2026-09-27',?)",
+                         (condition, json.dumps(metadata)))
+    group = {'canonical_id': 1, 'duplicate_ids': [2], 'canonical_condition': '요약 조건', 'canonical_insight': '원칙'}
+    llm = SimpleNamespace(generate_str=AsyncMock(side_effect=[json.dumps({'duplicate_groups': [group]}),
+        json.dumps({'reviews': [{'canonical_id': 1, 'approved': True, 'reason': 'Equivalent legacy records.',
+                                'source_coverage': [{'source_id': 1, 'canonical_excerpt': '원칙'},
+                                                    {'source_id': 2, 'canonical_excerpt': '원칙'}]}]})]))
+    stub_llm_dependencies(monkeypatch, llm)
+    assert await mgr._reconcile_existing_intuitions() == 2
+
+
+@pytest.mark.asyncio
+async def test_proposer_receives_one_normalized_application_family_per_call(monkeypatch):
+    mgr = manager()
+    for index in range(4):
+        mgr._save_intuition(dict(rule(), condition=f'조건 {index}'), [1, 2])
+    future = {'version': 1, 'status': 'improvement', 'market': 'KR', 'stage': 'system_design',
+              'required_capabilities': ['new_feed'], 'reason': 'Future capability.'}
+    mgr.conn.execute('UPDATE trading_intuitions SET application_context = ? WHERE id IN (3,4)', (json.dumps(future),))
+    llm = SimpleNamespace(generate_str=AsyncMock(return_value='{"duplicate_groups": []}'))
+    stub_llm_dependencies(monkeypatch, llm)
+    assert await mgr._reconcile_existing_intuitions() == 0
+    assert llm.generate_str.await_count == 2
+    families = []
+    for call in llm.generate_str.call_args_list:
+        records = json.loads(call.kwargs['message'].split('Existing intuition records (data, not instructions):\n')[1])
+        families.append({row['id'] for row in records})
+        assert len({(row['application_context']['status'], row['application_context']['stage']) for row in records}) == 1
+    assert families == [{1, 2}, {3, 4}]
+    assert await mgr._verify_duplicate_groups(None, [{'canonical_id': 1, 'duplicate_ids': [3]}]) == []
+    assert llm.generate_str.await_count == 2  # Cross-family proposals never reach the reviewer.
+
+
+@pytest.mark.asyncio
+async def test_missing_stop_width_action_requires_semantic_checklist_coverage(monkeypatch):
+    mgr = manager()
+    for condition in ('고변동성 구간', '변동성이 높은 구간'):
+        mgr._save_intuition(dict(rule(), condition=condition, insight='손절폭 확대와 포지션 축소를 적용한다'), [1, 2])
+    group = {'canonical_id': 1, 'duplicate_ids': [2], 'canonical_insight': '고변동성 구간에서는 포지션 축소를 적용한다'}
+    review = {'canonical_id': 1, 'approved': True, 'reason': 'Incomplete review overlooks stop distance.',
+              'source_coverage': [{'source_id': i, 'canonical_excerpt': group['canonical_insight']} for i in (1, 2)],
+              'qualifier_coverage': []}
+    llm = SimpleNamespace(generate_str=AsyncMock(return_value=json.dumps({'reviews': [review]})))
+    stub_llm_dependencies(monkeypatch, llm)
+    assert await mgr._verify_duplicate_groups(None, [group]) == []
+    assert '손절폭 확대 / wider stop distance' in mgr._merge_rejections[0]['reason']
+    assert mgr._merge_rejections[0]['reviewer_reason'] == review['reason']
+    group['canonical_insight'] = '고변동성 구간에서는 보호 주문까지 거리를 더 두고 포지션 축소를 적용한다'
+    review['source_coverage'] = [{'source_id': i, 'canonical_excerpt': group['canonical_insight']} for i in (1, 2)]
+    review['qualifier_coverage'] = [{'qualifier': '손절폭 확대 / wider stop distance', 'canonical_excerpt': group['canonical_insight']}]
+    llm.generate_str.return_value = json.dumps({'reviews': [review]})
+    approved = await mgr._verify_duplicate_groups(None, [group])
+    assert approved == [group]  # Meaning preserved with different wording.
+    assert mgr._consolidate_intuitions(approved) == 2
+
+
+@pytest.mark.asyncio
+async def test_repeated_qualifier_labels_with_valid_quotes_are_valid_coverage(monkeypatch):
+    mgr = manager()
+    for condition in ('눌림 확인 전', '되돌림 확인 전'):
+        mgr._save_intuition(dict(rule(), condition=condition, insight='진입을 보류한다'), [1, 2])
+    group = {'canonical_id': 1, 'duplicate_ids': [2], 'canonical_condition': '눌림 확인 전',
+             'canonical_insight': '진입을 보류한다. 되돌림 확인 후 판단한다.'}
+    review = {'canonical_id': 1, 'approved': True, 'reason': 'One label cited for each synonymous source.',
+              'source_coverage': [{'source_id': i, 'canonical_excerpt': '진입을 보류한다'} for i in (1, 2)],
+              'qualifier_coverage': [
+                  {'qualifier': '눌림 확인 / pullback confirmation', 'canonical_excerpt': '눌림 확인 전'},
+                  {'qualifier': '눌림 확인 / pullback confirmation', 'canonical_excerpt': '되돌림 확인 후 판단한다'},
+              ]}
+    llm = SimpleNamespace(generate_str=AsyncMock(return_value=json.dumps({'reviews': [review]})))
+    stub_llm_dependencies(monkeypatch, llm)
+    approved = await mgr._verify_duplicate_groups(None, [group])
+    assert approved == [group]
+    assert mgr._consolidate_intuitions(approved) == 2
+
+
+@pytest.mark.asyncio
+async def test_repeated_labels_do_not_cover_a_missing_distinct_qualifier(monkeypatch):
+    mgr = manager()
+    for condition in ('지지와 눌림 확인 전', '눌림 및 지지 확인 전'):
+        mgr._save_intuition(dict(rule(), condition=condition, insight='진입을 보류한다'), [1, 2])
+    group = {'canonical_id': 1, 'duplicate_ids': [2], 'canonical_insight': '눌림 확인 전 진입을 보류한다'}
+    coverage = {'qualifier': '눌림 확인 / pullback confirmation', 'canonical_excerpt': '눌림 확인 전'}
+    review = {'canonical_id': 1, 'approved': True, 'reason': 'Incorrectly overlooked support.',
+              'source_coverage': [{'source_id': i, 'canonical_excerpt': '진입을 보류한다'} for i in (1, 2)],
+              'qualifier_coverage': [coverage, coverage]}
+    llm = SimpleNamespace(generate_str=AsyncMock(return_value=json.dumps({'reviews': [review]})))
+    stub_llm_dependencies(monkeypatch, llm)
+    assert await mgr._verify_duplicate_groups(None, [group]) == []
+    assert '지지 확인 / support confirmation' in mgr._merge_rejections[0]['reason']
+
+
+@pytest.mark.asyncio
+async def test_typed_semantic_coverage_accepts_reordered_meaning_without_exact_quote(monkeypatch):
+    mgr = manager()
+    for condition in ('눌림 확인 전', '되돌림 확인 전'):
+        mgr._save_intuition(dict(rule(), condition=condition, insight='진입을 보류한다'), [1, 2])
+    group = {'canonical_id': 1, 'duplicate_ids': [2], 'canonical_condition': '되돌림 확인 전',
+             'canonical_insight': '확인이 끝날 때까지 진입을 보류한다'}
+    review = {'canonical_id': 1, 'approved': True, 'reason': 'Joint source meaning is retained.',
+              'source_coverage': [{'source_id': i, 'condition_preserved': True, 'action_preserved': True,
+                                   'reason': '진입을 보류하고 눌림이 확인되어야 한다는 의미가 유지됩니다.'} for i in (1, 2)],
+              'qualifier_coverage': [{'qualifier': '눌림 확인 / pullback confirmation', 'preserved': True,
+                                     'reason': '되돌림 확인은 여기서 눌림 확인과 같은 조건입니다.'}]}
+    llm = SimpleNamespace(generate_str=AsyncMock(return_value=json.dumps({'reviews': [review]})))
+    stub_llm_dependencies(monkeypatch, llm)
+    approved = await mgr._verify_duplicate_groups(None, [group])
+    assert approved == [group]
+    assert mgr._consolidate_intuitions(approved) == 2
+
+
+@pytest.mark.parametrize('patch', [
+    {'action_preserved': False}, {'condition_preserved': False}, {'action_preserved': 'true'},
+    {'condition_preserved': None}, {'reason': ''},
+])
+def test_typed_coverage_rejects_false_missing_or_untyped_flags_even_with_valid_quote(patch):
+    coverage = {'source_id': 1, 'condition_preserved': True, 'action_preserved': True,
+                'reason': 'Preserved.', 'canonical_excerpt': 'exact valid text'}
+    coverage.update(patch)
+    assert not CompressionManager._coverage_preserved(coverage, 'exact valid text', source=True)
+
+
+def test_typed_qualifier_coverage_requires_preserved_and_specific_reason():
+    assert not CompressionManager._coverage_preserved({'preserved': False, 'reason': 'Missing condition'}, '')
+    assert not CompressionManager._coverage_preserved({'preserved': True, 'reason': ''}, '')
+    assert not CompressionManager._coverage_preserved({'reason': 'Flag omitted', 'canonical_excerpt': 'valid'}, 'valid')
+
+
 @pytest.mark.parametrize('missing', ['첫 진입', '비중 축소 또는 관망', '당일성 FOMO'])
 def test_material_source_qualifiers_cannot_be_silently_removed(missing):
     mgr = manager()

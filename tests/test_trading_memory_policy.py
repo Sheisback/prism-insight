@@ -115,3 +115,33 @@ def test_merge_cannot_cross_reviewed_application_status():
     mgr.conn.execute('UPDATE trading_intuitions SET application_context = ? WHERE id=1', (json.dumps(context()),))
     mgr.conn.execute('UPDATE trading_intuitions SET application_context = ? WHERE id=2', (json.dumps(context(status='improvement')),))
     assert mgr._consolidate_intuitions([{'canonical_id': 1, 'duplicate_ids': [2]}]) == 0
+
+
+@pytest.mark.asyncio
+async def test_semantic_consolidation_cannot_promote_improvements(monkeypatch):
+    mgr = manager()
+    for condition in ('초단위 추세 감지', '초 단위 추세 변화 감지'):
+        mgr._save_intuition({'condition': condition, 'insight': '새 실시간 데이터 연동'}, [1, 2])
+    future = context(status='improvement', stage='system_design', capabilities=['new_tick_feed'])
+    mgr.conn.execute('UPDATE trading_intuitions SET application_context = ?', (json.dumps(future),))
+    group = {'canonical_id': 1, 'duplicate_ids': [2], 'canonical_condition': '초단위 추세 변화 관찰',
+             'canonical_insight': '새 실시간 데이터 연동'}
+    llm = SimpleNamespace(generate_str=AsyncMock(return_value=json.dumps({'reviews': [
+        {'canonical_id': 1, 'approved': True, 'reason': 'Same future data capability.', 'source_coverage': [
+            {'source_id': 1, 'canonical_excerpt': '새 실시간 데이터 연동'},
+            {'source_id': 2, 'canonical_excerpt': '새 실시간 데이터 연동'}]}]})))
+    stub_llm_dependencies(monkeypatch, llm)
+    approved = await mgr._verify_duplicate_groups(None, [group])
+    assert mgr._consolidate_intuitions(approved) == 2
+    metadata = json.loads(mgr.conn.execute('SELECT application_context FROM trading_intuitions WHERE is_active=1').fetchone()[0])
+    assert metadata['status'] == 'improvement' and not is_current_buy_memory(metadata, 'KR')
+    assert mgr._application_records('KR', False, 0) == []
+    mgr._save_intuition({'condition': '초단위로 추세 변화를 관찰', 'insight': '새 실시간 데이터 연동'}, [3, 4])
+    mgr.conn.execute('UPDATE trading_intuitions SET application_context = ? WHERE id=4', (json.dumps(future),))
+    unchanged = {'canonical_id': 3, 'duplicate_ids': [4]}
+    llm.generate_str.return_value = json.dumps({'reviews': [
+        {'canonical_id': 3, 'approved': True, 'reason': 'Absorb another alias without wording change.', 'source_coverage': [
+            {'source_id': 3, 'canonical_excerpt': '새 실시간 데이터 연동'},
+            {'source_id': 4, 'canonical_excerpt': '새 실시간 데이터 연동'}]}]})
+    assert mgr._consolidate_intuitions(await mgr._verify_duplicate_groups(None, [unchanged])) == 1
+    assert mgr._application_records('KR', False, 0) == []
