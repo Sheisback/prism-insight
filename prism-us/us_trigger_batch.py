@@ -1455,6 +1455,23 @@ def select_final_tickers(triggers: dict, trade_date: str = None, use_hybrid: boo
 
 # === Batch Execution ===
 
+def _prioritized_universe(directory_symbols):
+    """Reorder (never add to) the directory: index members first, then A-Z.
+
+    The expanded snapshot stops at a wall-clock budget. Directory order lists
+    every NASDAQ row before NYSE/AMEX, so NYSE large caps (JPM, XOM, LLY...)
+    fell past the budget and were never screened.
+    """
+    symbols = sorted(set(directory_symbols))
+    try:
+        majors = set(get_major_tickers())
+    except Exception as exc:
+        logger.warning('Major-index priority unavailable: %s', type(exc).__name__)
+        majors = set()
+    return ([s for s in symbols if s in majors]
+            + [s for s in symbols if s not in majors])
+
+
 def _load_screening_inputs(trade_date):
     """Apply one common-stock/cap/liquidity boundary before every US trigger."""
     mode = os.getenv('US_SCREENING_UNIVERSE', DEFAULT_US_SCREENING_UNIVERSE)
@@ -1480,7 +1497,7 @@ def _load_screening_inputs(trade_date):
     if not math.isfinite(minimum) or minimum <= 0:
         raise ValueError('Invalid expanded-universe market-cap threshold')
     universe = fetch_universe()
-    tickers = [record.symbol for record in universe.records]
+    tickers = _prioritized_universe(record.symbol for record in universe.records)
     current, previous, date, collection = get_batched_snapshot_pair(trade_date, tickers)
     from prism_core.batch_run_status import snapshot_coverage
     raw_coverage = snapshot_coverage(current, previous, tickers, trade_date, date)
