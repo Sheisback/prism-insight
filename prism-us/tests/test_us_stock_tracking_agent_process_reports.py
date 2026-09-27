@@ -145,6 +145,29 @@ us_agent_module = _load_us_agent_module()
 USStockTrackingAgent = us_agent_module.USStockTrackingAgent
 
 
+@pytest.mark.parametrize("capture_enabled,broken", [(False, False), (True, False), (True, True)])
+def test_committed_exit_optional_oneil_tape(monkeypatch, capture_enabled, broken):
+    from observability import oneil_capture
+    monkeypatch.setenv("ONEIL_TAPE_CAPTURE_ENABLED", str(capture_enabled))
+    tape = MagicMock()
+    tape.campaign_id_for_position.return_value = "campaign"
+    tape.bind_event_identity.side_effect = lambda _, event: event
+    if broken:
+        tape.append_exit.side_effect = RuntimeError("unavailable")
+    monkeypatch.setattr(oneil_capture, "_tape", lambda: tape)
+    monkeypatch.setattr(us_agent_module, "emit_trading_context", lambda *a, **kw: None)
+    agent = USStockTrackingAgent.__new__(USStockTrackingAgent)
+    agent.conn = MagicMock()
+    agent._live_market_context = {"regime": "bullish"}
+    agent._emit_exit_context_snapshot(ticker="AAPL", company_name="Apple",
+        scenario_json="{}", legacy_holding_ids=[17], trigger_type="test",
+        trigger_mode="morning", sell_reason="test", exit_kind="ai", buy_price=100,
+        sell_price=105, profit_rate=5, holding_days=1, account_key="test")
+    assert tape.append_exit.call_count == int(capture_enabled)
+    if capture_enabled:
+        tape.campaign_id_for_position.assert_called_once_with("legacy:US:17")
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "elapsed, expected_period, stored_days",
@@ -460,9 +483,16 @@ async def test_us_buy_dual_writes_open_position():
 
 
 @pytest.mark.asyncio
-async def test_us_mirror_failures_keep_buy_and_sell_legacy_commits(monkeypatch):
+@pytest.mark.parametrize("owned_exit", [False, True])
+async def test_us_mirror_failures_keep_buy_and_sell_legacy_commits(monkeypatch, owned_exit):
     """US shadow failures must stay observable and never block legacy writes."""
     from prism_core.positions import PositionStore
+    if owned_exit:
+        import prism_core.oneil_routing as routing
+        def mark_owned(agent, stock, reason):
+            stock["_oneil_owned_exit"] = True
+            return True
+        monkeypatch.setattr(routing, "route_exit", mark_owned)
 
     agent = USStockTrackingAgent.__new__(USStockTrackingAgent)
     agent.conn = sqlite3.connect(":memory:")
@@ -552,13 +582,22 @@ async def test_us_mirror_failures_keep_buy_and_sell_legacy_commits(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("tape_enabled", [False, True])
 async def test_us_full_exit_closes_all_siblings_before_one_order_and_publish(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, tape_enabled
 ):
     """A queued full exit closes every legacy/shadow row but emits one order."""
     from prism_core.positions import PositionStore
 
     events = []
+    from observability import oneil_capture
+    monkeypatch.setenv("ONEIL_TAPE_CAPTURE_ENABLED", str(tape_enabled))
+    monkeypatch.setattr(us_agent_module, "emit_trading_context", lambda *a, **kw: None)
+    tape = MagicMock()
+    tape.campaign_id_for_position.return_value = "campaign"
+    tape.bind_event_identity.side_effect = lambda _, event: event
+    tape.append_exit.side_effect = lambda *_: events.append("tape")
+    monkeypatch.setattr(oneil_capture, "_tape", lambda: tape)
     trading_module = types.ModuleType("trading.us_stock_trading")
 
     class FullExitTradingContext:
@@ -668,7 +707,7 @@ async def test_us_full_exit_closes_all_siblings_before_one_order_and_publish(
     sold = await USStockTrackingAgent.update_holdings(agent)
 
     assert len(sold) == 2
-    assert events == ["broker", "redis", "gcp"]
+    assert events == ["broker", "redis", "gcp"] + (["tape", "tape"] if tape_enabled else [])
     assert agent.conn.execute("SELECT COUNT(*) FROM us_stock_holdings").fetchone()[0] == 0
     assert agent.conn.execute("SELECT COUNT(*) FROM us_trading_history").fetchone()[0] == 2
     positions = agent.conn.execute(
@@ -719,12 +758,35 @@ def _install_us_trading_module(monkeypatch):
 
 @pytest.mark.parametrize("entry_quality_capture", ["0", "1"])
 @pytest.mark.parametrize("micro_split_shadow", ["0", "1"])
+@pytest.mark.parametrize("scenario_capture", ["0", "1", "failure"])
 @pytest.mark.asyncio
 async def test_process_reports_analyzes_once_and_dedupes_signals(
-    monkeypatch, caplog, tmp_path, entry_quality_capture, micro_split_shadow
+    monkeypatch, caplog, tmp_path, entry_quality_capture, micro_split_shadow, scenario_capture,
+    real_strategy_write=False, broker_failure=False, adaptive_sidecar="0", owned_initial=False,
 ):
+    if owned_initial:
+        import prism_core.oneil_routing as routing
+        async def intercept(*args, **kwargs):
+            return dict(handled=True, strategy_recorded=False, reason="OWNED_INITIAL_UNAVAILABLE")
+        monkeypatch.setattr(routing, "route_initial", intercept)
+    from prism_core import oneil_batch_setup
+    monkeypatch.setenv("ONEIL_AUTO_REVIEW_CAPTURE_ENABLED", "0" if adaptive_sidecar == "0" else "1")
+    sidecar_calls = []
+    def load_sidecar(path, **kwargs):
+        sidecar_calls.append((path, kwargs))
+        if adaptive_sidecar == "failure":
+            raise RuntimeError("synthetic sidecar failure")
+        return dict(contract_version="oneil-batch-linked-review-v1", market="US",
+                    symbol=kwargs["symbol"], decision_ref=kwargs["decision_ref"], status="MISSING")
+    monkeypatch.setattr(oneil_batch_setup, "load_review_sidecar", load_sidecar)
     monkeypatch.setenv("ENTRY_QUALITY_CAPTURE_ENABLED", entry_quality_capture)
     monkeypatch.setenv("MICRO_SPLIT_SHADOW_ENABLED", micro_split_shadow)
+    monkeypatch.setenv("SCENARIO_SHADOW_CAPTURE_ENABLED", "0" if scenario_capture == "0" else "1")
+    monkeypatch.setenv("SCENARIO_SHADOW_CAPTURE_DB", str(tmp_path / "capture.sqlite"))
+    if scenario_capture == "failure":
+        def broken_capture(**kwargs):
+            raise RuntimeError("synthetic observer failure")
+        monkeypatch.setattr(us_agent_module, "emit_scenario_shadow_capture", broken_capture)
     monkeypatch.setenv(
         "PRISM_OBSERVABILITY_SPOOL", str(tmp_path / "observability.jsonl")
     )
@@ -751,6 +813,18 @@ async def test_process_reports_analyzes_once_and_dedupes_signals(
     agent.conn = sqlite3.connect(":memory:")
     agent.cursor = agent.conn.cursor()
 
+    if real_strategy_write:
+        agent.conn.execute("""CREATE TABLE us_stock_holdings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, account_key TEXT, account_name TEXT,
+            ticker TEXT, company_name TEXT, buy_price REAL, buy_date TEXT,
+            current_price REAL, last_updated TEXT, scenario TEXT, target_price REAL,
+            stop_loss REAL, trigger_type TEXT, trigger_mode TEXT, sector TEXT)""")
+        agent.conn.commit()
+        agent._mirror_position_open = MagicMock()
+        agent._get_trigger_win_rate = lambda _trigger: ""
+        agent._msg_types = []
+        agent.message_queue = []
+
     core_calls = []
     holdings_checks = []
     slot_checks = []
@@ -760,6 +834,23 @@ async def test_process_reports_analyzes_once_and_dedupes_signals(
     redis_calls = []
     gcp_calls = []
     watchlist_calls = []
+    frozen_live_scenarios = []
+    broker_calls = []
+
+    original_broker_buy = _FakeAsyncUSTradingContext.async_buy_stock
+
+    async def checked_broker_buy(context, *args, **kwargs):
+        broker_calls.append((context.account_name, args, kwargs))
+        if scenario_capture == "1":
+            # Capture must precede this broker path, even when its result is partial.
+            records = [json.loads(line) for line in (tmp_path / "observability.jsonl").read_text().splitlines()]
+            assert any(record["event_type"].startswith("scenario_shadow.")
+                       and record["position_id"] == f"legacy:US:{len(broker_calls)}" for record in records)
+        if broker_failure:
+            return {"success": False, "message": "synthetic broker rejection"}
+        return await original_broker_buy(context, *args, **kwargs)
+
+    monkeypatch.setattr(_FakeAsyncUSTradingContext, "async_buy_stock", checked_broker_buy)
 
     async def fake_core(report_path):
         core_calls.append(report_path)
@@ -801,6 +892,10 @@ async def test_process_reports_analyzes_once_and_dedupes_signals(
         ticker, company_name, current_price, scenario, rank_change_msg, is_add=False
     ):
         buy_calls.append((agent.active_account["name"], ticker))
+        frozen_live_scenarios.append((scenario, json.dumps(scenario, sort_keys=True)))
+        if real_strategy_write:
+            return await USStockTrackingAgent._buy_stock_with_position(
+                agent, ticker, company_name, current_price, scenario, rank_change_msg, is_add=is_add)
         return LegacyPositionWriteResult(True, len(buy_calls))
 
     def fake_link_position_entry_intent(**kwargs):
@@ -828,13 +923,22 @@ async def test_process_reports_analyzes_once_and_dedupes_signals(
 
     buy_count, sell_count = await USStockTrackingAgent.process_reports(agent, ["report-a.pdf"])
 
+    if owned_initial:
+        assert buy_count == sell_count == 0
+        assert buy_calls == broker_calls == link_calls == redis_calls == gcp_calls == []
+        assert core_calls == ["report-a.pdf"]
+        return
     assert buy_count == 2
     assert sell_count == 0
     assert core_calls == ["report-a.pdf"]
-    assert holdings_checks == [("us-primary", "AAPL"), ("us-secondary", "AAPL")]
-    assert slot_checks == ["us-primary", "us-secondary"]
+    repeats = 2 if real_strategy_write else 1
+    assert holdings_checks == [(name, "AAPL") for name in ("us-primary", "us-secondary") for _ in range(repeats)]
+    assert slot_checks == [name for name in ("us-primary", "us-secondary") for _ in range(repeats)]
     assert sector_checks == [("us-primary", "Technology"), ("us-secondary", "Technology")]
     assert buy_calls == [("us-primary", "AAPL"), ("us-secondary", "AAPL")]
+    assert len(broker_calls) == 2
+    assert all(json.dumps(scenario, sort_keys=True) == original
+               for scenario, original in frozen_live_scenarios)
     assert [call["legacy_holding_id"] for call in link_calls] == [1, 2]
     assert all(call["intent_id"] for call in link_calls)
     intent_sources = sqlite3.connect(agent.db_path).execute(
@@ -844,10 +948,11 @@ async def test_process_reports_analyzes_once_and_dedupes_signals(
         ("vps:us-primary:01", "legacy:US:1"),
         ("vps:us-secondary:01", "legacy:US:2"),
     ]
-    assert len(redis_calls) == 1
-    assert len(gcp_calls) == 1
+    assert len(redis_calls) == (0 if broker_failure else 1)
+    assert len(gcp_calls) == (0 if broker_failure else 1)
     assert watchlist_calls == []
-    assert "partial success" in caplog.text.lower()
+    if not broker_failure:
+        assert "partial success" in caplog.text.lower()
     observed = [
         json.loads(line)
         for line in (tmp_path / "observability.jsonl")
@@ -873,7 +978,7 @@ async def test_process_reports_analyzes_once_and_dedupes_signals(
         assert len(reconciliations) == 2
         assert all(
             event["attributes"]["fill_provenance"]["status"]
-            == "SUBMITTED_ONLY"
+            == ("REJECTED" if broker_failure else "SUBMITTED_ONLY")
             for event in reconciliations
         )
     else:
@@ -901,6 +1006,64 @@ async def test_process_reports_analyzes_once_and_dedupes_signals(
         ) == [0, 1]
     else:
         assert micro_split_events == []
+
+    scenario_events = [event for event in observed if event["event_type"].startswith("scenario_shadow.")]
+    if scenario_capture == "1":
+        assert len(scenario_events) == 2
+        assert {event["position_id"] for event in scenario_events} == {"legacy:US:1", "legacy:US:2"}
+        assert {event["decision_id"] for event in scenario_events} == {"report:report-a.pdf"}
+        if adaptive_sidecar != "0":
+            assert len(sidecar_calls) == 2
+            assert all(kwargs["decision_ref"] == "report:report-a.pdf"
+                       and kwargs["symbol"] == "AAPL" for _, kwargs in sidecar_calls)
+            assert all(event["attributes"]["adaptive_setup"]["status"] == "MISSING"
+                       for event in scenario_events)
+        else:
+            assert sidecar_calls == []
+            assert all("adaptive_setup" not in event["attributes"] for event in scenario_events)
+    else:
+        assert scenario_events == []
+        assert not (tmp_path / "capture.sqlite").exists()
+    if real_strategy_write:
+        holdings = agent.conn.execute("SELECT id, buy_price, stop_loss, scenario FROM us_stock_holdings ORDER BY id").fetchall()
+        assert [(row[0], row[1], row[2]) for row in holdings] == [(1, 180.5, 170.0), (2, 180.5, 170.0)]
+        assert [json.loads(row[3]) for row in holdings] == [json.loads(raw) for _, raw in frozen_live_scenarios]
+        entries = [event for event in observed if event["event_type"] == "entry.executed"]
+        assert {event["position_id"] for event in entries} == {"legacy:US:1", "legacy:US:2"}
+        if scenario_capture == "1":
+            for event in scenario_events:
+                assert any(entry["position_id"] == event["position_id"]
+                           and entry["decision_id"] == event["decision_id"] for entry in entries)
+
+
+@pytest.mark.parametrize("capture_mode", ["0", "1", "failure"])
+@pytest.mark.asyncio
+async def test_scenario_capture_real_strategy_commit_parity(monkeypatch, caplog, tmp_path, capture_mode):
+    await test_process_reports_analyzes_once_and_dedupes_signals(
+        monkeypatch, caplog, tmp_path, "1", "0", capture_mode, real_strategy_write=True)
+
+
+@pytest.mark.asyncio
+async def test_owned_initial_unavailable_cannot_fall_through_full_buy(monkeypatch, caplog, tmp_path):
+    await test_process_reports_analyzes_once_and_dedupes_signals(
+        monkeypatch, caplog, tmp_path, "0", "0", "0", owned_initial=True)
+
+
+@pytest.mark.asyncio
+async def test_scenario_capture_preserves_rejected_broker_strategy(monkeypatch, caplog, tmp_path):
+    await test_process_reports_analyzes_once_and_dedupes_signals(
+        monkeypatch, caplog, tmp_path, "1", "0", "1", real_strategy_write=True, broker_failure=True)
+
+
+@pytest.mark.parametrize("sidecar_mode", ["0", "1", "failure"])
+@pytest.mark.parametrize("broker_failure", [False, True])
+@pytest.mark.asyncio
+async def test_adaptive_sidecar_real_strategy_and_broker_parity(
+    monkeypatch, caplog, tmp_path, sidecar_mode, broker_failure,
+):
+    await test_process_reports_analyzes_once_and_dedupes_signals(
+        monkeypatch, caplog, tmp_path, "1", "0", "1", real_strategy_write=True,
+        broker_failure=broker_failure, adaptive_sidecar=sidecar_mode)
 
 
 @pytest.mark.parametrize("configured_budget", [None, 0, 1, 2000.0])
@@ -1026,6 +1189,10 @@ async def test_sideways_uptrend_score_six_uses_half_size_us_order(monkeypatch, t
 async def test_process_reports_applies_macro_adjustment_to_final_score(
     monkeypatch, tmp_path
 ):
+    monkeypatch.setenv("SCENARIO_SHADOW_CAPTURE_ENABLED", "1")
+    monkeypatch.setenv("SCENARIO_SHADOW_CAPTURE_DB", str(tmp_path / "capture.sqlite"))
+    monkeypatch.setattr(us_agent_module, "emit_scenario_shadow_capture",
+                        lambda **kwargs: pytest.fail("rejected candidate must not create a plan"))
     agent = USStockTrackingAgent.__new__(USStockTrackingAgent)
     agent.db_path = str(tmp_path / "macro-score.sqlite")
     _ensure_reentry_schema(agent.db_path)
@@ -1096,6 +1263,7 @@ async def test_process_reports_applies_macro_adjustment_to_final_score(
     assert (buy_count, sell_count) == (0, 0)
     assert gate_scores == [4.0]
     agent._buy_stock_with_position.assert_not_awaited()
+    assert not (tmp_path / "capture.sqlite").exists()
     assert "Insufficient score (4/5)" in watchlist_calls[0]["skip_reason"]
 
 
@@ -1180,7 +1348,8 @@ async def test_process_reports_returns_zero_for_empty_accounts(caplog):
 
 
 @pytest.mark.asyncio
-async def test_update_holdings_masks_sold_account_payload(monkeypatch, tmp_path):
+@pytest.mark.parametrize("owned_exit", [False, True])
+async def test_update_holdings_masks_sold_account_payload(monkeypatch, tmp_path, owned_exit):
     agent = USStockTrackingAgent.__new__(USStockTrackingAgent)
     agent.db_path = str(tmp_path / "us_stock_tracking.sqlite")
     agent.conn = sqlite3.connect(":memory:")
@@ -1243,6 +1412,8 @@ async def test_update_holdings_masks_sold_account_payload(monkeypatch, tmp_path)
         return True, "Take profit"
 
     async def fake_sell_stock(stock, reason, exit_kind=None):
+        if owned_exit:
+            stock["_oneil_owned_exit"] = True
         return True
 
     agent._get_current_stock_price = fake_get_current_stock_price
@@ -1253,12 +1424,16 @@ async def test_update_holdings_masks_sold_account_payload(monkeypatch, tmp_path)
     gcp_calls = []
     _install_signal_modules(monkeypatch, redis_calls, gcp_calls)
     _install_us_trading_module(monkeypatch)
+    if owned_exit:
+        monkeypatch.setattr(us_agent_module.ExecutionService, "us", MagicMock(side_effect=AssertionError("legacy broker forbidden")))
 
     sold = await USStockTrackingAgent.update_holdings(agent)
 
     assert len(sold) == 1
     assert sold[0]["account_label"] == "us-primary (vps:12****78:01)"
     assert "account_key" not in sold[0]
+    if owned_exit:
+        us_agent_module.ExecutionService.us.assert_not_called()
 
 
 def test_safe_account_log_label_masks_account_key():

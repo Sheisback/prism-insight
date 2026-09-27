@@ -1,13 +1,13 @@
 # PRISM-INSIGHT v2.23.0 — DART 심층분석 · 업종별 보고서 · 읽기 쉬운 리포트
 
-> **발행일**: 2026-09-27
-> **범위**: `v2.22.0` (`60a0c8cd`) → `62dd9414` (PR #797까지) · 제품 변경 커밋 **226개** / 병합 PR **61개**
-> **규모**: 파일 **357개**, **+47,369 / −1,850줄** · 2026-09-15–2026-09-27
+> **발행일**: 2026-09-28
+> **범위**: `v2.22.0` (`60a0c8cd`) → `688d0f1f` (PR #818까지) · 제품 변경 커밋 **311개** / 병합 PR **80개**
+> **규모**: 파일 **518개**, **+71,072 / −2,437줄** · 2026-09-15–2026-09-28
 > **집계 기준**: 릴리즈 문서·감사 자료 작성 커밋은 위 제품 변경 통계에서 제외합니다. 새 태그에는 이 릴리즈 문서도 포함됩니다.
 
 ## 한눈에 보기
 
-이전 정식 릴리즈는 **v2.22.0, 2026-09-15(KST)**입니다. 이번 버전은 지난 12일의 변경 226개를
+이전 정식 릴리즈는 **v2.22.0, 2026-09-15(KST)**입니다. 이번 버전은 지난 13일의 변경 311개를
 오래된 순서부터 한 번씩 검토해 작업 단위로 묶었습니다. 가장 큰 변화는 **한국 종목 보고서**입니다.
 공시(DART) 원문을 근거로 한 새 장이 생겼고, 은행·지주·건설·바이오·리츠처럼 업종마다 다른
 잣대로 읽도록 바뀌었으며, 처음 읽는 분도 이해할 수 있게 요약과 용어 풀이를 다시 썼습니다.
@@ -21,14 +21,19 @@
   단기 목표로 쓰지 않습니다(KR·US 기본 적용). 매수 판단은 5장이 포함된 보고서 전문을 읽습니다.
   금융사는 부채비율 대신 **규제 자본비율**로 재무 건전성을 봅니다(운영 서버 적용, 관측 중).
   5장·경쟁사 표를 체크리스트 근거로 인용하게 하는 별도 규칙은 코드만 들어갔고 **꺼져 있습니다**.
+  위 매물 없는 신고가 돌파는 오닐 규칙 목표(진입가 × 1.20)를 근거로 인정하고, 거래량·위치·동종업계 수치는
+  코드로 계산해 판단에 넣습니다.
+- **매도·보유**: 트레일링 스탑이 고점을 읽지 못해 발동하지 않던 결함을 고쳐, 기존 규칙대로 고점 대비 하락을 적용합니다.
 - **US 보고서**: 공식 실적·공시·물가·금리 발표로 근거를 보강하고, 단위·계산을 코드로 검증하며,
   경쟁사 비교 표를 추가했습니다.
 - **US 선별 대상**: 기존에는 S&P 500 + 나스닥 100 구성종목(약 518개)만 보고 시가총액은 거르지 않았습니다.
   이제는 **상장 보통주 전체**를 보고, 당일 거래대금 5천만 달러 이상 종목 중 **시가총액 10억 달러 이상**만 남깁니다.
 - **데이터·운영**: 권리락 종목 하나로 KR 선별 전체가 멈추던 문제, 조용히 끝나던 US 배치, 배치에 묶여 꺼지던
-  리포트 프록시를 고쳤고, US 완료 일봉 캐시와 배치 실패 알림을 추가했습니다.
-- **BTC·관측**: BTC 데모 공지와 강제청산 위험 검사, API 키 만료 경고를 보강했고, 오닐식 후보와
-  초분할을 **관측 전용(SHADOW)**으로 연결했습니다. 실거래 전환은 없습니다.
+  리포트 프록시를 고쳤고, US 완료 일봉 캐시와 배치 실패 알림을 추가했습니다. 주간 인사이트는 기간·표본 수를
+  함께 보여 주고, 같은 뜻의 누적 교훈을 하나로 정리합니다.
+- **BTC·관측**: BTC 데모 공지와 강제청산 위험 검사, API 키 만료 경고를 보강했고, 오닐식 후보·초분할,
+  손절·보류 종목의 돌파 후 재진입, 미국 최초 50% 분할 진입을 **관측 전용(SHADOW)**으로 연결했습니다.
+  실거래 전환은 없습니다.
 
 ## 이전 → 지금: 달라진 동작 (날짜순)
 
@@ -67,6 +72,14 @@
 | 09-26 | 금융사 매수 기준 | 금융사도 "부채비율 < 200%"로 판단해 구조적으로 미달 | 규제 자본비율로 판정(운영 서버 적용), 보고서에 없으면 12개월 이내 공시 수치를 검색 (#791, #792, #797) |
 | 09-26 | 5장 문체 | 공시 용어를 그대로 사용 | 전문 용어마다 괄호 풀이, 핵심 수치마다 부담·여유 한 문장 (#793, #795) |
 | 09-27 | BTC 경보 | 레버리지가 이미 같을 때(110043)를 오류로 보고 오류 폭주 경보, 키 만료 사전 경고 없음 | 성공으로 처리, 만료 14일·3일 전 경고, "만료 없음" 값 처리 (#794, #796) |
+| 09-27 | 주간 인사이트·누적 기억 | 누적 트리거 관측을 이번 주 성과처럼 표시하고 건수만으로 기준 완화를 권함, 표현만 다른 같은 뜻의 직관이 중복 | 기간·표본 수·미확인을 표시하고 매도 후 가격 변화와 매도 판단의 적절성을 구분, 의미 검증을 통과한 직관만 통합(활성 45개 → 18개, 원문 보존) (#800–#802) |
+| 09-27 | 매수 게이트 산술 검사 | 판단 뒤 시세가 조금 움직이면 R/R 산수가 틀렸다고 보고 매수 차단 | 산수는 시나리오 작성 기준가로, R/R 하한·손절폭 상한은 새 시세로 검사 (#803) |
+| 09-27 | 거래량 해석 (KR·US 매수·매도) | 저거래량 조정을 추세 반전으로 단정, KR 매도는 14:50 봉을 확정봉으로 가정 | 가격 위치·지지 유지·돌파 성공과 함께 확정 세션 기준으로 해석 (#805) |
+| 09-27 | 매수 보조 수치 | 판단 시점 수치를 모델이 직접 계산 | 최근 3개 확정 세션 거래량, 20일 고가·MA20·ATR 대비 위치, KR 동종업계 PER/PBR 중앙값, US 다음 실적일을 코드가 제공 (#807) |
+| 09-27 | 트레일링 스탑 | 추세 청산 루프가 운영에 없는 컬럼을 읽어 고점이 늘 현재가였고, 초기화한 고점을 저장하지 않아 6/24 이후 발동 0회 | 시나리오에 저장된 고점을 읽고 오르기만 하도록 저장, 기존 트레일링 규칙이 의도대로 작동 (#810) |
+| 09-27 | 관측(SHADOW) 재진입 | 손절·보류 종목의 이후 흐름을 보지 않음 | 손절 청산·자리 보류·게이트 차단 종목의 피벗 돌파 재진입을 가상 기록하고, 트리거 때만 매수 에이전트로 재점검 (#803, #806, #812–#816) |
+| 09-27 | 매수 목표가 | 목표가를 가장 가까운 저항까지 80%로만 잡아 52주 고점 부근 종목은 목표 여력 1~3%·R/R 1 미만 | 위 매물 없는 신고가 돌파는 진입가 × 1.20(오닐 20~25% 익절 규칙의 하단), 보고서 전문을 새 미진입 사유로 쓰지 않는 안전 문구 기본 적용 (#817) |
+| 09-27 | 관측(SHADOW) 분할매수 | 미국 신규 진입은 전액 매수만 | 최초 최대 50% 후 조건부 80/100% 분할을 전용 worker로 가상 운용, LIVE는 별도 승인 파일 필요 (#818) |
 
 ## 보고서를 읽는 분께: 무엇이 어떻게 바뀌었나
 
@@ -190,14 +203,26 @@ DART의 공식 업종명과 재무상태표 구조를 함께 보고 판별합니
   차트에서 안전하게 처리합니다. (#756, #759–#762)
 - 코드로 만드는 경쟁사 표를 추가하고, 오래된 발행사 발표·영문 영수증·소수점 표기 오류를 고쳤습니다. (#781)
 
-## 4. KR/US 공통 시장 근거
+## 4. KR/US 공통 시장 근거와 매수·매도 판단
 
 - 16개 ETF 수익률, 참여도, 확정 매매 국면을 보고서·요약·매수 판단에 **설명용**으로 전달합니다. 점수·임계값은
   바꾸지 않았습니다. (#747)
 - **매수 목표가 규칙(KR·US, 기본 적용)**: 보고서 목표가는 출처·날짜·기간이 이번 매매에 맞을 때만 쓰고, 12개월
   컨센서스를 단기 목표로 쓰지 않으며, 근거가 없으면 현재가 +15~30% 같은 임의 값으로 채우지 않고 미진입합니다.
   업종 선도 가점은 산업이 정확히 일치할 때만 줍니다. 근거 없는 목표로는 진입이 계약 검증에서 거절됩니다. (#747)
+- **신고가 돌파 목표(KR·US)**: 52주 고가 95% 이상·위로 +20% 안에 다른 주요 저항 없음·돌파 고점 대비 +5% 이내·
+  하락추세 게이트 미해당을 모두 충족하면 목표가를 진입가 × 1.20(오닐의 20~25% 익절 규칙 하단)으로 둡니다.
+  비율은 계약 검증이 코드로 확인하며, 목표 도달 뒤 처리는 기존 매도 규칙(강세 국면 트레일링)을 따릅니다. (#817)
 - 매수 판단은 PDF에서 추출한 보고서 전문(5장·경쟁사 표 포함)을 Codex·대체 경로 모두에서 그대로 받습니다. (#765)
+  이 자료로 새 미진입 사유·감점을 만들지 않는다는 안전 문구를 기본 적용하며, 감사의견 비적정·계속기업 불확실성·
+  거래정지 같은 존속 위협은 기존대로 미진입 사유입니다. (#817)
+- 매수 게이트의 R/R 산술 검사는 시나리오 작성 기준가로 하고, R/R 하한·손절폭 상한은 새 시세로 검사합니다. (#803)
+- 거래량은 가격 위치·지지 유지·돌파 성공과 함께 확정 세션 기준으로 해석합니다(KR·US 매수·매도). 점수·국면·손절·
+  주문 규칙은 그대로입니다. (#805)
+- 매수 프롬프트에 코드로 계산한 보조 수치(확정 세션 거래량, 20일 고가·MA20·ATR 대비 위치, KR 동종업계 PER/PBR
+  중앙값, US 다음 실적일)를 넣습니다. 긴급 중지는 `PRISM_BUY_DECISION_FACTS=false`입니다. (#807)
+- 추세 청산 루프와 매도 에이전트가 보유 고점을 제대로 읽고 저장하도록 고쳐, 고점 +5% 이후 -8%/-5%/-10% 트레일링이
+  의도대로 작동합니다(6/24~9/27 발동 0회였음). (#810)
 - 측정되지 않은 선택 지표 행을 요약 표시하고, 출처가 끊긴 문단만 제외합니다. (#774, #784)
 
 ## 5. 업종별 보고서 관점과 금융업 매수 기준
@@ -237,42 +262,55 @@ DART의 공식 업종명과 재무상태표 구조를 함께 보고 판별합니
 - API 키 만료를 따로 분류하고, 레버리지 무변경 응답의 오경보를 없앴으며, 만료 14일·3일 전에 경고하고, 만료 없음
   값을 올바르게 처리합니다. (#743, #794, #796)
 
-## 8. SHADOW 관측: 오닐식 후보 × 초분할
+## 8. SHADOW 관측: 오닐식 후보 · 초분할 · 재진입 · 최초 50% 분할
 
 - US·KR 오닐식 후보 감시와 초분할 초기 진입 투영을 **관측 이벤트로만** 기록합니다. 기존 선정·매수·매도·
   사이징·주문은 바뀌지 않으며, 자동 LIVE 승격은 금지돼 있습니다. 표본은 아직 부족합니다. (#741, #745)
+- **재진입 v2**: 손절 청산·자리 보류·게이트 차단 종목을 지켜보다 피벗 돌파가 나오면 가상 진입·청산을 기록합니다.
+  트리거 시점 입력은 고정 저장하고, 트리거가 나올 때만 매수 에이전트로 재점검합니다(`REENTRY_V2_LLM_RECHECK`,
+  운영 켜짐, 월 2~5회 예상). 운영 DB는 읽기만 하며 주문은 없습니다. 판단 입력값 기록(`decision_inputs_v1`)과
+  v1 재진입 관측은 이 과정에서 함께 들어왔고 v1은 꺼져 있습니다. (#803, #804, #806, #812–#816)
+- **최초 최대 50% 전환형 분할(US)**: 첫 매수는 단위 예산의 최대 50%, 이후 조건부 80/100%로 늘리는 방식을 기존
+  전액 매수와 나란히 전용 worker(`prism-oneil-shadow`, 60초 주기)로 가상 운용합니다. 계좌·종목 소유권, 부분체결·
+  UNKNOWN 주문, 보호 우선 처리를 실제와 같은 규칙으로 기록합니다. LIVE는 계좌·예산·만료일·코드 해시에 묶인
+  별도 승인 파일 없이는 켜지지 않습니다. 운영은 SHADOW입니다. (#818)
+- 재진입 피벗 규칙과 청산 가설의 재생 도구를 추가했습니다. 1단계 재생에서는 일관된 우위가 없어 전진 관측만 합니다. (#808, #809, #811)
 
 ## 9. 운영·거버넌스
 
 - 리포트 전용 OAuth 프록시를 배치 수명과 분리해 db-server의 systemd 서비스로 운영합니다. (#757, #758)
 - 전략 도입 적합성 게이트와 스크리닝↔매매 에이전트 호환성 추적을 검토 절차에 의무화했습니다(문서). (#733, #736)
 - 격리 작업 폴더를 Git 추적에서 제외했습니다(직접 커밋 `f2f8312f`).
+- 주간 인사이트는 누적 기간·표본 수·미확인을 표시하고, 매도 후 가격 변화와 매도 판단의 적절성을 구분합니다.
+  누적 직관은 별도 검증을 통과한 같은 뜻만 통합하고 원문은 비활성 행으로 보존합니다(운영 활성 45개 → 18개). (#800–#802)
 
 ## 개발자용 상세 — 동일 가중치 커밋 집계
 
-`v2.22.0..62dd9414`의 **226개 커밋을 모두 오래된 순서부터 확인**했습니다.
+`v2.22.0..688d0f1f`에서 릴리즈 문서 PR(#798·#799)을 뺀 **311개 커밋을 모두 오래된 순서부터 확인**했습니다.
 각 커밋은 1표이며 날짜·최근성·변경 줄 수·작성자·PR 크기에 추가 가중치를 주지 않았습니다.
 비병합 커밋은 주된 목적 하나에만 배정하고, 병합 커밋은 별도로 집계했습니다.
 통합 PR(#781)로 함께 들어온 하위 PR(#777–#780)의 커밋은 하위 PR의 주제로 분류했습니다.
-PR이 없는 직접 커밋 **5개**도 포함했습니다. 한 PR의 커밋이 성격에 따라 여러 주제로 나뉜 경우(#765·#772·#781·#782)가
+PR이 없는 직접 커밋 **13개**도 포함했습니다. 한 PR의 커밋이 성격에 따라 여러 주제로 나뉜 경우(#765·#772·#781·#782·#807)가
 있습니다. 커밋 수가 중요도·완성도·수익성 점수라는 뜻은 아닙니다.
 
 <details>
-<summary>226개 커밋의 주제별 집계 펼치기</summary>
+<summary>311개 커밋의 주제별 집계 펼치기</summary>
 
 | 작업 묶음 | 커밋 | 비율 |
 |---|---:|---:|
-| KR 보고서 DART 심층분석(5장) 수집·집필·차트 (`report_kr_dart`) | 29 | 12.8% |
-| 보고서 구성·정확성(요약·전략·경쟁사 표·차트·사실 검증·텔레그램 요약) (`report_quality`) | 45 | 19.9% |
-| US 보고서 공식 근거·수치·피어 표 (`report_us`) | 19 | 8.4% |
-| KR/US 공통 시장 근거 (`market_evidence`) | 9 | 4.0% |
-| 업종별 보고서 관점·금융업 매수 기준 (`sector_aware`) | 7 | 3.1% |
-| 스크리닝·시장 데이터·배치 상태 (`screening_data`) | 16 | 7.1% |
-| BTC 데모 공지·안전장치·경보 (`btc`) | 18 | 8.0% |
-| SHADOW 관측(오닐 후보·초분할) (`shadow_observability`) | 6 | 2.7% |
-| 운영(리포트 프록시)·거버넌스 문서 (`ops_governance`) | 7 | 3.1% |
-| 병합 커밋 (`merge`) — PR 병합 61개 + 동기화 병합 9개 | 70 | 31.0% |
-| **합계** | **226** | 100% |
+| KR 보고서 DART 심층분석(5장) 수집·집필·차트 (`report_kr_dart`) | 29 | 9.3% |
+| 보고서 구성·정확성(요약·전략·경쟁사 표·차트·사실 검증·텔레그램 요약) (`report_quality`) | 45 | 14.5% |
+| US 보고서 공식 근거·수치·피어 표 (`report_us`) | 19 | 6.1% |
+| KR/US 공통 시장 근거 (`market_evidence`) | 9 | 2.9% |
+| 매수·매도 판단 규칙(목표가·게이트 산술·거래량·보조 수치·트레일링) (`trading_rules`) | 8 | 2.6% |
+| 업종별 보고서 관점·금융업 매수 기준 (`sector_aware`) | 7 | 2.3% |
+| 스크리닝·시장 데이터·배치 상태 (`screening_data`) | 16 | 5.1% |
+| BTC 데모 공지·안전장치·경보 (`btc`) | 18 | 5.8% |
+| SHADOW 관측(오닐 후보·초분할·재진입·최초 50% 분할·재생 도구) (`shadow_observability`) | 42 | 13.5% |
+| 주간 인사이트·누적 기억 (`memory`) | 13 | 4.2% |
+| 운영(리포트 프록시)·거버넌스 문서 (`ops_governance`) | 7 | 2.3% |
+| 병합 커밋 (`merge`) — PR 병합 80개 + 동기화 병합 18개 | 98 | 31.5% |
+| **합계** | **311** | 100% |
 
 </details>
 
@@ -284,19 +322,21 @@ PR이 없는 직접 커밋 **5개**도 포함했습니다. 한 PR의 커밋이 �
 | 2026-09-15 – 2026-09-16 | 24 | 15 | 39 |
 | 2026-09-17 – 2026-09-22 | 24 | 6 | 30 |
 | 2026-09-23 – 2026-09-24 | 60 | 16 | 76 |
-| 2026-09-25 – 2026-09-27 | 48 | 33 | 81 |
-| **합계** | **156** | **70** | **226** |
+| 2026-09-25 – 2026-09-26 | 43 | 27 | 70 |
+| 2026-09-27 – 2026-09-28 | 62 | 34 | 96 |
+| **합계** | **213** | **98** | **311** |
 
 </details>
 
-전체 SHA·작성일·제목·단일 분류·PR 연결과 PR별 규모는
-[릴리즈 감사 자료](https://github.com/dragon1086/prism-insight/blob/v2.23.0/docs/release_audits/v2.23.0.json)에 있습니다.
+`62dd9414`까지의 전체 SHA·작성일·제목·단일 분류·PR 연결과 PR별 규모는
+[릴리즈 감사 자료](https://github.com/dragon1086/prism-insight/blob/v2.23.0/docs/release_audits/v2.23.0.json)에 있고,
+그 이후 커밋은 `git log 62dd9414..688d0f1f`로 같은 기준을 확인할 수 있습니다.
 PR 연결은 제목 추측이 아니라 GitHub가 기록한 병합 커밋과 병합 부모 간 Git 도달 가능성을 기준으로 확인했습니다.
 
 ## 개발자용 상세 — PR별 변경 규모
 
 <details>
-<summary>병합 PR 61개 펼치기</summary>
+<summary>병합 PR 80개 펼치기</summary>
 
 | PR | 제목 | 규모 |
 |---|---|---|
@@ -361,15 +401,35 @@ PR 연결은 제목 추측이 아니라 GitHub가 기록한 병합 커밋과 병
 | [#795](https://github.com/dragon1086/prism-insight/pull/795) | feat: DART 5장 용어 풀이 범위 확대 (예시 밖 전문 용어까지) | 2 files, +20/−10 |
 | [#796](https://github.com/dragon1086/prism-insight/pull/796) | fix: treat Bybit's epoch expiredAt as no expiry in the key expiry check | 2 files, +5/−1 |
 | [#797](https://github.com/dragon1086/prism-insight/pull/797) | feat: 금융사 BUY 판단에서 자본비율을 Perplexity로 보완 조회 | 3 files, +45/−12 |
+| [#800](https://github.com/dragon1086/prism-insight/pull/800) | fix: 주간 인사이트 정확성과 실행 가능한 누적 기억 정리 | 17 files, +2,024/−430 |
+| [#801](https://github.com/dragon1086/prism-insight/pull/801) | fix: 주간 기억 대표 표시와 운영 SQLite 검증 마무리 | 5 files, +71/−13 |
+| [#802](https://github.com/dragon1086/prism-insight/pull/802) | fix: 표현보다 의미를 기준으로 누적 직관 통합 | 4 files, +517/−38 |
+| [#803](https://github.com/dragon1086/prism-insight/pull/803) | feat: decision-input and re-entry SHADOW; fix R/R quote drift misread as arithmetic error | 20 files, +1,993/−4 |
+| [#804](https://github.com/dragon1086/prism-insight/pull/804) | fix: shadow event key redaction and KIS read spacing in re-entry runner | 5 files, +79/−13 |
+| [#805](https://github.com/dragon1086/prism-insight/pull/805) | fix: KR/US 거래량을 가격 위치와 확정 세션 기준으로 해석 | 6 files, +323/−36 |
+| [#806](https://github.com/dragon1086/prism-insight/pull/806) | fix: point-in-time re-entry enrolment (run-count independent) | 2 files, +101/−54 |
+| [#807](https://github.com/dragon1086/prism-insight/pull/807) | feat: supplementary numeric facts in KR/US BUY prompt + paired replay tool; re-entry v2 design | 14 files, +680/−5 |
+| [#808](https://github.com/dragon1086/prism-insight/pull/808) | research: re-entry v2 pivot rules + daily-bar replay (stage 1: no consistent edge) | 5 files, +468/−1 |
+| [#809](https://github.com/dragon1086/prism-insight/pull/809) | fix: fixed SQL statements in re-entry shadow and pivot replay | 2 files, +17/−14 |
+| [#810](https://github.com/dragon1086/prism-insight/pull/810) | fix: trailing stop never fired (peak not read / not persisted) | 7 files, +110/−20 |
+| [#811](https://github.com/dragon1086/prism-insight/pull/811) | research: calibrated exit replay, exit hypotheses, re-entry v2 LLM recheck replay | 6 files, +578/−24 |
+| [#812](https://github.com/dragon1086/prism-insight/pull/812) | feat: deterministic re-entry v2 shadow (frozen recheck inputs, zero LLM calls) | 9 files, +649/−119 |
+| [#813](https://github.com/dragon1086/prism-insight/pull/813) | fix: re-entry v2 recheck inputs are point-in-time (report strictly before trigger day) + report age | 3 files, +44/−5 |
+| [#814](https://github.com/dragon1086/prism-insight/pull/814) | feat: re-entry v2 shadow LLM recheck of forward triggers (BUY agent, no MCP) | 7 files, +294/−27 |
+| [#815](https://github.com/dragon1086/prism-insight/pull/815) | feat: re-entry v2 LLM recheck opt-in (REENTRY_V2_LLM_RECHECK, default off) | 4 files, +12/−2 |
+| [#816](https://github.com/dragon1086/prism-insight/pull/816) | feat: re-entry v2 recheck input includes the original scenario key levels | 6 files, +82/−10 |
+| [#817](https://github.com/dragon1086/prism-insight/pull/817) | feat: O'Neil overhead-free breakout target and full-report evidence guard | 7 files, +226/−11 |
+| [#818](https://github.com/dragon1086/prism-insight/pull/818) | feat: deploy initial-max-50 adaptive SHADOW with guarded LIVE execution | 115 files, +15,628/−98 |
 
 </details>
 
 ## 검증
 
-- 감사 자료의 커밋 집합을 `git rev-list v2.22.0..62dd9414`와 대조해 226개 전부가 한 번씩, 하나의 분류로만
-  들어갔는지 확인했습니다. 병합 PR 61개의 병합 커밋 SHA를 GitHub 기록과 대조했습니다.
+- 커밋 집합을 `git rev-list`와 대조해 311개 전부가 한 번씩, 하나의 분류로만 들어갔는지 확인했습니다.
+  병합 PR 80개의 병합 커밋 SHA를 GitHub 기록과 대조했습니다.
 - 금융사 매수 기준 변경(#791·#792·#797)은 주문 없는 격리 테스트로 일반 기업의 매수 지시문·요청문이 main과 같음을
-  해시로 확인했고, 각 PR은 정확한 head의 CI 통과 후 병합해 db·app 서버에 `62dd9414`까지 배포했습니다.
+  해시로 확인했습니다. 각 PR은 정확한 head의 CI 통과 후 병합해 db-server에 `688d0f1f`까지 ff-only 배포했습니다.
+- 매수 목표가·안전 문구(#817)는 운영 서버 격리 worktree에서 운영 Python으로 스모크와 회귀를 통과한 뒤 배포했습니다.
 - `/report 003530`(한화투자증권, 2026-09-27)으로 금융사 판별, 금융업 관점 서술, 5장 생성과 용어 풀이(#793 기준)를
   확인했습니다. #795의 확대된 풀이와 새 형식의 **KR 정기 배치 보고서는 아직 관측하지 않았습니다**
   (추석 연휴 뒤 첫 배치는 2026-09-28 09:30).
@@ -389,6 +449,8 @@ git show --no-patch --oneline v2.23.0
   되돌리려면 `off`로 바꿉니다. `PRISM_BUY_REPORT_DEPTH_EVIDENCE`는 별도 승인 전까지 켜지 않습니다.
 - US 선별 대상을 이전 지수 기준으로 유지하려면 `US_SCREENING_UNIVERSE=major_indices`를 설정합니다.
 - 5장 수집은 DART 공개 화면을 조회하므로 같은 IP에서 반복 대량 조회를 피하십시오.
+- 매수 보조 수치는 `PRISM_BUY_DECISION_FACTS=false`로 즉시 뺄 수 있고, 재진입 재점검은 `REENTRY_V2_LLM_RECHECK`로
+  켜고 끕니다(코드 기본값 꺼짐). 분할 SHADOW는 `docs/ONEIL_DEPLOYMENT_20260928_ko.md`의 OFF 절차로 멈춥니다.
 
 ## 참고 사항과 알려진 한계
 
@@ -400,6 +462,9 @@ git show --no-patch --oneline v2.23.0
   손절 비율이 나쁘면 `off`로 되돌리는 조건을 미리 정해 두었습니다(`docs/SECTOR_AWARE_ROADMAP_ko.md` 4단계).
 - US 시가총액 10억 달러 선별은 유동성 기준이며 종목의 질을 보장하지 않습니다.
 - BTC 변경은 데모 범위이고, SHADOW 관측은 실거래나 포트폴리오 성과가 아닙니다.
+- 트레일링 수정으로 보유 종목이 이전보다 일찍 청산될 수 있습니다. 원래 규칙이 의도대로 작동하는 것입니다.
+- 신고가 돌파 목표는 진입 10건 또는 6주 뒤 기존 방식 진입과 성과를 비교하고, 나쁘면 한 커밋으로 되돌립니다
+  (`docs/ONEIL_BREAKOUT_TARGET_REVIEW_20260927_ko.md`).
 
 ## 텔레그램 공지
 
@@ -408,7 +473,7 @@ git show --no-patch --oneline v2.23.0
 ```text
 🚀 PRISM-INSIGHT v2.23.0 — DART 심층분석 · 업종별 보고서 · 읽기 쉬운 리포트
 
-9월 15일 이후 226개 커밋과 61개 PR을 날짜순으로 빠짐없이 묶었습니다. 가장 큰 변화는 한국 종목 보고서이고, 미국 선별 대상·BTC 데모·관측 기능도 함께 바뀌었습니다.
+9월 15일 이후 311개 커밋과 80개 PR을 날짜순으로 빠짐없이 묶었습니다. 가장 큰 변화는 한국 종목 보고서이고, 매매 판단 규칙·미국 선별 대상·BTC 데모·관측 기능도 함께 바뀌었습니다.
 
 📑 보고서가 이렇게 달라졌습니다
 · 새 5장 "DART 주요 재무·사업 위험 분석": 공시 원문을 직접 읽고 실적·현금흐름·차입, 지배구조·자본변동, 약정·소송·보증을 정리합니다
@@ -420,7 +485,11 @@ git show --no-patch --oneline v2.23.0
 🏦 업종에 맞는 잣대
 · 은행·보험·증권은 부채비율 대신 자본비율, 지주사는 보유 지분 가치, 건설은 부동산 PF 보증, 조선·방산은 수주 계약, 적자 바이오는 남은 현금으로 버틸 기간, 리츠는 배당 재원을 봅니다
 · 금융사의 매수 판단도 부채비율 대신 규제 자본비율로 봅니다(운영 적용, 관측 중)
-· 매수 목표가는 근거가 있을 때만 쓰고, 근거가 없으면 임의로 채우지 않고 진입하지 않습니다
+
+📈 매수·매도 판단
+· 매수 목표가는 근거가 있을 때만 쓰고, 근거가 없으면 진입하지 않습니다. 위 매물 없는 신고가 돌파는 오닐식 규칙 목표(진입가 +20%)를 근거로 인정합니다
+· 거래량은 가격 위치와 확정된 거래일 기준으로 읽고, 판단에 쓰는 수치는 코드로 계산해 넣습니다
+· 트레일링 스탑이 고점을 읽지 못해 작동하지 않던 결함을 고쳤습니다
 
 🇺🇸 미국 보고서
 · 공식 실적·공시·물가·금리 발표로 근거를 보강하고, 계산은 코드로 검증하며, 경쟁사 비교 표를 추가했습니다
@@ -430,10 +499,11 @@ git show --no-patch --oneline v2.23.0
 · 미국 선별 대상을 S&P 500 + 나스닥 100 구성종목(약 518개)에서 상장 보통주 전체로 넓히고, 시가총액 10억 달러 이상만 남깁니다
 · 배치가 조용히 끝나거나 실패하면 알림을 보내고, 미국 일봉은 완료된 날만 캐시합니다
 · 보고서 생성을 멈추게 하던 단계를 없애 발행이 더 안정적입니다
+· 주간 인사이트는 기간과 표본 수를 함께 보여 주고, 같은 뜻의 누적 교훈은 하나로 정리합니다
 
 ₿ BTC·관측
 · 데모 매매 공지를 정리하고, 진입 전 강제청산 위험을 검사하며, API 키 만료를 미리 경고합니다
-· 오닐식 후보 감시와 분할 진입 실험은 기록만 하고 실제 매매에는 쓰지 않습니다
+· 오닐식 후보 감시, 분할 진입, 손절·보류 종목의 재진입 실험은 기록만 하고 실제 매매에는 쓰지 않습니다
 ※ 실자금 전환이나 자동 실거래 승격은 없습니다
 
 릴리즈노트:
@@ -447,7 +517,7 @@ https://github.com/dragon1086/prism-insight/releases/tag/v2.23.0
 ```text
 🚀 PRISM-INSIGHT v2.23.0 — DART deep analysis · Sector-aware reports · Easier reading
 
-This release groups all 226 commits and 61 PRs since September 15. The biggest change is the Korean stock report, alongside a wider US screening universe, BTC demo safety and observation-only features.
+This release groups all 311 commits and 80 PRs since September 15. The biggest change is the Korean stock report, alongside trading-rule fixes, a wider US screening universe, BTC demo safety and observation-only features.
 
 📑 What changed in the report
 · New Chapter 5, "DART financial and business risk analysis": reads the latest official filings directly and covers earnings, cash flow and debt; governance and capital changes; and commitments, lawsuits and guarantees
@@ -459,7 +529,11 @@ This release groups all 226 commits and 61 PRs since September 15. The biggest c
 🏦 The right yardstick for each sector
 · Capital ratios instead of debt-to-equity for banks, insurers and brokers; NAV for holding companies; PF guarantees for builders; contract balances for shipbuilding and defense; cash runway for loss-making biotech; dividend capacity for REITs
 · Buy decisions for financial companies also use regulatory capital ratios instead of debt-to-equity (enabled in production; under observation)
-· Buy targets are used only with supporting evidence; with none, the system does not fill in a number and skips the entry
+
+📈 Buy and sell decisions
+· Buy targets are used only with supporting evidence; with none, the entry is skipped. A clean breakout to a new high with no overhead resistance uses an O'Neil rule target (entry +20%)
+· Volume is read with price location and completed sessions, and the figures used in the decision are computed by code
+· Fixed the trailing stop, which could not read the position peak and never fired
 
 🇺🇸 US reports
 · Evidence from official earnings, filings, inflation and rate releases, code-verified calculations and a new peer comparison table
@@ -469,10 +543,11 @@ This release groups all 226 commits and 61 PRs since September 15. The biggest c
 · US screening now covers all listed common stocks instead of only S&P 500 + NASDAQ-100 constituents (~518), keeping those with a $1B+ market cap
 · Silent or failed batches now send alerts, and completed US daily bars are cached
 · Removed the step that could abort report generation, so reports ship more reliably
+· Weekly insights show period and sample size, and duplicate long-term lessons are merged
 
 ₿ BTC and observation
 · Demo trade notices, liquidation-risk checks and early API-key expiry warnings
-· O'Neil-style watchlists and split-entry experiments are recorded for observation only, not traded
+· O'Neil-style watchlists, split entries and re-entry after a stop-out or skip are recorded for observation only, not traded
 No real-funds rollout or automatic live promotion.
 
 Release notes:

@@ -644,6 +644,9 @@ class USStockAnalysisOrchestrator:
 
             try:
                 from cores.us_analysis import analyze_us_stock
+                from prism_core.oneil_batch_setup import enabled, write_sidecar
+                research_metadata = {}
+                research_kwargs = {'research_metadata': research_metadata} if enabled() else {}
 
                 async with semaphore:
                     logger.info(
@@ -656,11 +659,17 @@ class USStockAnalysisOrchestrator:
                         language=language,
                         macro_context=macro_context,
                         market_report_cache=market_report_cache,
+                        **research_kwargs,
                     )
 
                 if report and len(report.strip()) > 0:
                     with open(output_file, "w", encoding="utf-8") as f:
                         f.write(report)
+                    if research_metadata.get('oneil_source') is not None:
+                        try:
+                            write_sidecar(output_file, research_metadata['oneil_source'])
+                        except Exception:
+                            logger.warning('Optional oneil report sidecar unavailable')
                     logger.info(f"[{idx}/{len(tickers)}] Report generation complete: {company_name}({ticker}) - {len(report)} characters")
                     return output_file
                 else:
@@ -703,6 +712,12 @@ class USStockAnalysisOrchestrator:
 
                 # Convert markdown to PDF
                 markdown_to_pdf(report_path, pdf_file, 'playwright', add_theme=True, enable_watermark=False)
+                try:
+                    from prism_core.oneil_batch_setup import enabled, bind_pdf_sidecar
+                    if enabled():
+                        bind_pdf_sidecar(report_path, pdf_file)
+                except Exception:
+                    logger.warning('Optional oneil PDF sidecar unavailable')
 
                 logger.info(f"PDF conversion complete: {pdf_file}")
                 pdf_paths.append(pdf_file)

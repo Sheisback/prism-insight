@@ -1,4 +1,4 @@
-"""Re-entry v2 SHADOW (pivot breakout), deterministic only. No orders, LLM calls or DB writes.
+"""Re-entry v2 SHADOW (pivot breakout). No orders and no DB writes.
 
 After the close, for stop exits, near-miss skips and gate-blocked entries
 (observability.reentry_shadow.candidates with include_blocked=True):
@@ -8,9 +8,11 @@ After the close, for stop exits, near-miss skips and gate-blocked entries
     ORIGINAL and READY_OPEN controls;
   * on each new trigger, the full LLM recheck input is FROZEN (report reference + hash,
     trigger-time technical/market facts, fresh price levels, original reason) into an
-    append-only JSONL so the recheck can be run later in one batch without look-ahead.
+    append-only JSONL;
+  * forward triggers (session after the shadow started) get one BUY-agent recheck on those
+    frozen inputs (observability/reentry_v2_recheck.py), results in a second JSONL.
 
-Design and evidence: docs/REENTRY_V2_DESIGN_20260927_ko.md (sections 11-14).
+Design and evidence: docs/REENTRY_V2_DESIGN_20260927_ko.md (sections 11-15).
 """
 from __future__ import annotations
 
@@ -24,19 +26,21 @@ from pathlib import Path
 
 from observability.events import emit_event
 from observability.reentry_recheck_inputs import archived_report, latest_report, technical_block
+from observability import reentry_v2_recheck as RC
 from observability.reentry_shadow import _atomic, candidates
 from prism_core import pivot_reentry as P
 
 ROOT = Path(__file__).resolve().parents[1]
 POLICY_PATH = ROOT / "trading/config/reentry_v2_shadow.json"
-POLICY = {"mode": "SHADOW", "policy_version": P.POLICY_VERSION, "markets": ["KR", "US"], "enabled": True}
+POLICY = {"mode": "SHADOW", "policy_version": P.POLICY_VERSION, "markets": ["KR", "US"], "enabled": True,
+          "llm_recheck": True}
 STATE_DIR = ROOT / "runtime"
 DB_PATH = ROOT / "stock_tracking_db.sqlite"
 ARCHIVE_DB = ROOT / "archive.db"
 LOOKBACK_DAYS = 70          # enrolment window; a watch lives up to 30 sessions (~45 calendar days)
 ARCHIVE_AFTER_DAYS = 150    # finished watches (incl. 60-bar exit horizon) move to the archive
-INPUT_CONTRACT = "reentry_v2_recheck_input_v2"
-REPORT_MAX_AGE_DAYS = 30     # older reports are regenerated before the recheck (user decision 2026-09-27)
+INPUT_CONTRACT = "reentry_v2_recheck_input_v3"
+REPORT_MAX_AGE_DAYS = 30     # older reports are flagged stale, not regenerated (user decision 2026-09-27)
 
 
 def enabled(market):
@@ -49,10 +53,21 @@ def enabled(market):
         return False
 
 
+def llm_recheck_enabled():
+    """Opt-in: the BUY-agent recheck spends LLM quota, so it runs only with REENTRY_V2_LLM_RECHECK=true."""
+    try:
+        policy = json.loads(POLICY_PATH.read_text())
+    except (OSError, ValueError):
+        return False
+    return (policy.get("llm_recheck") is True
+            and os.getenv("REENTRY_V2_LLM_RECHECK", "false").strip().lower() in {"1", "true", "yes", "on"})
+
+
 def paths(market, root=STATE_DIR):
     stem = Path(root) / f"reentry_v2_state_{market.lower()}"
     return {"state": stem.with_suffix(".json"), "archive": Path(f"{stem}_archive.jsonl"),
-            "inputs": Path(root) / f"reentry_v2_recheck_inputs_{market.lower()}.jsonl"}
+            "inputs": Path(root) / f"reentry_v2_recheck_inputs_{market.lower()}.jsonl",
+            "results": Path(root) / f"reentry_v2_recheck_results_{market.lower()}.jsonl"}
 
 
 def _load(path, market):
@@ -155,7 +170,7 @@ def freeze_inputs(market, watch, result, bars, bench_rows, reports_root, archive
                                                                   (f"stopped out ({row.get('realized_pct')}%)"
                                                                    if watch["source"] == "STOP_EXIT" else None)),
                          "buy_score": row.get("buy_score"), "min_score": row.get("min_score"),
-                         "decision_id": row.get("decision_id")},
+                         "decision_id": row.get("decision_id"), "key_levels": row.get("key_levels")},
             "llm_recheck": "NOT_EVALUATED", "frozen_at": datetime.now(timezone.utc).isoformat()}
 
 
@@ -238,6 +253,11 @@ def advance(state, rows, frames, completed, market, reports_root=ROOT, archive_d
     started = state.setdefault("started_session", completed)
     frozen = []
     live = {"CLOSED", "MISSING_FINAL"}
+    # Watches enrolled before key_levels were captured pick them up from today's read of the same row.
+    fresh = {_watch_id(market, row): row for row in rows}
+    for wid, watch in watches.items():
+        if "key_levels" not in watch["row"] and wid in fresh:
+            watch["row"]["key_levels"] = fresh[wid].get("key_levels")
     for watch in list(watches.values()):
         if watch["status"] not in live:
             item = _refresh(watch, frames, completed, market, reports_root, archive_db)
@@ -274,7 +294,7 @@ def archive_finished(state, archive_path, completed):
 
 
 def run(market, completed, *, collector, db_path=DB_PATH, root=STATE_DIR, reports_root=ROOT,
-        archive_db=ARCHIVE_DB, dry_run=False):
+        archive_db=ARCHIVE_DB, dry_run=False, llm_recheck=None, llm=None):
     p = paths(market, root)
     p["state"].parent.mkdir(parents=True, exist_ok=True)
     with p["state"].with_suffix(".lock").open("a") as lock:
@@ -312,15 +332,70 @@ def run(market, completed, *, collector, db_path=DB_PATH, root=STATE_DIR, report
                               event_id=item["event_id"], market=market, ticker=watch["ticker"],
                               attributes=attrs, event_time=now) is not None:
                     sent += 1
+        rechecked = []
+        if not dry_run and (llm_recheck if llm_recheck is not None else llm_recheck_enabled()):
+            rechecked = _run_rechecks(state, market, completed, p, reports_root, archive_db, llm)
         counts = {}
         for watch in state["watches"]:
             key = watch.get("status_final", watch["status"]) if watch["status"] == "CLOSED" else watch["status"]
             counts[key] = counts.get(key, 0) + 1
-        summary = {"mode": "SHADOW", "trading_impact": "none", "llm_calls": 0, "policy_version": P.POLICY_VERSION,
+        llm_calls = sum(r["status"] in {"OK", "PARSE_ERROR", "ERROR"} for r in rechecked)
+        summary = {"mode": "SHADOW", "trading_impact": "none", "llm_calls": llm_calls,
+                   "policy_version": P.POLICY_VERSION,
                    "completed_market_day": completed, "enrol_rows": len(rows), "symbols": len(tickers),
                    "collected": len([t for t in tickers if frames.get(t)]), "new_triggers": len(frozen),
-                   "trigger_events_emitted": sent, "archived": archived, "status_counts": counts, "dry_run": dry_run}
+                   "trigger_events_emitted": sent, "archived": archived, "status_counts": counts, "dry_run": dry_run,
+                   "rechecks": len(rechecked), "recheck_status": _tally(r["status"] for r in rechecked)}
         if not dry_run:
             emit_event("reentry_v2.shadow_run", service=f"prism-{market.lower()}-reentry-v2-shadow", market=market,
                        attributes=summary, event_time=datetime.now(timezone.utc))
         return summary
+
+
+def _tally(values):
+    out = {}
+    for value in values:
+        out[value] = out.get(value, 0) + 1
+    return out
+
+
+def _run_rechecks(state, market, completed, p, reports_root, archive_db, llm):
+    """One BUY recheck per forward trigger; the result is appended before the state marks it done."""
+    todo = [w for w in state["watches"] if RC.eligible(w, state.get("started_session"))
+            and (w.get("recheck") or {}).get("last") != completed]
+    if not todo or not p["inputs"].exists():
+        return []
+    wanted = {w["trigger_event_id"] for w in todo}
+    items = {}
+    with p["inputs"].open(encoding="utf-8") as handle:
+        for line in handle:
+            item = json.loads(line)
+            if item.get("event_id") in wanted:
+                items[item["event_id"]] = item
+    instruction = None
+    results = []
+    for watch in todo:
+        item = items.get(watch["trigger_event_id"])
+        if item is None:
+            continue
+        if instruction is None and item.get("report_ref"):
+            instruction = RC.recheck_instruction(market)
+        record = RC.recheck(item, reports_root=reports_root, archive_db=archive_db, llm=llm, instruction=instruction)
+        attempts = (watch.get("recheck") or {}).get("attempts", 0) + (record["status"] not in {"NO_REPORT"})
+        record["attempt"] = attempts
+        with p["results"].open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")
+        watch["recheck"] = {"status": record["status"], "attempts": attempts, "last": completed,
+                            "approved": record.get("approved")}
+        _atomic(p["state"], state)
+        attrs = {"mode": "SHADOW", "trading_impact": "none", "policy_version": P.POLICY_VERSION,
+                 "watch_ref": watch["watch_id"], "trigger_date": item["trigger_date"], "status": record["status"],
+                 "approved": record.get("approved"), "decision": record.get("decision"),
+                 "buy_score": record.get("buy_score"), "report_stale": record.get("report_stale"),
+                 "model": record.get("model"), "reasoning_effort": record.get("reasoning_effort"),
+                 "latency_s": record.get("latency_s"), "attempt": attempts}
+        emit_event("reentry_v2.shadow_recheck", service=f"prism-{market.lower()}-reentry-v2-shadow",
+                   event_id=hashlib.sha256(f"{item['event_id']}|recheck|{attempts}".encode()).hexdigest()[:32],
+                   market=market, ticker=watch["ticker"], attributes=attrs, event_time=datetime.now(timezone.utc))
+        results.append(record)
+    return results

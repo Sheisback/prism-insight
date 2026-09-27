@@ -318,10 +318,10 @@ class USStockTrading:
             account_key=self.account_key,
         )
 
-    def _request(self, api_url: str, tr_id: str, params: Dict[str, Any], **kwargs):
+    def _request(self, api_url: str, tr_id: str, params: Dict[str, Any], *, request_cont: str = "", **kwargs):
         with ka.get_trading_env_lock():
             self._activate_account()
-            return ka._url_fetch(api_url, tr_id, "", params, **kwargs)
+            return ka._url_fetch(api_url, tr_id, request_cont, params, **kwargs)
 
     def _probe_exchange(self, ticker: str) -> Optional[str]:
         """
@@ -1388,7 +1388,8 @@ class USStockTrading:
 
     async def async_buy_stock(self, ticker: str, buy_amount: Optional[float] = None,
                               exchange: str = None, timeout: float = 30.0,
-                              limit_price: Optional[float] = None, *, quote_validator=None, strict_budget: bool = False) -> Dict[str, Any]:
+                              limit_price: Optional[float] = None, *, quote_validator=None, strict_budget: bool = False,
+                              regular_session_only: bool = False, exact_quantity: Optional[int] = None) -> Dict[str, Any]:
         """
         Async buy API with timeout
 
@@ -1406,7 +1407,8 @@ class USStockTrading:
             return await asyncio.wait_for(
                 self._execute_buy_stock(ticker, buy_amount, exchange, limit_price,
                     **({'quote_validator': quote_validator} if quote_validator is not None else {}),
-                    **({'strict_budget': True} if strict_budget else {})),
+                    **({'strict_budget': True} if strict_budget else {}),
+                    **({'regular_session_only': True, 'exact_quantity': exact_quantity} if regular_session_only else {})),
                 timeout=timeout
             )
         except asyncio.TimeoutError:
@@ -1423,7 +1425,8 @@ class USStockTrading:
             }
 
     async def _execute_buy_stock(self, ticker: str, buy_amount: float = None,
-                                 exchange: str = None, limit_price: float = None, *, quote_validator=None, strict_budget: bool = False) -> Dict[str, Any]:
+                                 exchange: str = None, limit_price: float = None, *, quote_validator=None, strict_budget: bool = False,
+                                 regular_session_only: bool = False, exact_quantity: Optional[int] = None) -> Dict[str, Any]:
         """Execute buy stock logic"""
         amount = resolve_order_budget(buy_amount, 0 if strict_budget else self.buy_amount)
 
@@ -1494,6 +1497,10 @@ class USStockTrading:
                                 result['message'] = 'BUY quote validation rejected before submission'
                                 return result
                         buy_quantity = whole_share_quantity(amount, effective_limit_price)
+                        if regular_session_only and (type(exact_quantity) is not int or buy_quantity != exact_quantity
+                                                     or not self.is_market_open() or quote_validator is None):
+                            result['message'] = 'Adaptive order quantity/session/validator rejected'
+                            return result
                         if resolve_order_budget(effective_limit_price, 0):
                             result.update(order_budget_evidence(amount, effective_limit_price))
 
@@ -1511,10 +1518,16 @@ class USStockTrading:
                         # This is important for reserved orders when market is closed
                         logger.info(f"[Async Buy] {ticker} limit_price: ${effective_limit_price:.2f} (provided: {limit_price})")
 
-                        buy_result = await asyncio.to_thread(
-                            self.smart_buy, ticker, amount, exchange, effective_limit_price,
-                            **({'allow_local_queue': False} if quote_validator is not None or strict_budget else {}),
-                        )
+                        if regular_session_only:
+                            if not self.is_market_open():
+                                result['message'] = 'Adaptive regular session closed'
+                                return result
+                            buy_result = await asyncio.to_thread(self.buy_limit_price, ticker, effective_limit_price, amount, exchange)
+                        else:
+                            buy_result = await asyncio.to_thread(
+                                self.smart_buy, ticker, amount, exchange, effective_limit_price,
+                                **({'allow_local_queue': False} if quote_validator is not None or strict_budget else {}),
+                            )
 
                         result['quantity'] = buy_result.get('quantity', buy_quantity)
                         sizing_price = buy_result.get('limit_price') or float(f'{effective_limit_price:.2f}')
@@ -1551,7 +1564,8 @@ class USStockTrading:
 
     async def async_sell_stock(self, ticker: str, exchange: str = None,
                                timeout: float = 30.0, limit_price: Optional[float] = None,
-                               use_moo: bool = False, quantity: Optional[int] = None) -> Dict[str, Any]:
+                               use_moo: bool = False, quantity: Optional[int] = None, *,
+                               regular_session_only: bool = False, quote_validator=None) -> Dict[str, Any]:
         """
         Async sell API with timeout
 
@@ -1568,7 +1582,8 @@ class USStockTrading:
         """
         try:
             return await asyncio.wait_for(
-                self._execute_sell_stock(ticker, exchange, limit_price, use_moo, quantity=quantity),
+                self._execute_sell_stock(ticker, exchange, limit_price, use_moo, quantity=quantity,
+                    **({'regular_session_only': True, 'quote_validator': quote_validator} if regular_session_only else {})),
                 timeout=timeout
             )
         except asyncio.TimeoutError:
@@ -1585,7 +1600,8 @@ class USStockTrading:
             }
 
     async def _execute_sell_stock(self, ticker: str, exchange: str = None,
-                                  limit_price: float = None, use_moo: bool = False, quantity: int = None) -> Dict[str, Any]:
+                                  limit_price: float = None, use_moo: bool = False, quantity: int = None, *,
+                                  regular_session_only: bool = False, quote_validator=None) -> Dict[str, Any]:
         """Execute sell stock logic with portfolio verification
 
         quantity: partial sell quantity (None = full holding, unchanged behavior)
@@ -1658,9 +1674,22 @@ class USStockTrading:
                         logger.info(f"[Async Sell] {ticker} limit_price: ${effective_limit_price:.2f}, use_moo: {effective_use_moo}, qty: {sell_quantity}/{target_stock['quantity']}")
 
                         # Execute sell
-                        sell_result = await asyncio.to_thread(
-                            self.smart_sell_all, ticker, exchange, effective_limit_price if effective_limit_price > 0 else None, effective_use_moo, sell_quantity
-                        )
+                        if regular_session_only:
+                            if not self.is_market_open() or quote_validator is None or sell_quantity != quantity:
+                                result['message'] = 'Adaptive sell quantity/session/validator rejected'
+                                return result
+                            try:
+                                quote_validator(float(current_price))
+                                quote_validator(float(effective_limit_price))
+                            except Exception:
+                                result['message'] = 'SELL quote validation rejected before submission'
+                                return result
+                            sell_result = await asyncio.to_thread(self.sell_all_market_price, ticker, exchange,
+                                                                 limit_price=effective_limit_price, quantity=sell_quantity)
+                        else:
+                            sell_result = await asyncio.to_thread(
+                                self.smart_sell_all, ticker, exchange, effective_limit_price if effective_limit_price > 0 else None, effective_use_moo, sell_quantity
+                            )
 
                         if sell_result['success']:
                             result['success'] = True

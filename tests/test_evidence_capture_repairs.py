@@ -99,10 +99,11 @@ def test_buy_prompt_reconciles_evidence_without_new_gate(market, language):
             legacy_prompt = legacy_prompt.replace(current, previous)
         expected = {
             # 2026-09-18 reviewed target-first/industry-scope/ownership wording repair.
+            # 2026-09-27 reviewed O'Neil overhead-free breakout target (2a) in the target section.
             # JSON output and unrelated execution rules retain their original hashes.
-            "ko": ("bc1a2d324c9ce62a4e874968d72eeb0b11bb7d69a6208b26231c394c3605aaba",
+            "ko": ("e41e0077301212df852613d38b481d23822dd6cf0201875b71f4d0fa4c4bb43a",
                    "515130759f31ca1282749d6d3b2d10bc9704c69f86fc84484dd1a26c332ee646"),
-            "en": ("e3ece04d6df33dd1e6a292a105c3cc94b438a33a692b033758d820ab08261cea",
+            "en": ("8c526ae1f79ba30a762a05100f68e6112332c112be4705c8098bc37ce408eb65",
                    "c73c9066e6b9a043d70102cf1912fc6f1608fc544d6ef96e1555322e0aa6e031"),
         }
         tool_heading = "## 도구 사용" if language == "ko" else "## Tool Usage"

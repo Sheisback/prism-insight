@@ -59,6 +59,12 @@
 없는 값은 수익률·보고서·브로커 가격으로 역산하지 않습니다. 기존 Packet 파일은
 덮어쓰지 않고, 새 Packet ID와 이 추가 필드의 출처를 함께 기록합니다.
 
+`analysis_rows[].outcomes.exit_price_evidence`는 schema 1의 추가 허용 필드입니다.
+기존 정확한 position/시장/종목/시간 연결을 통과해 선택된 결과 이벤트가
+`exit.executed`일 때만 `decision_context.sell_price`와 해시 출처를 전달합니다.
+`trade.outcome`만 있거나 가격이 없으면 MISSING이며, 가까운 시각의 다른 이벤트로
+보충하거나 수익률로 역산하지 않습니다. 이 값 역시 전략 기록 가격이며 broker fill이 아닙니다.
+
 - 원본 JSONL은 이미 관측 계층에서 민감정보가 제거된 파일만 입력으로 허용합니다.
 - Packet은 허용 목록 필드만 출력합니다. 원문 prompt, 기사 전문, account, broker order
   ID, token, cookie, authorization, secret payload는 복사하지 않습니다.

@@ -27,21 +27,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from observability.reentry_recheck_inputs import (  # noqa: E402
-    RECHECK_KO, _as_dt, archived_report, latest_report, technical_block,
+    _as_dt, archived_report, latest_report, recheck_instruction, technical_block,
 )
 from tools.replay_pivot_reentry import load_bars  # noqa: E402
 
 
 def instruction(market):
     os.environ["PRISM_BUY_DECISION_FACTS"] = "true"
-    if market == "KR":
-        from cores.agents.trading_agents import create_trading_scenario_agent
-        return create_trading_scenario_agent(language="ko").instruction + RECHECK_KO
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("us_agents_recheck", ROOT / "prism-us/cores/agents/trading_agents.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.create_us_trading_scenario_agent(language="ko").instruction + RECHECK_KO
+    return recheck_instruction(market, ROOT)
 
 
 async def run(records, market, bars_by_ticker, bench, reports_root, out, concurrency, archive_db=None):

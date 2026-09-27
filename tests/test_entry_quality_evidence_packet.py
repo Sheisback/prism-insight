@@ -8,6 +8,45 @@ import pytest
 from tools.build_entry_quality_evidence_packet import build_evidence_packet
 
 
+@pytest.mark.parametrize("bad", [None, True, 0, -1, float("nan"), float("inf"), "PRIVATE"])
+def test_exit_reference_rejects_invalid_and_never_inverts_return(bad):
+    from tools.build_entry_quality_evidence_packet import _exit_price_evidence
+    event = {"event_type": "exit.executed", "event_id": "PRIVATE", "attributes": {
+        "profit_rate_pct": 10, "decision_context": {"sell_price": bad, "buy_price": 100}}}
+    result = _exit_price_evidence(event)
+    assert result["status"] == "MISSING"
+    assert "PRIVATE" not in json.dumps(result)
+
+
+def test_exit_reference_requires_exit_event_not_outcome_or_fill():
+    from tools.build_entry_quality_evidence_packet import _exit_price_evidence
+    event = {"event_type": "exit.executed", "event_id": "exit-1", "attributes": {
+        "decision_context": {"sell_price": 101}}}
+    assert _exit_price_evidence(event)["reference_price"] == 101
+    for kind in ("trade.outcome", "entry.fill_reconciled"):
+        event["event_type"] = kind
+        assert _exit_price_evidence(event)["status"] == "MISSING"
+
+
+@pytest.mark.parametrize("variant", ["valid", "wrong_position", "wrong_ticker", "before_entry", "outcome_only"])
+def test_exit_price_obeys_existing_exact_link_and_clock(variant):
+    candidate = _candidate("c", "2026-08-29T00:00:00Z", "d")
+    entry = _event("e", "entry.executed", "2026-08-29T00:01:00Z",
+                   decision_id="d", position_id="p")
+    event = _event("x", "exit.executed", "2026-08-30T00:00:00Z", position_id="p",
+                   attributes={"profit_rate_pct": 1, "decision_context": {"sell_price": 101}})
+    if variant == "wrong_position":
+        event["position_id"] = "other"
+    if variant == "wrong_ticker":
+        event["ticker"] = "OTHER"
+    if variant == "before_entry":
+        event["timestamp"] = "2026-08-28T00:00:00Z"
+    if variant == "outcome_only":
+        event["event_type"] = "trade.outcome"
+    evidence = build_evidence_packet([candidate, entry, event])["analysis_rows"][0]["outcomes"]["exit_price_evidence"]
+    assert evidence["status"] == ("OK" if variant == "valid" else "MISSING")
+
+
 @pytest.mark.parametrize("bad", [None, True, 0, -1, float("nan"), float("inf"), "PRIVATE_CANARY"])
 def test_entry_price_evidence_rejects_invalid_prices(bad):
     from tools.build_entry_quality_evidence_packet import _entry_price_evidence

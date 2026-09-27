@@ -39,7 +39,7 @@ ARCHIVE_AFTER_DAYS = 60     # finished watches beyond the enrolment lookback mov
 SCORE_GAP = 2               # LOCATION_SKIP: min_score - buy_score <= 2
 TABLES = {"KR": ("trading_history", "watchlist_history"), "US": ("us_trading_history", "us_watchlist_history")}
 _STOP_COLUMNS = ("SELECT account_key, ticker, company_name, buy_date, buy_price, sell_date, sell_price, "
-                 "profit_rate, trigger_type, exit_kind FROM {} WHERE exit_kind = 'stop' "
+                 "profit_rate, trigger_type, exit_kind, scenario FROM {} WHERE exit_kind = 'stop' "
                  "AND substr(sell_date, 1, 10) >= ? AND substr(sell_date, 1, 10) <= ?")
 _SKIP_COLUMNS = ("SELECT id, ticker, company_name, analyzed_date, current_price, buy_score, min_score, decision, "
                  "skip_reason, trigger_type, scenario FROM {} WHERE substr(analyzed_date, 1, 10) >= ? "
@@ -154,6 +154,29 @@ def _int(value):
         return None
 
 
+KEY_LEVELS = ("primary_support", "secondary_support", "primary_resistance", "secondary_resistance")
+
+
+def _level_price(value):
+    """key_levels price: 1700 / "1,700" / "1700~1800" (range midpoint), else None."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value) if value > 0 else None
+    if not isinstance(value, str):
+        return None
+    try:
+        nums = [float(part.strip().replace(",", "")) for part in value.split("~") if part.strip()]
+    except ValueError:
+        return None
+    return round(sum(nums) / len(nums), 4) if nums and min(nums) > 0 else None
+
+
+def scenario_key_levels(scenario):
+    """The BUY scenario's support/resistance levels as numbers; None when it has none."""
+    levels = ((scenario or {}).get("trading_scenarios") or {}).get("key_levels") or {}
+    out = {name: _level_price(levels.get(name)) for name in KEY_LEVELS}
+    return out if any(v is not None for v in out.values()) else None
+
+
 def candidates(db_path, market, completed, lookback_days=LOOKBACK_DAYS, include_blocked=False):
     """Read-only enrolment rows; the DB is never written.
 
@@ -173,7 +196,8 @@ def candidates(db_path, market, completed, lookback_days=LOOKBACK_DAYS, include_
                         "company_name": row["company_name"], "entry_date": session_date(row["buy_date"], market),
                         "entry_price": row["buy_price"], "exit_date": session_date(row["sell_date"], market),
                         "exit_price": row["sell_price"], "trigger_type": row["trigger_type"],
-                        "exit_kind": row["exit_kind"], "realized_pct": row["profit_rate"]})
+                        "exit_kind": row["exit_kind"], "realized_pct": row["profit_rate"],
+                        "key_levels": scenario_key_levels(_scenario(row["scenario"]))})
         for row in conn.execute(SKIP_SQL[market], (since, until)):
             scenario = _scenario(row["scenario"])
             fundamentals = (scenario.get("fundamental_check") or {}).get("all_passed")
@@ -194,7 +218,8 @@ def candidates(db_path, market, completed, lookback_days=LOOKBACK_DAYS, include_
                         "trigger_type": row["trigger_type"], "exit_kind": None, "analysis_id": row["id"],
                         "decision": row["decision"], "buy_score": score, "min_score": minimum,
                         "skip_categories": skip_category(row["skip_reason"]),
-                        "decision_id": scenario.get("_decision_id"), "skip_reason": row["skip_reason"]})
+                        "decision_id": scenario.get("_decision_id"), "skip_reason": row["skip_reason"],
+                        "key_levels": scenario_key_levels(scenario)})
         # Only rows whose session is complete; a forming session is enrolled next run.
         return [r for r in out if r["exit_date"] <= completed]
 

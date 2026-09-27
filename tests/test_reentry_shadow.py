@@ -23,12 +23,13 @@ def _db(path, market="KR", stop_rows=(), watch_rows=()):
     trades, watch = S.TABLES[market]
     conn = sqlite3.connect(path)
     conn.execute(f"CREATE TABLE {trades} (account_key TEXT, ticker TEXT, company_name TEXT, buy_date TEXT, "
-                 "buy_price REAL, sell_date TEXT, sell_price REAL, profit_rate REAL, trigger_type TEXT, exit_kind TEXT)")
+                 "buy_price REAL, sell_date TEXT, sell_price REAL, profit_rate REAL, trigger_type TEXT, exit_kind TEXT, "
+                 "scenario TEXT)")
     conn.execute(f"CREATE TABLE {watch} (id INTEGER PRIMARY KEY, ticker TEXT, company_name TEXT, analyzed_date TEXT, "
                  "current_price REAL, buy_score INTEGER, min_score INTEGER, decision TEXT, skip_reason TEXT, "
                  "trigger_type TEXT, scenario TEXT, was_traded INTEGER DEFAULT 0)")
     for row in stop_rows:
-        conn.execute(f"INSERT INTO {trades} VALUES (?,?,?,?,?,?,?,?,?,?)", row)
+        conn.execute(f"INSERT INTO {trades} VALUES (?,?,?,?,?,?,?,?,?,?,?)", (tuple(row) + (None,))[:11])
     for row in watch_rows:
         conn.execute(f"INSERT INTO {watch} (ticker, company_name, analyzed_date, current_price, buy_score, "
                      "min_score, decision, skip_reason, trigger_type, scenario, was_traded) VALUES (?,?,?,?,?,?,?,?,?,?,?)",

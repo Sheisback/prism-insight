@@ -301,7 +301,14 @@ risk_reward_ratio  = expected_return_pct / expected_loss_pct
 - target_price: 손익비 계산 전에 근거와 보유 기간·청산 방식에 맞춰 독립적으로 결정합니다.
   1. 보고서 목표는 출처·기준일·산정 방식과 보유 기간이 적합할 때만 사용합니다. 12개월 컨센서스는 단기 목표로 자동 전용하지 않습니다.
   2. 구조적 목표는 보고서 1-1의 가장 가까운 주요 저항까지 거리의 80%를 기본으로 평가합니다. 다음 저항은 기존 보유 기간·청산 방식에 맞는 별도 근거가 있을 때만 사용하고 그 이유를 명시합니다.
-  3. 근거가 없으면 target_price와 종속 손익비 필드는 null, 미진입으로 남깁니다. 임의 상승률로 목표를 만들거나 R/R floor를 맞추려고 저항을 건너뛰지 않습니다.
+  2a. 상단 매물 없는 돌파(오닐 규칙 목표): 다음을 모두 충족하면 2번 대신 target_price = entry_price × 1.20으로 둡니다.
+     (a) 현재가가 52주 최고가의 95% 이상입니다(3단계 모멘텀 신호 3과 같은 기준).
+     (b) 보고서 1-1에서 현재가 위의 주요 저항이 없거나 그 52주 최고가(돌파 대상 고점) 하나뿐이고, entry_price × 1.20 이내에 그 밖의 주요 저항이 없습니다.
+     (c) 현재가가 돌파 대상 고점보다 5% 넘게 높지 않습니다(오닐의 추격 매수 한도).
+     (d) 1.5단계 추세 게이트(T1/T2)에 해당하지 않습니다.
+     이 목표는 윌리엄 오닐의 "20~25% 수익에서 익절" 규칙의 하단을 그대로 쓴 규칙 기반 마일스톤이며 가격 예측이 아닙니다. 도달 이후 처리는 기존 매도 규칙(강세 국면 trailing 전환, 횡보·약세 국면 매도)을 따릅니다.
+     target_provenance는 status="supported", source_type="oneil_breakout"으로 쓰고 source_section에 (a)~(c)를 확인한 절을 적습니다. 1.20 외의 비율로 바꾸거나 조건 미충족 종목에 쓰지 않습니다. 손절·점수·모멘텀·매트릭스 R/R floor 등 다른 기준은 그대로 적용합니다.
+  3. 근거가 없으면 target_price와 종속 손익비 필드는 null, 미진입으로 남깁니다. 임의 상승률로 목표를 만들거나 R/R floor를 맞추려고 저항을 건너뛰지 않습니다. 2a의 고정 규칙 목표만 예외입니다.
   목표를 확정한 후 기존 regime R/R floor를 평가합니다. 근거 미확인은 기업 품질 자체의 감점 사유가 아닙니다.
 - stop_loss: 위 "손절가 설정" 규칙대로 산정.
 
@@ -337,6 +344,12 @@ risk_reward_ratio  = expected_return_pct / expected_loss_pct
   NOT_IN_INPUT은 입력에 없음, NOT_REQUESTED는 미조회, SOURCE_UNAVAILABLE은 실제 조회 실패·미제공,
   INCOMPARABLE은 법인·기간·산정 기준 불일치입니다. 이들은 근거 상태이지 새로운 자동 통과·실패 규칙이나
   어디에도 데이터가 없다는 증명이 아닙니다.
+- 보고서 전문(공시·재무 위험 서술, 경쟁사 비교 표, 부록 포함)은 기존 기준을 판정하는 근거입니다.
+  이 자료로 새로운 미진입 사유·감점·점수 기준을 만들지 마십시오. 차입 만기·보증·우발채무·소송·희석 가능성처럼
+  공시에 서술된 일반적 위험은 그 존재만으로 severity = "high" 리스크 이벤트나 "추가 확인 필요" 사유가 되지 않으며,
+  기존 F1–F4·손절·미진입 단독 사유의 판정을 직접 바꿀 때만 해당 기준 안에서 반영합니다. 감사의견 비적정·계속기업
+  불확실성·거래정지·상장 유지 요건 미달 통보처럼 존속 자체를 위협하는 공시 사실은 기존 단독 사유 4로 다룰 수 있습니다.
+  해당 표나 자료가 없으면 NOT_IN_INPUT일 뿐 게이트가 아닙니다.
 
 ## 시간대별 데이터 신뢰도 (US 정규장 기준)
 
@@ -670,7 +683,14 @@ If the resulting R/R is below the matrix floor for the current regime → No Ent
 - target_price: establish independently from evidence, holding horizon and exit model BEFORE R/R.
   1. Use a report target only when source, asof, derivation and horizon fit this trade. A 12-month analyst consensus is not automatically a short-term target.
   2. For a structural target, evaluate 80% of the distance to the nearest major resistance in report 1-1. Use the next resistance only with separate evidence consistent with the existing holding horizon/exit model; explain why.
-  3. If evidence is unavailable, leave target_price and dependent risk fields null and choose NO ENTRY. Never invent a percentage target or skip resistance to satisfy the R/R floor.
+  2a. Overhead-free breakout (O'Neil rule target): if ALL of the following hold, use target_price = entry_price × 1.20 instead of step 2.
+     (a) Current price is at least 95% of the 52-week high (same basis as Step 3 momentum signal 3).
+     (b) Report 1-1 shows no major resistance above the current price other than that 52-week high (the breakout pivot), and no other major resistance within entry_price × 1.20.
+     (c) Current price is not more than 5% above the breakout pivot (O'Neil's chase limit).
+     (d) Not caught by the Step 1.5 trend gate (T1/T2).
+     This is the low end of William O'Neil's "take profits at 20-25%" rule: a rule-based milestone, not a price forecast. Handling after it is reached follows the existing SELL rules (trailing in bull regimes, exit in sideways/bear).
+     Write target_provenance with status="supported", source_type="oneil_breakout" and cite the sections confirming (a)-(c) in source_section. Never change the 1.20 ratio or use it when a condition fails. Stop, score, momentum and the matrix R/R floor still apply unchanged.
+  3. If evidence is unavailable, leave target_price and dependent risk fields null and choose NO ENTRY. Never invent a percentage target or skip resistance to satisfy the R/R floor. The fixed rule target in 2a is the only exception.
   Evaluate the existing regime R/R floor AFTER target selection. Missing target evidence is not an independent company-quality score penalty.
 - stop_loss: per "Stop Loss Construction" above.
 
@@ -707,6 +727,13 @@ If the resulting R/R is below the matrix floor for the current regime → No Ent
   floors and independent gates. NOT_IN_INPUT means absent from supplied inputs; NOT_REQUESTED means not queried;
   SOURCE_UNAVAILABLE requires an actual failed/unproductive query; INCOMPARABLE means incompatible entity,
   period or basis. These describe evidence, not a new automatic pass/fail rule or proof that data exists nowhere.
+- The full report (including filing and financial-risk commentary, the competitor comparison table and the appendix)
+  is evidence for the existing criteria. Do not derive a new rejection reason, penalty or score rule from it. A generic
+  filing risk such as debt maturities, guarantees, contingent liabilities, litigation or possible dilution is not, by its
+  mere presence, a severity = "high" risk event or an "additional confirmation needed" reason; reflect it only inside the
+  existing F1–F4, stop-loss or standalone no-entry criteria it directly changes. Filing facts that threaten the company's
+  continuity (non-clean audit opinion, going-concern doubt, trading halt, listing-deficiency notice) may be handled under
+  existing standalone reason 4. A missing table or source is NOT_IN_INPUT, never a gate.
 
 ## Time-of-day Data Reliability (US regular hours)
 

@@ -371,18 +371,42 @@ def get_snapshot(trade_date: str, tickers: List[str] = None) -> pd.DataFrame:
         raise ValueError(f"Failed to get snapshot for {trade_date}: {exc}") from exc
 
 
+# Measured on db-server: ~14 s per 50-symbol chunk and more threads did not add
+# throughput, so keep the request rate and give the full universe (~102 chunks) time.
+DEFAULT_SNAPSHOT_THREADS = 2
+DEFAULT_SNAPSHOT_BUDGET_SECONDS = 1800
+# Consecutive failed or empty chunks that stop collection (likely rate limit).
+SNAPSHOT_FAILURE_STOP = 3
+
+
+def _snapshot_limit(name, default):
+    try:
+        return float(os.getenv(name, str(default)))
+    except ValueError as exc:
+        raise ValueError(f'Invalid {name}') from exc
+
+
 def get_batched_snapshot_pair(trade_date: str, tickers: List[str], *,
-                              batch_size: int = 50, max_seconds: float = 600):
+                              batch_size: int = 50, max_seconds: float = None,
+                              threads: int = None):
     """Expanded-universe path: decode both dates before discarding each chunk.
 
     No global reuse cache, implicit fallback, or unbounded retries. The budget
     stops new chunks; an in-flight yfinance call can still outlive it. Provider
     timestamps/delay are NOT guaranteed by this wall-clock collection budget.
+    Threads and budget default to US_SNAPSHOT_THREADS / US_SNAPSHOT_BUDGET_SECONDS
+    so they can be lowered without a deploy if the provider starts refusing.
     """
     from collections import Counter
 
-    if batch_size < 1 or not np.isfinite(max_seconds) or max_seconds <= 0:
+    if max_seconds is None:
+        max_seconds = _snapshot_limit('US_SNAPSHOT_BUDGET_SECONDS', DEFAULT_SNAPSHOT_BUDGET_SECONDS)
+    if threads is None:
+        threads = _snapshot_limit('US_SNAPSHOT_THREADS', DEFAULT_SNAPSHOT_THREADS)
+    if (batch_size < 1 or not np.isfinite(max_seconds) or max_seconds <= 0
+            or threads != int(threads) or not 1 <= threads <= 16):
         raise ValueError('Invalid snapshot collection limits')
+    threads = int(threads)
     tickers = list(dict.fromkeys(tickers))
     date = datetime.datetime.strptime(trade_date, '%Y%m%d').date()
     prev_date = get_last_trading_day(date - datetime.timedelta(days=1))
@@ -391,7 +415,13 @@ def get_batched_snapshot_pair(trade_date: str, tickers: List[str], *,
     reasons = [Counter(), Counter()]
     started = time.monotonic()
     calls = 0
+    failures = 0
     for offset in range(0, len(tickers), batch_size):
+        if failures >= SNAPSHOT_FAILURE_STOP:
+            for counts in reasons:
+                counts['provider_failure_stop'] += len(tickers) - offset
+            logger.warning('Expanded snapshot stopped after %d failed chunks', failures)
+            break
         if time.monotonic() - started >= max_seconds:
             for counts in reasons:
                 counts['collection_budget_exhausted'] += len(tickers) - offset
@@ -402,19 +432,24 @@ def get_batched_snapshot_pair(trade_date: str, tickers: List[str], *,
             raw = yf.download(
                 chunk, start=(prev_date - datetime.timedelta(days=5)).isoformat(),
                 end=(date + datetime.timedelta(days=1)).isoformat(),
-                progress=False, threads=2, timeout=10)
+                progress=False, threads=threads, timeout=10)
         except Exception as exc:
+            failures += 1
             for counts in reasons:
                 counts['provider_error'] += len(chunk)
             # Do not retry a possible rate limit or expose provider response text.
             logger.warning('Expanded snapshot chunk failed: %s', type(exc).__name__)
             continue
+        valid = 0
         for index, requested in enumerate(dates):
             frame = _snapshot_from_history(raw, requested, chunk)
             reasons[index].update(frame.attrs['snapshot_coverage']['reason_counts'])
             frame.attrs = {}
             if not frame.empty:
                 frames[index].append(frame)
+                valid += len(frame)
+        # yfinance can swallow a refusal and return nothing for a whole chunk.
+        failures = failures + 1 if valid == 0 else 0
     results = []
     for index, requested in enumerate(dates):
         frame = (pd.concat(frames[index]) if frames[index] else
@@ -432,6 +467,8 @@ def get_batched_snapshot_pair(trade_date: str, tickers: List[str], *,
         'download_invocations': calls,
         'elapsed_seconds': round(time.monotonic() - started, 3),
         'batch_size': batch_size,
+        'threads': threads,
+        'budget_seconds': max_seconds,
         'network_request_count': None,
     })
 
