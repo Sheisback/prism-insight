@@ -205,70 +205,95 @@ def _basis_ok(bars, entry_date, price):
     return day is not None and day["low"] * 0.97 <= float(price) <= day["high"] * 1.03
 
 
-def advance(state, rows, frames, completed, market):
-    """Enrol new rows once, re-evaluate active watches, return (state, new_events)."""
-    watches = {w["watch_id"]: w for w in state["watches"]}
-    active_tickers = {(w["source"], w["ticker"]) for w in watches.values()
-                      if w["status"] not in {"CLOSED", "MISSING_FINAL"}}
-    for row in rows:
-        wid = R.watch_id(market, row["account_key"], row["ticker"], row["entry_date"], row["exit_date"])
-        if wid in watches:
+def _ended_on(watch):
+    """Last date the watch was live; None while it is (or may still be) live."""
+    status = watch.get("status_final") or watch["status"]
+    if watch["status"] == "MISSING_FINAL":
+        return watch.get("ended_on") or watch["row"]["exit_date"]
+    if status in R.TERMINAL:
+        return watch.get("asof")
+    return None
+
+
+def _blocked(watches, row):
+    """Point-in-time: skip a row only if an earlier watch of the same ticker/source was live on its date."""
+    for other in watches.values():
+        if (other["source"], other["ticker"]) != (row["source"], row["ticker"]) or other["row"]["exit_date"] > row["exit_date"]:
             continue
-        if (row["source"], row["ticker"]) in active_tickers:
-            continue  # one live watch per ticker and source; a newer analysis never extends it
+        ended = _ended_on(other)
+        if ended is None or ended >= row["exit_date"]:
+            return True
+    return False
+
+
+def _refresh(watch, frames, completed, market):
+    """Enrol (freeze levels) if needed and re-evaluate on completed bars; return new events."""
+    bars = frames.get(watch["ticker"])
+    if not bars:
+        watch["last_missing"] = completed
+        return []
+    bars = [b for b in bars if b["date"] <= completed]
+    if watch["status"] == "PENDING_ENROLL":
+        row = watch["row"]
+        if not _basis_ok(bars, row["entry_date"], row["entry_price"]):
+            watch.update(status="MISSING_FINAL", reason="price_basis_mismatch")
+            return []
+        frozen = R.enroll(market, row["account_key"], row["ticker"], row["entry_date"], row["entry_price"],
+                          row["exit_date"], row["exit_price"], bars, trigger_type=row.get("trigger_type"),
+                          exit_kind=row.get("exit_kind"), source=row["source"])
+        watch.update(frozen=frozen, status=frozen["status"])
+        if frozen["status"] == "MISSING":
+            watch.update(status="MISSING_FINAL", reason=frozen.get("reason"))
+            return []
+    result = R.evaluate(watch["frozen"], bars)
+    bench_rows = (frames.get("__benchmark_rows") or {}).get(watch["ticker"]) or []
+    for event in result["events"]:
+        event["market_check"] = _bench_ok(bench_rows, event["date"]) if bench_rows else None
+    known = {e["event_id"] for e in watch.get("events", [])}
+    fresh = [(watch, e) for e in result["events"] if e["event_id"] not in known]
+    watch["events"] = result["events"]
+    watch["status"], watch["reason"], watch["asof"] = result["status"], result.get("reason"), result.get("asof")
+    if watch["source"] == "STOP_EXIT":
+        watch["control"] = {"kind": "HOLD_WITHOUT_STOP", **R.hold_counterfactual(watch["frozen"], bars)}
+    else:
+        watch["control"] = {"kind": "IMMEDIATE_NEXT_OPEN", **R.simulate(bars, {
+            "kind": "IMMEDIATE", "date": watch["frozen"]["entry_date"], "swing_low": 0, "reclaim_level": 0})}
+    done = result["status"] in R.TERMINAL and all(
+        e["trade"].get("status") in {"CLOSED", "SKIPPED", "MISSING"} for e in result["events"]) \
+        and watch["control"].get("status") != "PENDING"
+    if done:
+        watch["status_final"] = watch["status"]
+        watch["status"] = "CLOSED"
+    return fresh
+
+
+def advance(state, rows, frames, completed, market):
+    """Re-evaluate watches, enrol new rows in date order, return (state, new_events).
+
+    Enrolment is point-in-time: a row is skipped only when an earlier watch of the
+    same ticker and source was still live on the row's date, so the outcome does not
+    depend on how many runs happened. A watch without bars stays PENDING_ENROLL and
+    conservatively blocks later rows until it can be evaluated.
+    """
+    watches = {w["watch_id"]: w for w in state["watches"]}
+    started = state.setdefault("started_session", completed)
+    fresh = []
+    for watch in list(watches.values()):
+        if watch["status"] not in {"CLOSED", "MISSING_FINAL"}:
+            fresh.extend(_refresh(watch, frames, completed, market))
+    for row in sorted(rows, key=lambda r: (r["exit_date"], r["entry_date"], r["ticker"])):
+        wid = R.watch_id(market, row["account_key"], row["ticker"], row["entry_date"], row["exit_date"])
+        if wid in watches or _blocked(watches, row):
+            continue
         # Rows that finished before this SHADOW first ran are backfill, not forward evidence.
-        enrollment = "PROSPECTIVE" if row["exit_date"] >= state.setdefault("started_session", completed) else "LATE"
         watches[wid] = {"watch_id": wid, "status": "PENDING_ENROLL", "row": row, "market": market,
                         "source": row["source"], "ticker": row["ticker"], "enrolled_at": completed,
-                        "enrollment": enrollment}
-        active_tickers.add((row["source"], row["ticker"]))
-    bench = frames.get("__benchmark_rows", {})
-    fresh = []
-    for wid, watch in watches.items():
-        if watch["status"] in {"CLOSED", "MISSING_FINAL"}:
-            continue
-        bars = frames.get(watch["ticker"])
-        if not bars:
-            watch["last_missing"] = completed
-            continue
-        bars = [b for b in bars if b["date"] <= completed]
-        if watch["status"] == "PENDING_ENROLL":
-            row = watch["row"]
-            if not _basis_ok(bars, row["entry_date"], row["entry_price"]):
-                watch.update(status="MISSING_FINAL", reason="price_basis_mismatch")
-                continue
-            frozen = R.enroll(market, row["account_key"], row["ticker"], row["entry_date"], row["entry_price"],
-                              row["exit_date"], row["exit_price"], bars, trigger_type=row.get("trigger_type"),
-                              exit_kind=row.get("exit_kind"), source=row["source"])
-            watch.update(frozen=frozen, status=frozen["status"])
-            if frozen["status"] == "MISSING":
-                watch.update(status="MISSING_FINAL", reason=frozen.get("reason"))
-                continue
-        result = R.evaluate(watch["frozen"], bars)
-        bench_rows = bench.get(watch["ticker"]) or []
-        for event in result["events"]:
-            event["market_check"] = _bench_ok(bench_rows, event["date"]) if bench_rows else None
-        known = {e["event_id"]: e for e in watch.get("events", [])}
-        for event in result["events"]:
-            if event["event_id"] not in known:
-                fresh.append((watch, event))
-        watch["events"] = result["events"]
-        watch["status"], watch["reason"], watch["asof"] = result["status"], result.get("reason"), result.get("asof")
-        if watch["source"] == "STOP_EXIT":
-            watch["control"] = {"kind": "HOLD_WITHOUT_STOP", **R.hold_counterfactual(watch["frozen"], bars)}
-        else:
-            watch["control"] = {"kind": "IMMEDIATE_NEXT_OPEN", **R.simulate(bars, {
-                "kind": "IMMEDIATE", "date": watch["frozen"]["entry_date"], "swing_low": 0, "reclaim_level": 0})}
-        done = result["status"] in R.TERMINAL and all(
-            e["trade"].get("status") in {"CLOSED", "SKIPPED", "MISSING"} for e in result["events"]) \
-            and watch["control"].get("status") != "PENDING"
-        if done:
-            watch["status_final"] = watch["status"]
-            watch["status"] = "CLOSED"
+                        "enrollment": "PROSPECTIVE" if row["exit_date"] >= started else "LATE"}
+        fresh.extend(_refresh(watches[wid], frames, completed, market))
     live = [w for w in watches.values() if w["status"] not in {"CLOSED", "MISSING_FINAL"}]
     live.sort(key=lambda w: w["row"]["exit_date"])
     for watch in live[:-MAX_ACTIVE] if len(live) > MAX_ACTIVE else []:
-        watch.update(status="MISSING_FINAL", reason="capacity")
+        watch.update(status="MISSING_FINAL", reason="capacity", ended_on=completed)
     state["watches"] = list(watches.values())
     return state, fresh
 
