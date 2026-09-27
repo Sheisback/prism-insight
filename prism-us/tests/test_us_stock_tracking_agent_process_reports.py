@@ -145,6 +145,29 @@ us_agent_module = _load_us_agent_module()
 USStockTrackingAgent = us_agent_module.USStockTrackingAgent
 
 
+@pytest.mark.parametrize("capture_enabled,broken", [(False, False), (True, False), (True, True)])
+def test_committed_exit_optional_oneil_tape(monkeypatch, capture_enabled, broken):
+    from observability import oneil_capture
+    monkeypatch.setenv("ONEIL_TAPE_CAPTURE_ENABLED", str(capture_enabled))
+    tape = MagicMock()
+    tape.campaign_id_for_position.return_value = "campaign"
+    tape.bind_event_identity.side_effect = lambda _, event: event
+    if broken:
+        tape.append_exit.side_effect = RuntimeError("unavailable")
+    monkeypatch.setattr(oneil_capture, "_tape", lambda: tape)
+    monkeypatch.setattr(us_agent_module, "emit_trading_context", lambda *a, **kw: None)
+    agent = USStockTrackingAgent.__new__(USStockTrackingAgent)
+    agent.conn = MagicMock()
+    agent._live_market_context = {"regime": "bullish"}
+    agent._emit_exit_context_snapshot(ticker="AAPL", company_name="Apple",
+        scenario_json="{}", legacy_holding_ids=[17], trigger_type="test",
+        trigger_mode="morning", sell_reason="test", exit_kind="ai", buy_price=100,
+        sell_price=105, profit_rate=5, holding_days=1, account_key="test")
+    assert tape.append_exit.call_count == int(capture_enabled)
+    if capture_enabled:
+        tape.campaign_id_for_position.assert_called_once_with("legacy:US:17")
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "elapsed, expected_period, stored_days",
@@ -552,13 +575,22 @@ async def test_us_mirror_failures_keep_buy_and_sell_legacy_commits(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("tape_enabled", [False, True])
 async def test_us_full_exit_closes_all_siblings_before_one_order_and_publish(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, tape_enabled
 ):
     """A queued full exit closes every legacy/shadow row but emits one order."""
     from prism_core.positions import PositionStore
 
     events = []
+    from observability import oneil_capture
+    monkeypatch.setenv("ONEIL_TAPE_CAPTURE_ENABLED", str(tape_enabled))
+    monkeypatch.setattr(us_agent_module, "emit_trading_context", lambda *a, **kw: None)
+    tape = MagicMock()
+    tape.campaign_id_for_position.return_value = "campaign"
+    tape.bind_event_identity.side_effect = lambda _, event: event
+    tape.append_exit.side_effect = lambda *_: events.append("tape")
+    monkeypatch.setattr(oneil_capture, "_tape", lambda: tape)
     trading_module = types.ModuleType("trading.us_stock_trading")
 
     class FullExitTradingContext:
@@ -668,7 +700,7 @@ async def test_us_full_exit_closes_all_siblings_before_one_order_and_publish(
     sold = await USStockTrackingAgent.update_holdings(agent)
 
     assert len(sold) == 2
-    assert events == ["broker", "redis", "gcp"]
+    assert events == ["broker", "redis", "gcp"] + (["tape", "tape"] if tape_enabled else [])
     assert agent.conn.execute("SELECT COUNT(*) FROM us_stock_holdings").fetchone()[0] == 0
     assert agent.conn.execute("SELECT COUNT(*) FROM us_trading_history").fetchone()[0] == 2
     positions = agent.conn.execute(

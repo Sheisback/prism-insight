@@ -33,6 +33,25 @@ def test_disabled_zero_io(setup_capture, monkeypatch):
     assert not path.exists()
 
 
+@pytest.mark.parametrize("broken", [False, True])
+def test_tape_hook_sees_durable_original_and_cannot_suppress_spool(setup_capture, monkeypatch, broken):
+    from observability import oneil_capture
+    args, path, spool = setup_capture
+    seen = []
+    def observe(payload):
+        with sqlite3.connect(path) as connection:
+            stored = json.loads(connection.execute("SELECT payload FROM captures").fetchone()[0])
+        assert payload == stored
+        seen.append(payload["position_id"])
+        if broken:
+            raise RuntimeError("optional tape unavailable")
+    monkeypatch.setattr(oneil_capture, "capture_initial", observe)
+    event = capture.emit_initial_capture(**args)
+    assert event["position_id"] == args["position_id"]
+    assert seen == [args["position_id"]]
+    assert spool.exists()
+
+
 @pytest.mark.parametrize("change", [
     {"market": "KR"}, {"entry_eligible": False}, {"is_add": True},
     {"decision_id": None}, {"position_id": ""}, {"current_price": float("nan")},

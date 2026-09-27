@@ -199,3 +199,11 @@ def test_stop_cannot_ratchet_down_from_previous_tick():
     next_tick.update(occurred_at="2026-09-25T13:42:00Z", current_stop="99")
     ticks.append(next_tick)
     assert evaluate_replay(data)["status"] == "INPUT_UNAVAILABLE"
+
+
+def test_capture_gap_cannot_be_hidden_by_other_complete_ticks():
+    data = payload()
+    data["campaigns"][0]["capture_gaps"] = ["MISSING_CURRENT_INPUT"]
+    result = evaluate_replay(data)
+    assert result["coverage"]["evaluated"] == 0
+    assert result["cost_cases"]["10"]["adaptive"] is None

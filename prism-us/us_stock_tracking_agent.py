@@ -67,6 +67,8 @@ from observability.journal_influence import (  # noqa: E402
 )
 from observability.micro_split import emit_initial_shadow as emit_micro_split_shadow  # noqa: E402
 from observability.scenario_shadow import emit_initial_capture as emit_scenario_shadow_capture  # noqa: E402
+from observability.oneil_capture import capture_exit as capture_oneil_exit, capture_holding as capture_oneil_holding, holding_observation as oneil_holding_observation  # noqa: E402
+from observability.oneil_capture import defer_exit_capture  # noqa: E402
 from observability.trading_context import (  # noqa: E402
     emit_trading_context,
     execution_profile_ref,
@@ -3225,6 +3227,10 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
         except Exception:
             slots_after = None
         for legacy_holding_id in legacy_holding_ids:
+            observe_or_emit(self, capture_oneil_exit,
+                position_id=f"legacy:US:{legacy_holding_id}", price=sell_price,
+                source="us_strategy_exit",
+            )
             observe_or_emit(self, emit_trading_context,
                 "exit.executed",
                 market="US",
@@ -3477,6 +3483,7 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
             logger.error(traceback.format_exc())
             return False
 
+    @defer_exit_capture
     async def update_holdings(self, *, raise_on_error: bool = False) -> List[Dict[str, Any]]:
         """
         Update holdings information and make sell decisions.
@@ -3527,6 +3534,7 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
             # already removed, so skip them when the loop reaches them.
             fully_exited_tickers: set = set()
 
+            oneil_observations = []
             for stock in holdings:
                 ticker = stock.get('ticker')
                 company_name = stock.get('company_name')
@@ -3828,8 +3836,16 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
                         (current_price, now, ticker, stock.get("account_key"))
                     )
                     self.conn.commit()
+                    oneil_observations.append(oneil_holding_observation(
+                        position_id=f"legacy:US:{stock['id']}", price=current_price,
+                        scenario=stock.get("scenario"), source="us_regular_holdings",
+                    ))
                     logger.info(f"{ticker} ({company_name}) price updated: ${current_price:.2f} ({sell_reason})")
 
+            # Finish all sell/protection decisions before optional tape I/O.
+            for observation in oneil_observations:
+                if observation is not None:
+                    await asyncio.to_thread(capture_oneil_holding, observation)
             return sold_stocks
 
         except EffectsFailure:

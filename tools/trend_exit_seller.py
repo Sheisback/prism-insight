@@ -467,6 +467,11 @@ async def _make_agent(market: str):
 
 # ── Core evaluation for one market ─────────────────────────────────────────────
 async def run_market(market: str, run_id: str) -> Dict[str, Any]:
+    from observability.oneil_capture import defer_exit_capture
+    return await defer_exit_capture(_run_market)(market, run_id)
+
+
+async def _run_market(market: str, run_id: str) -> Dict[str, Any]:
     """Evaluate the O'Neil trend-exit tiers (TIER1.5/2/3) for every clean
     single-row holding, applying the close-confirmation / consecutive-breach gate.
 

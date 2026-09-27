@@ -168,6 +168,12 @@ def emit_initial_capture(*, market, ticker, decision_id, position_id, scenario,
                         return None
                 else:
                     connection.execute("INSERT INTO captures VALUES (?,?)", (key, _json(payload)))
+            # The independent tape only receives the durable frozen original.
+            try:
+                from observability.oneil_capture import capture_initial
+                capture_initial(payload)
+            except Exception:
+                pass
             # Serialize cooperating writers. Original is already durable if emit fails.
             with connection:
                 connection.execute("BEGIN IMMEDIATE")

@@ -39,6 +39,8 @@ def _identity(event, plan):
 
 def _validate_campaign(campaign):
     _ref(campaign["campaign_id"])
+    if campaign.get("capture_gaps"):
+        raise ValueError("CAPTURE_GAPS_UNRESOLVED")
     plan = campaign["plan"]
     _validate(plan)
     entry, terminal = campaign["entry"], campaign["exit"]
