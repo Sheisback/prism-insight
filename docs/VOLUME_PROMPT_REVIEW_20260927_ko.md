@@ -73,4 +73,7 @@ cron 불변을 확인한다. 첫 정규 KR/US 배치는 별도로 관측 여부�
 - 두 프롬프트 파일의 문자열을 제외한 AST, BUY 의사결정 블록, BUY/SELL JSON 이후 구간,
   도구 목록이 기준선과 동일함을 확인했다. Python compile, Ruff 오류 검사, diff 공백 검사 통과.
 - 기존 SDK의 deprecation 경고는 남아 있다. LLM 판단 정확도·수익률은 이 테스트의 검증 대상이 아니다.
+- PR #803의 최신 main 통합 후 같은 검증군은 224 passed, 별도 US 프롬프트 52 passed.
+  PR #804의 후속 main 변경도 별도 워크트리에서 통합하며 다른 작업의 파일은 수정하지 않는다.
+- 독립 검토에서 신규 blocker 없음. 29개 거래량/자료 계약 테스트 및 Python compile·Ruff 통과.
 - CI와 배포/첫 배치 관측은 아직 완료되지 않았다.
