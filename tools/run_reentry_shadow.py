@@ -13,6 +13,7 @@ import json
 import logging
 import math
 import sys
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -24,6 +25,8 @@ if str(ROOT) not in sys.path:
 from observability import reentry_shadow  # noqa: E402
 
 HISTORY_DAYS = 210
+KIS_SPACING_SECONDS = 0.25   # stay under the KIS per-second quota shared with trading loops
+KIS_RETRY_SECONDS = 1.5
 CLOSE_BUFFER = {"KR": (16, 30, "Asia/Seoul", "XKRX"), "US": (17, 0, "America/New_York", "NYSE")}
 KR_CACHE_DIR = ROOT / "runtime/reentry_kr_daily_cache"
 log = logging.getLogger("reentry_shadow")
@@ -116,15 +119,18 @@ def collect_kr(tickers, completed, *, source=None, master=None, cache_dir=None):
         for symbol, is_index in ((code, True), (ticker, False)):
             if symbol in data:
                 continue
-            try:
-                frame = source.index_history(symbol, start, end) if is_index else \
-                    source.price_history(symbol, start, end, adjusted=True)
-                rows = _frame_rows(frame, completed)
-                if rows and rows[-1]["date"] == completed:
-                    data[symbol] = rows
-                    _atomic(cache, data)
-            except Exception:  # noqa: BLE001 - explicit missing input; provider detail stays out of events
-                log.debug("KIS history unavailable for shadow symbol")
+            for attempt in (1, 2):
+                time.sleep(KIS_SPACING_SECONDS if attempt == 1 else KIS_RETRY_SECONDS)
+                try:
+                    frame = source.index_history(symbol, start, end) if is_index else \
+                        source.price_history(symbol, start, end, adjusted=True)
+                    rows = _frame_rows(frame, completed)
+                    if rows and rows[-1]["date"] == completed:
+                        data[symbol] = rows
+                        _atomic(cache, data)
+                    break
+                except Exception as error:  # noqa: BLE001 - explicit missing input; detail stays out of events
+                    log.info("KIS history unavailable for shadow symbol (attempt %s, %s)", attempt, type(error).__name__)
     out = {t: data[t] for t in tickers if t in data}
     out["__benchmark_rows"] = {t: data[c] for t, c in benchmarks.items() if c in data}
     return out

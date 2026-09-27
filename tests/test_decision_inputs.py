@@ -1,5 +1,4 @@
 from datetime import date, datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -105,3 +104,19 @@ def test_disabled_flag(monkeypatch):
     agent = _Agent()
     D.capture_frame(agent, "X", _frame(40), market="KR")
     assert not hasattr(agent, "_decision_input_bars")
+
+
+def test_payload_survives_event_sanitizer(monkeypatch):
+    import json
+
+    from observability.events import build_event
+    captured = {}
+    monkeypatch.setattr(D, "emit_event", lambda event, **kw: captured.update(kw) or {"ok": 1})
+    agent = _Agent()
+    D.capture_frame(agent, "AAPL", _frame(40, today=date(2026, 9, 28), forming_volume=900), market="US")
+    D.emit_decision_inputs(agent, market="US", ticker="AAPL", decision_id="d", scenario={}, current_price=140.0,
+                           decision="x", source="t", now=datetime(2026, 9, 28, 15, 0, tzinfo=timezone.utc),
+                           earnings_lookup=lambda t, d: {"status": "OK"})
+    event = build_event("decision_inputs.shadow_captured", service="s", attributes=captured["attributes"])
+    assert "[REDACTED]" not in json.dumps(event["attributes"])
+    assert event["attributes"]["features"]["market_elapsed_fraction"] > 0
