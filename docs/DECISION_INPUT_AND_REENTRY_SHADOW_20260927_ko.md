@@ -102,7 +102,8 @@
 - `tools/run_reentry_shadow.py --market KR|US`: db-server 장 마감 후 cron(KR 16:40 KST,
   US 17:20 ET). DB는 읽기 전용(`mode=ro`), KR 일봉은 KIS 수정주가·지수 일봉(세션별 캐시),
   US는 yfinance 비수정 일봉. 주문·보유·LLM·선정 결과에 접근하지 않는다.
-- 상태: `runtime/reentry_shadow_state_{kr,us}_v1.json`(원자적 저장, 잠금). 이벤트:
+- 상태: `runtime/reentry_shadow_state_{kr,us}_v1.json`(원자적 저장, 잠금, 동시 실행은 건너뜀).
+  청산 후 60일이 지난 종료 감시는 `*_archive.jsonl`로 옮기고 증거 패킷이 함께 읽는다. 이벤트:
   `reentry.shadow_signal`(신호당 1회), `reentry.shadow_run`(실행 요약).
 - 신호는 `NOT_EVALUATED`다. 보고서·BUY를 다시 부르지 않고 후보 목록에 끼워 넣지 않는다.
 - 설정: `trading/config/reentry_shadow.json`(비밀 아님), 긴급 중지 `REENTRY_SHADOW_ENABLED=false`.

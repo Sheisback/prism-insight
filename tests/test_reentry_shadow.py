@@ -144,3 +144,29 @@ def test_account_key_is_never_copied(tmp_path):
     _db(db, stop_rows=[("prod:12345678:01", "000001", "A", "2026-09-01 09:40:00", 100, "2026-09-03 10:00:00", 93, -7, "t", "stop")])
     rows = S.candidates(db, "KR", "2026-09-25")
     assert rows[0]["account_key"].startswith("acct-") and "12345678" not in json.dumps(rows)
+
+
+def test_finished_watches_move_to_archive_and_packet_reads_it(tmp_path):
+    from tools import build_reentry_evidence_packet as P
+    path = tmp_path / "reentry_shadow_state_kr_v1.json"
+    old = {"watch_id": "a", "status": "CLOSED", "source": "STOP_EXIT", "enrollment": "PROSPECTIVE",
+           "row": {"exit_date": "2026-06-01"}, "events": [{"kind": "RECLAIM", "date": "2026-06-05",
+           "market_check": {"ok": True}, "trade": {"status": "CLOSED", "ret": 0.1}}], "control": {}}
+    live = {"watch_id": "b", "status": "WATCHING", "source": "STOP_EXIT", "row": {"exit_date": "2026-06-01"},
+            "events": []}
+    recent = dict(old, watch_id="c", row={"exit_date": "2026-09-01"})
+    state = {"schema_version": 1, "policy_version": R.POLICY_VERSION, "market": "KR", "watches": [old, live, recent]}
+    assert S.archive_finished(state, path, "2026-09-25") == 1
+    assert [w["watch_id"] for w in state["watches"]] == ["b", "c"]
+    assert S.archive_finished(state, path, "2026-09-25") == 0
+    path.write_text(json.dumps(state))
+    assert P.build(P.load_states([path]))["trades"]["KR|PROSPECTIVE|STOP_EXIT|RECLAIM|all"]["n"] == 2
+
+
+def test_concurrent_run_is_skipped_cleanly(tmp_path):
+    import fcntl
+    path = tmp_path / "state.json"
+    with path.with_suffix(".lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        summary = S.run("KR", "2026-09-25", collector=lambda *a: {}, db_path=tmp_path / "none.sqlite", path=path)
+    assert summary["skipped"] == "lock_held"

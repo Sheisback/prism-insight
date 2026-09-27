@@ -2,6 +2,8 @@
 
     python tools/build_reentry_evidence_packet.py runtime/reentry_shadow_state_kr_v1.json [...]
 
+A sibling ``*_archive.jsonl`` (finished watches moved out of the state) is read too.
+
 Groups closed hypothetical trades by market / source / event kind / market check
 and compares them with the stored controls. PENDING / MISSING / SKIPPED are
 counted, never filled with 0%. LATE (backfilled) enrolments are reported apart
@@ -95,11 +97,24 @@ def build(states):
     return body
 
 
+def load_states(names):
+    states = []
+    for name in names:
+        path = Path(name)
+        state = json.loads(path.read_text())
+        archive = path.with_name(path.stem + "_archive.jsonl")
+        if archive.exists():
+            state["watches"] = state["watches"] + [json.loads(line) for line in archive.read_text().splitlines()
+                                                   if line.strip()]
+        states.append(state)
+    return states
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("states", nargs="+")
     args = parser.parse_args(argv)
-    states = [json.loads(Path(p).read_text()) for p in args.states]
+    states = load_states(args.states)
     print(json.dumps(build(states), ensure_ascii=False, indent=1, sort_keys=True))
     return 0
 

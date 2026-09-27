@@ -35,6 +35,7 @@ DB_PATH = ROOT / "stock_tracking_db.sqlite"
 POLICY = {"mode": "SHADOW", "policy_version": R.POLICY_VERSION, "markets": ["KR", "US"], "enabled": True}
 LOOKBACK_DAYS = 45          # calendar days of stop exits / analyses to enrol
 MAX_ACTIVE = 80             # per market, oldest dropped as MISSING(capacity)
+ARCHIVE_AFTER_DAYS = 60     # finished watches beyond the enrolment lookback move to the archive
 SCORE_GAP = 2               # LOCATION_SKIP: min_score - buy_score <= 2
 TABLES = {"KR": ("trading_history", "watchlist_history"), "US": ("us_trading_history", "us_watchlist_history")}
 SKIP_CATEGORIES = (
@@ -62,6 +63,31 @@ def _emit(event, market, **kwargs):
 
 def state_path(market):
     return STATE_DIR / f"reentry_shadow_state_{market.lower()}_v1.json"
+
+
+def archive_path(path):
+    return Path(path).with_name(Path(path).stem + "_archive.jsonl")
+
+
+def archive_finished(state, path, completed):
+    """Append finished watches past the lookback to a JSONL archive, then drop them.
+
+    They can no longer be re-enrolled (older than LOOKBACK_DAYS), and the evidence
+    packet reads the archive, so the state file stays small without losing evidence.
+    """
+    cutoff = (date.fromisoformat(completed) - timedelta(days=ARCHIVE_AFTER_DAYS)).isoformat()
+    done = [w for w in state["watches"] if w["status"] in {"CLOSED", "MISSING_FINAL"}
+            and w.get("row", {}).get("exit_date", "") < cutoff]
+    if not done:
+        return 0
+    with archive_path(path).open("a", encoding="utf-8") as handle:
+        for watch in done:
+            handle.write(json.dumps(watch, ensure_ascii=False, allow_nan=False) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    ids = {w["watch_id"] for w in done}
+    state["watches"] = [w for w in state["watches"] if w["watch_id"] not in ids]
+    return len(done)
 
 
 def _load(path, market):
@@ -257,7 +283,10 @@ def run(market, completed, *, collector, db_path=DB_PATH, path=None, dry_run=Fal
     path = Path(path) if path else state_path(market)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.with_suffix(".lock").open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return {"mode": "SHADOW", "trading_impact": "none", "skipped": "lock_held", "market": market}
         state = _load(path, market)
         state.setdefault("started_session", completed)
         rows = candidates(db_path, market, completed)
@@ -265,7 +294,9 @@ def run(market, completed, *, collector, db_path=DB_PATH, path=None, dry_run=Fal
         frames = collector(tickers, completed) if tickers else {}
         state, fresh = advance(state, rows, frames, completed, market)
         state["last_completed"] = completed
+        archived = 0
         if not dry_run:
+            archived = archive_finished(state, path, completed)
             _atomic(path, state)
         now = datetime.now(timezone.utc)
         sent = 0
@@ -287,7 +318,7 @@ def run(market, completed, *, collector, db_path=DB_PATH, path=None, dry_run=Fal
         summary = {"mode": "SHADOW", "trading_impact": "none", "policy_version": R.POLICY_VERSION,
                    "completed_session": completed, "enrol_rows": len(rows), "symbols": len(tickers),
                    "collected": len([t for t in tickers if frames.get(t)]), "new_signals": len(fresh),
-                   "signals_emitted": sent, "status_counts": counts, "dry_run": dry_run}
+                   "signals_emitted": sent, "status_counts": counts, "archived": archived, "dry_run": dry_run}
         if not dry_run:
             _emit("reentry.shadow_run", market, attributes=summary, event_time=now)
         return summary
