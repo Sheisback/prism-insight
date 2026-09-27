@@ -154,8 +154,12 @@ def _int(value):
         return None
 
 
-def candidates(db_path, market, completed, lookback_days=LOOKBACK_DAYS):
-    """Read-only enrolment rows; the DB is never written."""
+def candidates(db_path, market, completed, lookback_days=LOOKBACK_DAYS, include_blocked=False):
+    """Read-only enrolment rows; the DB is never written.
+
+    include_blocked adds ENTER_BLOCKED: the BUY agent chose entry but a deterministic gate
+    stopped it (used by re-entry v2; v1 keeps its original sources).
+    """
     since = (date.fromisoformat(completed) - timedelta(days=lookback_days)).isoformat()
     until = (date.fromisoformat(completed) + timedelta(days=1)).isoformat()  # KST stamps of US rows run ahead
     uri = "file:" + str(db_path) + "?mode=ro"
@@ -174,19 +178,23 @@ def candidates(db_path, market, completed, lookback_days=LOOKBACK_DAYS):
             scenario = _scenario(row["scenario"])
             fundamentals = (scenario.get("fundamental_check") or {}).get("all_passed")
             score, minimum = _int(row["buy_score"]), _int(row["min_score"])
-            if fundamentals is not True or score is None or minimum is None or minimum - score > SCORE_GAP:
+            blocked = include_blocked and fundamentals is not False and \
+                str(row["decision"] or "").strip().lower() in {"enter", "진입", "entry"}
+            if not blocked and (fundamentals is not True or score is None or minimum is None
+                                or minimum - score > SCORE_GAP):
                 continue
             price = row["current_price"]
             if not price:
                 continue
-            out.append({"source": "LOCATION_SKIP", "account_key": "analysis", "ticker": str(row["ticker"]),
+            out.append({"source": "ENTER_BLOCKED" if blocked else "LOCATION_SKIP", "account_key": "analysis",
+                        "ticker": str(row["ticker"]),
                         "company_name": row["company_name"], "entry_date": session_date(row["analyzed_date"], market),
                         "entry_price": price, "exit_date": session_date(row["analyzed_date"], market),
                         "exit_price": price,
                         "trigger_type": row["trigger_type"], "exit_kind": None, "analysis_id": row["id"],
                         "decision": row["decision"], "buy_score": score, "min_score": minimum,
                         "skip_categories": skip_category(row["skip_reason"]),
-                        "decision_id": scenario.get("_decision_id")})
+                        "decision_id": scenario.get("_decision_id"), "skip_reason": row["skip_reason"]})
         # Only rows whose session is complete; a forming session is enrolled next run.
         return [r for r in out if r["exit_date"] <= completed]
 
