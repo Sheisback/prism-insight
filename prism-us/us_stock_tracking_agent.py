@@ -34,7 +34,7 @@ import time
 import threading
 import traceback
 import importlib.util as _ilu
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional
 
@@ -66,6 +66,9 @@ from observability.journal_influence import (  # noqa: E402
     build_journal_influence_context,
 )
 from observability.micro_split import emit_initial_shadow as emit_micro_split_shadow  # noqa: E402
+from observability.scenario_shadow import emit_initial_capture as emit_scenario_shadow_capture  # noqa: E402
+from observability.oneil_capture import capture_exit as capture_oneil_exit, capture_holding as capture_oneil_holding, holding_observation as oneil_holding_observation  # noqa: E402
+from observability.oneil_capture import defer_exit_capture  # noqa: E402
 from observability.trading_context import (  # noqa: E402
     emit_trading_context,
     execution_profile_ref,
@@ -3221,6 +3224,10 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
         except Exception:
             slots_after = None
         for legacy_holding_id in legacy_holding_ids:
+            observe_or_emit(self, capture_oneil_exit,
+                position_id=f"legacy:US:{legacy_holding_id}", price=sell_price,
+                source="us_strategy_exit",
+            )
             observe_or_emit(self, emit_trading_context,
                 "exit.executed",
                 market="US",
@@ -3274,6 +3281,8 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
         """
         require_execution_runtime(self)
         try:
+            from prism_core.oneil_routing import route_exit
+            route_exit(self, stock_data, sell_reason)
             ticker = stock_data.get('ticker', '')
             company_name = stock_data.get('company_name', '')
             buy_price = stock_data.get('buy_price', 0)
@@ -3401,6 +3410,12 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
                 )
             self.conn.commit()
             try:
+                if stock_data.get("_oneil_owned_exit"):
+                    from prism_core.oneil_routing import mark_owned_strategy_exit
+                    mark_owned_strategy_exit(stock_data)
+            except Exception:
+                logger.warning("[ONEIL] strategy exit committed; execution marker retry required")
+            try:
                 self._emit_exit_context_snapshot(
                     ticker=ticker,
                     company_name=company_name,
@@ -3473,6 +3488,7 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
             logger.error(traceback.format_exc())
             return False
 
+    @defer_exit_capture
     async def update_holdings(self, *, raise_on_error: bool = False) -> List[Dict[str, Any]]:
         """
         Update holdings information and make sell decisions.
@@ -3523,6 +3539,7 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
             # already removed, so skip them when the loop reaches them.
             fully_exited_tickers: set = set()
 
+            oneil_observations = []
             for stock in holdings:
                 ticker = stock.get('ticker')
                 company_name = stock.get('company_name')
@@ -3656,7 +3673,9 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
                         trade_result = {'success': False, 'message': 'Trading not executed'}
 
                         # Only execute trading if we have a valid price
-                        if current_price > 0:
+                        owned_exit = stock.get("_oneil_owned_exit") or (
+                            plan == "full_exit" and any(row.get("_oneil_owned_exit") for row in sibling_rows))
+                        if current_price > 0 and not owned_exit:
                             closed_rows = (
                                 sibling_rows if plan == "full_exit" else [stock]
                             )
@@ -3824,8 +3843,16 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
                         (current_price, now, ticker, stock.get("account_key"))
                     )
                     self.conn.commit()
+                    oneil_observations.append(oneil_holding_observation(
+                        position_id=f"legacy:US:{stock['id']}", price=current_price,
+                        scenario=stock.get("scenario"), source="us_regular_holdings",
+                    ))
                     logger.info(f"{ticker} ({company_name}) price updated: ${current_price:.2f} ({sell_reason})")
 
+            # Finish all sell/protection decisions before optional tape I/O.
+            for observation in oneil_observations:
+                if observation is not None:
+                    await asyncio.to_thread(capture_oneil_holding, observation)
             return sold_stocks
 
         except EffectsFailure:
@@ -4128,6 +4155,11 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
                     # held ticker only when the strong-bull add-gate passes. Otherwise
                     # keep the legacy skip. Computed per active account.
                     is_add = False
+                    if effects is None:
+                        from prism_core.oneil_routing import route_owned_entry
+                        if await route_owned_entry(self, account, ticker):
+                            state["held_skip_reason"] = "Adaptive owned campaign is managed by its execution worker"
+                            continue
                     if await self._is_ticker_in_holdings(ticker):
                         # Post-FTD 파일럿 윈도우: 중복매수(피라미딩) 동결. sim/real 공통 매수 전에
                         # 차단해 시뮬레이터/실주문이 동일하게 스킵된다. fail-open: 예외 시 기존 로직.
@@ -4444,6 +4476,15 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
                             state["traded"] = bool(applied)
                             buy_count += int(applied)
                             continue
+                        from prism_core.oneil_routing import route_initial
+                        owned_initial = await route_initial(self, account=account, ticker=ticker,
+                            company_name=company_name, scenario=scenario, current_price=current_price,
+                            report_path=state["report_path"], rank_change_msg=rank_change_msg)
+                        if owned_initial["handled"]:
+                            state["traded"] = owned_initial["strategy_recorded"]
+                            buy_count += int(owned_initial["strategy_recorded"])
+                            state["skip_reason"] = owned_initial["reason"]
+                            continue
                         buy_result = await self._buy_stock_with_position(
                             ticker,
                             company_name,
@@ -4455,6 +4496,40 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
                         buy_success = buy_result.success
 
                         if buy_success:
+                            # Freeze only after the strategy position exists, before
+                            # broker funding/quantity can influence capture. The
+                            # observer is opt-in and never changes the BUY scenario.
+                            try:
+                                adaptive_review = None
+                                from observability.scenario_shadow import capture_enabled
+                                from prism_core.oneil_batch_setup import enabled as setup_capture_enabled
+                                if capture_enabled() and setup_capture_enabled():
+                                    from prism_core.oneil_batch_setup import load_review_sidecar
+                                    try:
+                                        adaptive_review = await asyncio.to_thread(
+                                            load_review_sidecar, state["report_path"],
+                                            symbol=ticker, decision_ref=source_decision_id,
+                                            as_of=datetime.now(timezone.utc).isoformat(),
+                                        )
+                                    except Exception:  # sidecar failure must not suppress original capture
+                                        adaptive_review = {
+                                            "contract_version": "oneil-batch-linked-review-v1",
+                                            "market": "US", "symbol": ticker,
+                                            "decision_ref": source_decision_id, "status": "MISSING",
+                                        }
+                                observe_or_emit(self, emit_scenario_shadow_capture,
+                                    market="US", ticker=ticker,
+                                    account_id=account.get("account_key"),
+                                    decision_id=scenario.get("_decision_id"),
+                                    position_id=legacy_position_id("US", buy_result.legacy_holding_id),
+                                    scenario=scenario, current_price=current_price,
+                                    entry_eligible=entry_eligible, is_add=is_add,
+                                    trigger_type=trigger_type,
+                                    trigger_mode=trigger_info.get("trigger_mode"),
+                                    adaptive_review=adaptive_review,
+                                )
+                            except Exception:  # noqa: BLE001 - optional capture cannot fail trading
+                                logger.warning("[SCENARIO_SHADOW] initial capture unavailable")
                             trade_result = {'success': False, 'message': 'Trading not executed'}
 
                             if current_price > 0:

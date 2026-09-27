@@ -87,6 +87,15 @@ def test_unknown_exchange_is_not_guessed():
     assert collector.normalize(request, received)["bars"] == []
 
 
+def test_explicit_arca_code_uses_us_equity_calendar_for_spy():
+    request = {"interval": "1d", "start": "2026-09-08T00:00:00Z", "end": collector.CUTOFF}
+    received = response([raw("2026-09-08T00:00:00-04:00")])
+    received["exchange"] = "PCX"
+    normalized = collector.normalize(request, received)
+    assert normalized["calendar"] == "NYSE"
+    assert len(normalized["bars"]) == 1
+
+
 def test_partial_entry_bar_is_not_treated_as_post_entry_observation():
     request = {"interval": "5m", "start": "2026-09-08T19:02:03Z", "end": collector.CUTOFF}
     result = collector.normalize(request, response([raw("2026-09-08T15:00:00-04:00")]))

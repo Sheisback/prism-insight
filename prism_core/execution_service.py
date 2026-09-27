@@ -178,6 +178,7 @@ class ExecutionService:
         account_name: str | None = None,
         *,
         db_path: str | Path | None = None,
+        intent_store: IntentStore | None = None,
     ) -> "ExecutionService":
         try:
             from trading.us_stock_trading import AsyncUSTradingContext
@@ -197,7 +198,10 @@ class ExecutionService:
                 sys.path.insert(0, path)
             from us_stock_trading import AsyncUSTradingContext
 
-        store = IntentStore(db_path) if db_path is not None else None
+        if db_path is not None and intent_store is not None:
+            if Path(db_path).expanduser().resolve() != Path(intent_store.db_path).expanduser().resolve():
+                raise ValueError("db_path must target the originating IntentStore database")
+        store = intent_store if intent_store is not None else IntentStore(db_path) if db_path is not None else None
         return cls(
             AsyncUSTradingContext(account_name=account_name),
             intent_store=store,

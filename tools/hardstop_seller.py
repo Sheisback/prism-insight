@@ -291,6 +291,11 @@ async def _make_agent(market: str):
 
 # ── Core evaluation for one market ─────────────────────────────────────────────
 async def run_market(market: str, run_id: str) -> Dict[str, Any]:
+    from observability.oneil_capture import defer_exit_capture
+    return await defer_exit_capture(_run_market)(market, run_id)
+
+
+async def _run_market(market: str, run_id: str) -> Dict[str, Any]:
     """Evaluate the TIER1 hard stop for every clean single-row holding.
 
     Never raises: any failure degrades to a no-op for that ticker/market.
@@ -300,6 +305,7 @@ async def run_market(market: str, run_id: str) -> Dict[str, Any]:
     from cores.oneil_fallback import SellInputs, evaluate_tier1_hardstop
     conn = _connect()
     agent = {"ref": None}  # lazily created on first LIVE sell
+    oneil_observations = []
     try:
         _ensure_schema(conn)
         by_ticker = load_holdings_by_ticker(conn, market)
@@ -334,6 +340,12 @@ async def run_market(market: str, run_id: str) -> Dict[str, Any]:
                     should_sell, reason = evaluate_tier1_hardstop(
                         SellInputs(buy_price=buy_price, current_price=cur_price, stop_loss=stop_loss)
                     )
+                    if market == "US" and not should_sell:
+                        from observability.oneil_capture import holding_observation
+                        oneil_observations.append(holding_observation(
+                            position_id=f"legacy:US:{h.get('id')}", price=cur_price,
+                            scenario={"stop_loss": stop_loss}, source="us_mechanical_hardstop",
+                        ))
                     if not should_sell:
                         continue
                     summary["triggered"] += 1
@@ -343,6 +355,12 @@ async def run_market(market: str, run_id: str) -> Dict[str, Any]:
         except Exception as e:  # context/credential failure -> skip whole market safely
             logger.warning("%s trading context failed: %s", market, e)
     finally:
+        # Protection/actions for every holding finish before optional tape I/O.
+        if oneil_observations:
+            from observability.oneil_capture import capture_holding
+            for observation in oneil_observations:
+                if observation is not None:
+                    await asyncio.to_thread(capture_holding, observation)
         # Run-end: if anything sold this run, send ONE realtime portfolio summary
         # (matches the batch flow). Done at run-end — NOT inside the per-sell
         # action — so generate_report_summary's DB reads never corrupt the
@@ -660,6 +678,19 @@ async def _act_on_trigger(conn, market: str, ticker: str, stock_data: Dict[str, 
         if not sim_ok:
             logger.error("[%s] %s sell_stock (sim) failed -> aborting, no KIS order", market, ticker)
             release_lock(conn, ticker, market, run_id, new_state="HOLDING")
+            return
+
+        if market == "US" and stock_data.get("_oneil_owned_exit") is True:
+            # The owned execution journal cancels pending BUYs and exits only
+            # its confirmed shares. Never send this legacy whole-account SELL.
+            record_inflight(conn, ticker, market, run_id, 0, "OWNED_EXIT_PENDING", reason, None)
+            release_lock(conn, ticker, market, run_id, new_state="SOLD")
+            summary["sold"] += 1  # strategy close, not a broker fill assertion
+            summary["owned_exit_delegated"] = summary.get("owned_exit_delegated", 0) + 1
+            try:
+                await ag.send_telegram_message(CHAT_ID, await_broadcast=True)
+            except Exception:
+                logger.warning("owned strategy exit notification unavailable")
             return
 
         # 2) real KIS market order on the holding's own account; reconcile qty first.
