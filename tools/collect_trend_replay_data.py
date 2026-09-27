@@ -19,7 +19,8 @@ CUTOFF = "2026-09-09T16:18:06.031436Z"
 FIELDS = {"Open": "open", "High": "high", "Low": "low", "Close": "close",
           "Adj Close": "adj_close", "Volume": "volume", "Dividends": "dividends",
           "Stock Splits": "stock_splits", "Capital Gains": "capital_gains"}
-EXCHANGES = {"NMS": "NASDAQ", "NGM": "NASDAQ", "NCM": "NASDAQ", "NYQ": "NYSE"}
+# Explicit NYSE Arca provider code (e.g. SPY), not an unknown-exchange fallback.
+EXCHANGES = {"NMS": "NASDAQ", "NGM": "NASDAQ", "NCM": "NASDAQ", "NYQ": "NYSE", "PCX": "NYSE"}
 
 
 def stamp(value):

@@ -118,6 +118,7 @@ jobs:
           python -m pytest tests/test_oneil_adaptive_policy.py tests/test_oneil_adaptive_ledger.py -q
           python -m pytest tests/test_oneil_intraday_inputs.py tests/test_oneil_setup_inputs.py \
             tests/test_oneil_input_bridge.py tests/test_oneil_input_collection.py -q
+          python -m pytest tests/test_oneil_auto_review.py tests/test_oneil_auto_review_pipeline.py -q
           # Existing bootstrap creates only a fake example.com KIS config, removes it at exit.
           python -m pytest tests/test_multi_account_domestic.py \
             tests/test_astra_kr_safety.py tests/test_kr_buy_quote_validation.py \
