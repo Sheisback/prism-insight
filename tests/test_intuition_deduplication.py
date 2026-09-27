@@ -85,6 +85,13 @@ def test_explicit_evidence_must_be_subset_of_corpus():
     assert mgr.conn.execute('SELECT COUNT(*) FROM trading_intuitions').fetchone()[0] == 0
 
 
+def test_empty_market_is_not_implicitly_korean():
+    mgr = manager()
+    mgr._save_intuition(rule(), [1, 2])
+    mgr.conn.execute("UPDATE trading_intuitions SET market=''")
+    assert mgr._active_intuitions() == []
+
+
 def test_union_preserves_originals_and_legacy_provenance_is_not_verified_support():
     mgr = manager()
     mgr._save_intuition(rule(), [1, 2])

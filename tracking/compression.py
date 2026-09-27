@@ -42,7 +42,7 @@ class CompressionManager:
         """Filter shared and legacy KR-only rows before applying corpus limits."""
         columns = [d[0] for d in cursor.description]
         rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
-        return [row for row in rows if (row.get('market') or 'KR') == 'KR']
+        return [row for row in rows if row.get('market') in (None, 'KR')]
 
     def _active_intuitions(self) -> List[Dict[str, Any]]:
         cursor = self.conn.execute(
