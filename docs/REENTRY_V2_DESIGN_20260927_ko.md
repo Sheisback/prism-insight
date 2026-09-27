@@ -191,3 +191,65 @@ LLM 재점검 결과는 13절에 기록한다.
   (a) 트리거 시점의 새 가격 수준(피벗을 새 지지선으로, 측정 이동 목표 등)을 결정론적 사실로 제공하거나,
   (b) 트리거 전에 보고서를 새로 만들어야 한다. 7절 기준에 따라 **v2는 SHADOW·LIVE로 진행하지 않는다.**
 - 원본: db-server `/root/prism-server-backups/reentry-recheck-20260927/`.
+
+## 14. 결정론 SHADOW로 전환 (2026-09-27, LLM 호출 0회)
+
+13절 결과와 주간 한도 때문에 LLM 재점검은 지금 돌리지 않는다(사용자 결정: astra 미사용). 대신 v1 단순 재진입
+SHADOW를 **v2 피벗 재진입 결정론 SHADOW**로 교체하고, 트리거 순간의 재점검 입력을 동결해 둔다. 나중에 LLM을
+쓸 수 있을 때 동결된 입력으로 일괄 재점검하면 사후 정보 없이 같은 조건을 재현할 수 있다.
+
+- 코드: `observability/reentry_v2_shadow.py`, `tools/run_reentry_v2_shadow.py`, 입력 구성은
+  `observability/reentry_recheck_inputs.py`(재생 도구와 공유). 정책 `trading/config/reentry_v2_shadow.json`.
+  PR #812, #813.
+- 감시 대상: 손절(STOP_EXIT), 자리 보류(LOCATION_SKIP), **게이트 차단(ENTER_BLOCKED, 신규)** — BUY가 진입을
+  골랐는데 결정론 게이트가 막은 건. 판단일 기준 point-in-time 중복 제거, 70일 등록 창.
+- 트리거와 청산: 1절 피벗 돌파(장중, 거래량 1.0배 이상, 피벗 +5% 초과는 추격으로 배제), 시장 CORRECTION이면 차단.
+  성과는 12절 보정된 운영 청산 규칙으로 시뮬레이션하고 ORIGINAL·READY_OPEN 통제군을 같이 기록한다.
+- 동결 입력(`runtime/reentry_v2_recheck_inputs_{kr,us}.jsonl`, append-only, 계약 `reentry_v2_recheck_input_v2`):
+  보고서 참조(파일 또는 archive.db, sha256, 작성일, 경과일, 30일 초과 `stale`), KR 결정론 시장 국면,
+  기술·시장 사실, **트리거 시점의 새 가격 수준**(피벗=새 지지선, 베이스 저점, 측정 이동 목표=피벗+(피벗-저점),
+  손절=max(-7%, 베이스 저점), R/R), 원래 사유·점수. `llm_recheck: NOT_EVALUATED`.
+  13절의 실패 원인 1~3(낡은 가격 수준, 시장 국면 누락)을 입력에서 해소한다.
+- 보고서는 **트리거 전날까지** 작성된 것만 쓴다. 첫 운영 실행에서 트리거 당일 오후 보고서가 잡힌 것을 발견해
+  고쳤다(#813, KR 003160: 9/21 오후 → 9/01). 계약 v1으로 동결된 5건은
+  `/root/prism-server-backups/reentry-v2-contract-v1-20260927/`로 옮기고 v2로 다시 동결했다.
+- 운영: db-server cron의 v1 러너 두 줄을 v2 러너로 교체(KR 16:40 KST, US 17:20 ET, 로그
+  `logs/reentry_v2_shadow_{kr,us}.log`). 백업 `/root/prism-server-backups/crontab.before-reentry-v2-shadow.20260927`.
+  v1은 정책 파일에서 `enabled: false`.
+- 첫 실행(수동, 2026-09-27 22:4x KST): KR 완료 세션 9/23(추석 연휴), 등록 49행·37종목 수집, 트리거 2건.
+  US 완료 세션 9/25, 등록 155행·66종목, 트리거 3건. 재실행 시 신규 0건(멱등). 이벤트
+  `reentry_v2.shadow_trigger`·`reentry_v2.shadow_run` 기록, 마스킹 0건.
+
+| 시장 | 종목 | 출처 | 트리거일 | 보고서 | 경과 | R/R |
+|---|---|---|---|---|---|---|
+| KR | 010950 | 자리 보류 | 09-01 | 파일 08-28 | 4일 | 2.51 |
+| KR | 003160 | 자리 보류 | 09-21 | 파일 09-01 | 20일 | 1.71 |
+| US | AMCR | 자리 보류 | 08-20 | archive 08-12 | 8일 | 1.00 |
+| US | DHR | 자리 보류 | 08-19 | archive 07-22 | 28일 | 1.18 |
+| US | MDT | 자리 보류 | 09-01 | archive 07-29 | 34일(stale) | 1.00 |
+
+이 5건은 과거 자료로 늦게 등록된(LATE) 것이다. 효과 판단은 앞으로 판단 순간에 등록되는 PROSPECTIVE 건으로 한다.
+LIVE 승격은 7절 기준과 사용자 승인이 필요하다.
+
+## 15. 운영 병행 LLM 재점검 (2026-09-27, 14절의 "나중 일괄 재점검"을 대체)
+
+사용자 결정: 일괄 재점검은 하지 않는다. SHADOW가 운영과 함께 돌다가 트리거가 날 때만 LLM을 부른다.
+모델은 BUY와 같은 astra/high, 30일 넘은 보고서는 재생성하지 않고 `stale` 표시만 남겨 나중에 따로 비교한다.
+
+- 코드: `observability/reentry_v2_recheck.py`(PR #814). 매일 러너가 새 트리거를 동결한 직후 호출한다.
+- 대상: 트리거 세션이 SHADOW 시작일(`started_session`, KR 9/23·US 9/25) **이후**인 것만. 늦게 등록된 감시라도
+  트리거가 앞으로 나면 대상이다. 이미 동결된 과거 트리거 5건은 호출하지 않는다(NOT_EVALUATED 유지).
+- 입력: 동결 레코드 그대로(원래 사유·점수, KR 결정론 국면, 기술·시장 사실, 새 가격 수준, 보고서 작성일·경과일).
+  보고서는 같은 point-in-time 규칙으로 다시 찾고 sha256이 다르면 `REPORT_CHANGED`로 기록하고 부르지 않는다.
+- 호출: 운영 BUY 지시문 + 재진입 재점검 절, Codex BUY 설정, **MCP 도구 없음**(러너가 장 마감 뒤라 도구가
+  돌파 이후 시세를 읽을 수 있음). 실패(ERROR/PARSE_ERROR)는 다음 실행에서 1회만 재시도, 같은 날 재실행은 호출 안 함.
+- 결과: `runtime/reentry_v2_recheck_results_{kr,us}.jsonl`(append-only, 시나리오 전체), 이벤트
+  `reentry_v2.shadow_recheck`, 실행 요약의 `llm_calls`.
+- 끄기: 정책 `llm_recheck: false`, 환경 `REENTRY_V2_LLM_RECHECK=false`, CLI `--no-llm`. dry-run은 호출하지 않는다.
+- 운영: cron 두 줄에 BUY와 같은 Codex 환경(모델·effort·timeout·bin·home·auth)을 붙였다.
+  백업 `/root/prism-server-backups/crontab.before-reentry-v2-llm.20260927`.
+  배포 후 점검: 스위치 켜짐, 기존 트리거 대상 없음 → 호출 0회. 실제 LLM 호출은 첫 전방 트리거에서 처음 일어난다.
+- 예상 호출량: 11절 재생(약 3개월, KR+US 트리거 78건) 기준 월 20~30회, 약세장에서는 시장 게이트 때문에 더 적다.
+  (처음 적은 "월 2~5회"는 아직 감시 중인 백로그의 이미 난 트리거 5건만 보고 잡은 과소 추정이었다.)
+- 판정: 승인 건과 거절 건의 운영 청산 시뮬레이션 성과(지수 대비)를 비교해 재점검이 실패 돌파를 거르는지 본다.
+  stale 건은 따로 본다. LIVE 승격은 7절 기준과 사용자 승인이 필요하다.

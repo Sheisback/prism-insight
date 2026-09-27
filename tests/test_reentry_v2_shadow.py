@@ -53,6 +53,9 @@ def test_trigger_freezes_recheck_inputs_once_and_is_idempotent(tmp_path):
     watch, item = frozen[0]
     assert watch["status"] in {"TRIGGERED", "CLOSED"} and item["trigger_date"] == bars[73]["date"]
     assert item["llm_recheck"] == "NOT_EVALUATED" and item["report_ref"]["kind"] == "file"
+    assert item["report_ref"]["report_date"] == bars[60]["date"] and item["report_ref"]["age_days"] == (
+        date.fromisoformat(bars[73]["date"]) - date.fromisoformat(bars[60]["date"])).days
+    assert item["report_ref"]["stale"] is False
     assert item["levels"]["support_pivot"] == 110 and item["levels"]["measured_move_target"] > 110
     assert "📏 트리거 시점 가격 수준" in item["facts_text"] and item["original"]["reason"] == "추세 게이트 T1"
     _, again = V2.advance(state, [_row(bars)], frames, completed, "KR", reports_root=tmp_path, archive_db=None)
@@ -100,12 +103,12 @@ def test_run_dry_run_writes_nothing_and_real_run_freezes(tmp_path, monkeypatch):
     collector = lambda tickers, completed: {"000001": bars, "__benchmark_rows": {"000001": bars}}  # noqa: E731
     root = tmp_path / "rt"
     summary = V2.run("KR", bars[-1]["date"], collector=collector, db_path=db, root=root, reports_root=tmp_path,
-                     archive_db=None, dry_run=True)
+                     archive_db=None, dry_run=True, llm_recheck=False)
     assert summary["new_triggers"] == 1 and summary["llm_calls"] == 0
     assert [f.name for f in root.iterdir()] == ["reentry_v2_state_kr.lock"]     # only the run lock
     assert sent == []
     summary = V2.run("KR", bars[-1]["date"], collector=collector, db_path=db, root=root, reports_root=tmp_path,
-                     archive_db=None)
+                     archive_db=None, llm_recheck=False)
     frozen = [json.loads(line) for line in (root / "reentry_v2_recheck_inputs_kr.jsonl").read_text().splitlines()]
     assert len(frozen) == 1 and frozen[0]["source"] == "ENTER_BLOCKED"
     assert [n for n, _ in sent] == ["reentry_v2.shadow_trigger", "reentry_v2.shadow_run"]
@@ -113,7 +116,8 @@ def test_run_dry_run_writes_nothing_and_real_run_freezes(tmp_path, monkeypatch):
     for _, kw in sent:
         assert "[REDACTED]" not in json.dumps(build_event("x", service="s", attributes=kw["attributes"])["attributes"])
     sent.clear()
-    V2.run("KR", bars[-1]["date"], collector=collector, db_path=db, root=root, reports_root=tmp_path, archive_db=None)
+    V2.run("KR", bars[-1]["date"], collector=collector, db_path=db, root=root, reports_root=tmp_path, archive_db=None,
+           llm_recheck=False)
     assert [n for n, _ in sent] == ["reentry_v2.shadow_run"]
     assert len((root / "reentry_v2_recheck_inputs_kr.jsonl").read_text().splitlines()) == 1
 
@@ -126,3 +130,122 @@ def test_enabled_requires_exact_policy(tmp_path, monkeypatch):
     assert V2.enabled("KR") and V2.enabled("US")
     monkeypatch.setenv("REENTRY_V2_SHADOW_ENABLED", "false")
     assert not V2.enabled("KR")
+
+
+def test_report_lookup_is_strictly_before_the_trigger_day(tmp_path):
+    from observability.reentry_recheck_inputs import latest_report
+    folder = tmp_path / "reports"
+    folder.mkdir()
+    for name in ("000001_A_20260820_morning_x.md", "000001_A_20260901_morning_x.md",
+                 "000001_A_20260901_afternoon_x.md", "000001_A_20260831_morning_x_en.md"):
+        (folder / name).write_text("r")
+    assert latest_report(tmp_path, "KR", "000001", "2026-09-01").name == "000001_A_20260820_morning_x.md"
+    assert latest_report(tmp_path, "KR", "000001", "2026-09-02").name == "000001_A_20260901_afternoon_x.md"
+    assert latest_report(tmp_path, "KR", "000001", "2026-08-20") is None
+
+
+def test_archive_lookup_is_strictly_before_the_trigger_day(tmp_path):
+    from observability.reentry_recheck_inputs import archived_report
+    db = tmp_path / "a.db"
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE report_archive (market TEXT, ticker TEXT, language TEXT, report_date TEXT, mode TEXT, "
+                 "model TEXT, content TEXT)")
+    conn.executemany("INSERT INTO report_archive VALUES (?,?,?,?,?,?,?)",
+                     [("us", "AAA", "ko", "2026-07-01", "morning", "m", "old"),
+                      ("us", "AAA", "ko", "2026-08-10", "afternoon", "m", "same-day")])
+    conn.commit()
+    conn.close()
+    report = archived_report(db, "US", "AAA", "2026-08-10")
+    assert report.read_text() == "old" and "_20260701_" in report.name
+
+
+def _forward_setup(tmp_path, monkeypatch):
+    """Shadow starts before the breakout, so the trigger is forward evidence."""
+    bars = _series()
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    db = tmp_path / "t.sqlite"
+    _db(db, bars)
+    (tmp_path / "reports").mkdir(exist_ok=True)
+    (tmp_path / "reports" / f"000001_A_{bars[60]['date'].replace('-', '')}_morning_x.md").write_text("REPORT")
+    monkeypatch.setattr(V2, "LOOKBACK_DAYS", 400)
+    monkeypatch.setattr(V2.RC, "recheck_instruction", lambda market: "SYS")
+    sent = []
+    monkeypatch.setattr(V2, "emit_event", lambda name, **kw: sent.append((name, kw)) or {"ok": 1})
+    collector = lambda tickers, completed: {"000001": bars, "__benchmark_rows": {"000001": bars}}  # noqa: E731
+    root = tmp_path / "rt"
+
+    def run(day, **kw):
+        return V2.run("KR", bars[day]["date"], collector=collector, db_path=db, root=root, reports_root=tmp_path,
+                      archive_db=None, **kw)
+    return bars, root, sent, run
+
+
+def _fake_llm(calls, reply='{"decision": "진입", "buy_score": 8, "min_score": 7}'):
+    async def llm(system, user):
+        calls.append((system, user))
+        if isinstance(reply, Exception):
+            raise reply
+        return reply, {"model": "m", "reasoning_effort": "high", "latency_s": 1.0}
+    return llm
+
+
+def test_forward_trigger_is_rechecked_once_with_frozen_inputs(tmp_path, monkeypatch):
+    bars, root, sent, run = _forward_setup(tmp_path, monkeypatch)
+    calls = []
+    assert run(72, llm_recheck=True, llm=_fake_llm(calls))["rechecks"] == 0     # enrolled, no trigger yet
+    summary = run(len(bars) - 1, llm_recheck=True, llm=_fake_llm(calls))
+    assert summary["llm_calls"] == 1 and summary["recheck_status"] == {"OK": 1}
+    system, user = calls[0]
+    assert system == "SYS" and "📏 트리거 시점 가격 수준" in user and "REPORT" in user and "게이트 차단" in user
+    result = json.loads((root / "reentry_v2_recheck_results_kr.jsonl").read_text())
+    assert result["approved"] is True and result["buy_score"] == 8 and result["report_stale"] is False
+    assert "reentry_v2.shadow_recheck" in [n for n, _ in sent]
+    from observability.events import build_event
+    attrs = next(kw["attributes"] for n, kw in sent if n == "reentry_v2.shadow_recheck")
+    assert "[REDACTED]" not in json.dumps(build_event("x", service="s", attributes=attrs)["attributes"])
+    assert run(len(bars) - 1, llm_recheck=True, llm=_fake_llm(calls))["llm_calls"] == 0
+    assert len(calls) == 1
+
+
+def test_backfilled_trigger_and_dry_run_never_call_the_llm(tmp_path, monkeypatch):
+    bars, root, _, run = _forward_setup(tmp_path, monkeypatch)
+    calls = []
+    assert run(len(bars) - 1, llm_recheck=True, llm=_fake_llm(calls))["llm_calls"] == 0   # trigger before start
+    bars2, root2, _, run2 = _forward_setup(tmp_path / "b", monkeypatch)
+    run2(72, llm_recheck=False)
+    assert run2(len(bars2) - 1, dry_run=True, llm_recheck=True, llm=_fake_llm(calls))["llm_calls"] == 0
+    assert calls == []
+
+
+def test_failed_recheck_is_retried_once_on_a_later_run(tmp_path, monkeypatch):
+    bars, root, _, run = _forward_setup(tmp_path, monkeypatch)
+    calls = []
+    boom = _fake_llm(calls, RuntimeError("down"))
+    run(72, llm_recheck=True, llm=boom)
+    assert run(len(bars) - 2, llm_recheck=True, llm=boom)["recheck_status"] == {"ERROR": 1}
+    assert run(len(bars) - 2, llm_recheck=True, llm=boom)["llm_calls"] == 0          # same day: no retry
+    assert run(len(bars) - 1, llm_recheck=True, llm=boom)["recheck_status"] == {"ERROR": 1}
+    assert run(len(bars) - 1, llm_recheck=True, llm=boom)["llm_calls"] == 0          # attempts exhausted
+    assert len(calls) == 2
+
+
+def test_changed_report_is_not_sent_to_the_llm(tmp_path, monkeypatch):
+    bars, root, _, run = _forward_setup(tmp_path, monkeypatch)
+    calls = []
+    run(72, llm_recheck=False)
+    report = tmp_path / "reports" / f"000001_A_{bars[60]['date'].replace('-', '')}_morning_x.md"
+    V2.run("KR", bars[-2]["date"], collector=lambda t, c: {"000001": bars, "__benchmark_rows": {"000001": bars}},
+           db_path=tmp_path / "t.sqlite", root=root, reports_root=tmp_path, archive_db=None, llm_recheck=False)
+    report.write_text("EDITED")
+    assert run(len(bars) - 1, llm_recheck=True, llm=_fake_llm(calls))["recheck_status"] == {"REPORT_CHANGED": 1}
+    assert calls == []
+
+
+def test_llm_recheck_switches(tmp_path, monkeypatch):
+    path = tmp_path / "p.json"
+    monkeypatch.setattr(V2, "POLICY_PATH", path)
+    assert not V2.llm_recheck_enabled()
+    path.write_text(json.dumps(V2.POLICY))
+    assert V2.llm_recheck_enabled()
+    monkeypatch.setenv("REENTRY_V2_LLM_RECHECK", "0")
+    assert not V2.llm_recheck_enabled()

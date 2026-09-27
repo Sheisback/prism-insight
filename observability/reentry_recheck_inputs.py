@@ -1,7 +1,7 @@
-"""Frozen recheck inputs for re-entry v2: latest report and trigger-time facts.
+"""Recheck inputs for re-entry v2: latest report, trigger-time facts and the BUY instruction.
 
-Shared by the SHADOW runner (which freezes these inputs at the trigger, no LLM call)
-and tools/replay_reentry_llm_recheck.py (which later feeds them to the BUY agent).
+Shared by the SHADOW runner (freezes these inputs at the trigger and runs the recheck,
+observability/reentry_v2_recheck.py) and tools/replay_reentry_llm_recheck.py.
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ RECHECK_KO = """
 ## 재진입 재점검 모드 (이번 요청에만 적용)
 
 이 종목은 과거에 분석되어 보류·차단되었거나 손절된 종목입니다. 오늘 장중에 베이스의 피벗(저항선)을
-거래량을 동반해 돌파했습니다. 입력의 보고서는 트리거 이전에 작성된 가장 최근 보고서이며 작성일을 확인하십시오.
+거래량을 동반해 돌파했습니다. 입력의 보고서는 트리거 전날까지 작성된 가장 최근 보고서이며 작성일을 확인하십시오.
 - 원래 보류·차단·손절 사유가 현재 기술적 사실(추세, 위치, 거래량)과 시장 상태로 해소됐는지 재점검하십시오.
 - 재무 F1~F4는 보고서 기준 판단을 유지합니다. 보고서 이후의 새 정보는 없으므로 추정하지 마십시오.
 - 진입 가격은 입력의 돌파 가격 기준입니다. 추격(피벗 +5% 초과)은 이미 배제됐습니다.
@@ -37,11 +37,12 @@ class ArchivedReport:
 
 
 def archived_report(archive_db, market, ticker, day):
+    """Latest ko report written strictly before `day` (a same-day report may postdate an intraday trigger)."""
     import sqlite3
     with sqlite3.connect("file:" + str(archive_db) + "?mode=ro", uri=True) as conn:
         row = conn.execute(
             "SELECT report_date, mode, model, content FROM report_archive WHERE market = ? AND ticker = ? "
-            "AND language = 'ko' AND replace(report_date, '-', '') <= ? ORDER BY replace(report_date, '-', '') DESC, "
+            "AND language = 'ko' AND replace(report_date, '-', '') < ? ORDER BY replace(report_date, '-', '') DESC, "
             "CASE mode WHEN 'afternoon' THEN 1 ELSE 0 END DESC LIMIT 1",
             (market.lower(), ticker, day.replace("-", ""))).fetchone()
     if not row:
@@ -51,6 +52,7 @@ def archived_report(archive_db, market, ticker, day):
 
 
 def latest_report(root, market, ticker, day):
+    """Latest ko report file dated strictly before `day` (see archived_report)."""
     folder = Path(root) / REPORT_DIRS[market]
     stamp = day.replace("-", "")
     best = None
@@ -58,12 +60,25 @@ def latest_report(root, market, ticker, day):
         if TRANSLATED.search(path.name):
             continue
         match = re.search(r"_(\d{8})_(morning|afternoon)", path.name)
-        if not match or match.group(1) > stamp:
+        if not match or match.group(1) >= stamp:
             continue
         key = (match.group(1), match.group(2) == "afternoon")
         if best is None or key > best[0]:
             best = (key, path)
     return best[1] if best else None
+
+
+def recheck_instruction(market, root=None):
+    """The production BUY agent instruction (current prompt flags) plus the re-entry recheck section."""
+    if market == "KR":
+        from cores.agents.trading_agents import create_trading_scenario_agent
+        return create_trading_scenario_agent(language="ko").instruction + RECHECK_KO
+    import importlib.util
+    root = Path(root) if root else Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("us_agents_recheck", root / "prism-us/cores/agents/trading_agents.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.create_us_trading_scenario_agent(language="ko").instruction + RECHECK_KO
 
 
 def market_facts(bench_bars, day):
