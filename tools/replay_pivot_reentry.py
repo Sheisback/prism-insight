@@ -31,6 +31,11 @@ from observability.reentry_shadow import session_date  # noqa: E402
 from prism_core import pivot_reentry as P  # noqa: E402
 
 GAP = 2
+# Fixed statements per market: no table name is ever interpolated into SQL.
+STOP_SQL = {
+    "KR": "SELECT ticker, sell_date, sell_price, profit_rate, exit_kind, scenario FROM trading_history",
+    "US": "SELECT ticker, sell_date, sell_price, profit_rate, exit_kind, scenario FROM us_trading_history",
+}
 
 
 def load_bars(raw):
@@ -50,9 +55,7 @@ def enrolments(db_path, market):
     """(source, ticker, date, price, fundamentals) rows from the trade DB, read-only."""
     rows = []
     with sqlite3.connect("file:" + str(db_path) + "?mode=ro", uri=True) as conn:
-        trades = "trading_history" if market == "KR" else "us_trading_history"
-        for ticker, sell_date, sell_price, pnl, kind, scenario in conn.execute(
-                f"SELECT ticker, sell_date, sell_price, profit_rate, exit_kind, scenario FROM {trades}"):  # nosec B608
+        for ticker, sell_date, sell_price, pnl, kind, scenario in conn.execute(STOP_SQL[market]):
             if kind == "stop" or (kind is None and pnl is not None and pnl <= -3):
                 passed = (_scenario(scenario).get("fundamental_check") or {}).get("all_passed")
                 rows.append(("STOP_EXIT", str(ticker), session_date(sell_date, market), sell_price, passed))
