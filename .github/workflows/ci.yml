@@ -115,6 +115,7 @@ jobs:
           python -m pytest tests/test_scenario_shadow_policy.py tests/test_scenario_shadow_ledger.py \
             tests/test_scenario_shadow_capture.py \
             tests/test_strategy_ledger_effects_cas.py tests/test_isolated_strategy_effects.py -q
+          python -m pytest tests/test_oneil_adaptive_policy.py tests/test_oneil_adaptive_ledger.py -q
           # Existing bootstrap creates only a fake example.com KIS config, removes it at exit.
           python -m pytest tests/test_multi_account_domestic.py \
             tests/test_astra_kr_safety.py tests/test_kr_buy_quote_validation.py \
