@@ -290,3 +290,26 @@ def test_us_inflight_guard(tmp_db, monkeypatch):
     s2 = asyncio.run(lb.run_market(MKT, "run2"))
     assert s2["skipped"] == 1
     assert _inflight(tmp_db) == 1
+
+
+# ── production shape: peak lives in the scenario JSON, not in a column ─────────
+def test_us_tier2_trailing_reads_scenario_peak(tmp_db, monkeypatch):
+    # Production us_stock_holdings has no highest_price column; the SELL agent keeps
+    # it in scenario JSON. Before 2026-09-27 the loop read 0 and TIER2 never fired.
+    _enable(monkeypatch, live=False, confirm=1)
+    row = list(_row(1, "AAPL", 100.0))
+    row[5] = '{"highest_price": 120.0}'
+    _seed(tmp_db, [tuple(row)])
+    calls = []
+    trader = FakeTrader({"AAPL": 108.0}, calls=calls)
+    _patch(monkeypatch, trader, agent_holder=FakeAgent(calls), ma50=0.0, regime="sideways")
+    summary = asyncio.run(lb.run_market(MKT, "run1"))
+    assert summary["signaled"] == 1 and summary["acted"] == 1
+
+
+def test_holding_highest_price_prefers_scenario_and_tolerates_garbage():
+    assert lb.holding_highest_price({"scenario": '{"highest_price": 120}'}) == 120.0
+    assert lb.holding_highest_price({"scenario": {"highest_price": "130.5"}}) == 130.5
+    assert lb.holding_highest_price({"scenario": "not json", "highest_price": 110}) == 110.0
+    assert lb.holding_highest_price({"scenario": None}) == 0.0
+    assert lb.holding_highest_price({"scenario": '{"highest_price": "x"}'}) == 0.0
