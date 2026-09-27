@@ -54,12 +54,13 @@ def enabled(market):
 
 
 def llm_recheck_enabled():
+    """Opt-in: the BUY-agent recheck spends LLM quota, so it runs only with REENTRY_V2_LLM_RECHECK=true."""
     try:
         policy = json.loads(POLICY_PATH.read_text())
     except (OSError, ValueError):
         return False
     return (policy.get("llm_recheck") is True
-            and os.getenv("REENTRY_V2_LLM_RECHECK", "true").strip().lower() in {"1", "true", "yes", "on"})
+            and os.getenv("REENTRY_V2_LLM_RECHECK", "false").strip().lower() in {"1", "true", "yes", "on"})
 
 
 def paths(market, root=STATE_DIR):

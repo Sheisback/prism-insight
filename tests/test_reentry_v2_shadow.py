@@ -246,6 +246,9 @@ def test_llm_recheck_switches(tmp_path, monkeypatch):
     monkeypatch.setattr(V2, "POLICY_PATH", path)
     assert not V2.llm_recheck_enabled()
     path.write_text(json.dumps(V2.POLICY))
+    monkeypatch.delenv("REENTRY_V2_LLM_RECHECK", raising=False)
+    assert not V2.llm_recheck_enabled()                 # opt-in: off unless the env turns it on
+    monkeypatch.setenv("REENTRY_V2_LLM_RECHECK", "true")
     assert V2.llm_recheck_enabled()
     monkeypatch.setenv("REENTRY_V2_LLM_RECHECK", "0")
     assert not V2.llm_recheck_enabled()

@@ -1,5 +1,6 @@
 """After-close re-entry v2 SHADOW runner (pivot breakout). No orders; one BUY-agent recheck per
-forward trigger unless --no-llm, a dry run, or the policy/env switch turns it off.
+forward trigger only when REENTRY_V2_LLM_RECHECK=true (.env or environment; default off),
+never with --no-llm or a dry run.
 
     python tools/run_reentry_v2_shadow.py --market KR
     python tools/run_reentry_v2_shadow.py --market US --dry-run
@@ -42,6 +43,8 @@ def main(argv=None):
     parser.add_argument("--archive-db", default=str(V2.ARCHIVE_DB))
     parser.add_argument("--no-llm", action="store_true", help="skip the LLM recheck of new triggers")
     args = parser.parse_args(argv)
+    from dotenv import load_dotenv
+    load_dotenv(ROOT / ".env", override=False)      # explicit environment (e.g. cron) wins
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     if not V2.enabled(args.market) and not args.dry_run:
         log.info("reentry v2 shadow disabled for %s", args.market)
