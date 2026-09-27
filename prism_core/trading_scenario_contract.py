@@ -14,6 +14,10 @@ _NUMBERS = ('entry_price', 'target_price', 'stop_loss', 'risk_reward_ratio',
 _ENTRY = {'진입', '매수', 'enter', 'entry', 'buy', 'yes'}
 _NO_ENTRY = {'미진입', '관망', '보류', '패스', 'skip', 'no entry', 'no_entry',
              'no-entry', 'no', 'pass', 'watch', 'hold'}
+# O'Neil overhead-free breakout: the low end of his 20-25% profit-taking rule.
+# A fixed ratio, so the model cannot stretch it to clear an R/R floor.
+_ONEIL_BREAKOUT_RATIO = 1.20
+_ONEIL_BREAKOUT_TOLERANCE = 0.01
 
 # These are the existing BUY prompt's policy template, not model-generated rules.
 # Detailed trailing parameters remain owned by the live SELL instruction/state.
@@ -98,6 +102,7 @@ def apply_buy_scenario_contract(scenario: dict, *, market: str, entry_price: Any
             raise ValueError('scenario ENTRY requires positive price/risk numbers')
         if not result['stop_loss'] < price < result['target_price']:
             raise ValueError('scenario ENTRY price must lie between stop and target')
+        _validate_oneil_breakout_target(result)
     scenarios = result.get('trading_scenarios')
     if scenarios is None:
         scenarios = {}
@@ -121,7 +126,7 @@ def _validate_target_provenance(scenario: dict, *, entering: bool) -> None:
     source = value.get('source_type')
     if (not isinstance(status, str) or not isinstance(source, str)
             or status not in {'supported', 'unknown'}
-            or source not in {'structural', 'report_scenario', 'unknown'}):
+            or source not in {'structural', 'report_scenario', 'oneil_breakout', 'unknown'}):
         raise ValueError('scenario unsupported target provenance')
     for field in ('source_section', 'asof', 'holding_horizon', 'exit_model', 'reason'):
         if not isinstance(value.get(field), str) or not value[field].strip():
@@ -133,6 +138,17 @@ def _validate_target_provenance(scenario: dict, *, entering: bool) -> None:
         raise ValueError('scenario supported target requires source')
     if entering and status != 'supported':
         raise ValueError('scenario ENTRY requires supported target provenance')
+
+
+def _validate_oneil_breakout_target(result: dict) -> None:
+    """An oneil_breakout target must be the fixed rule price from the analysis entry."""
+    provenance = result.get('target_provenance')
+    if not isinstance(provenance, dict) or provenance.get('source_type') != 'oneil_breakout':
+        return
+    reference = result['_analysis_entry_price']
+    expected = reference * _ONEIL_BREAKOUT_RATIO
+    if abs(result['target_price'] - expected) > expected * _ONEIL_BREAKOUT_TOLERANCE:
+        raise ValueError('scenario oneil_breakout target must equal entry_price x 1.20')
 
 
 def buy_scenario_prompt_contract(language: str = 'ko') -> str:
@@ -148,8 +164,10 @@ def buy_scenario_prompt_contract(language: str = 'ko') -> str:
   Never select a farther resistance or arbitrary percentage merely to pass the R/R floor.
   A 12-month analyst target is not automatically a short-term trading target. Unknown target
   evidence is not evidence of a weak company and must not independently reduce its quality score.
+- Use source_type "oneil_breakout" only when every overhead-free breakout condition in the BUY
+  instruction holds; its target_price must be exactly entry_price x 1.20 (code-validated).
 - Include target_provenance: {"version":"target-v1", "status":"supported|unknown",
-  "source_type":"structural|report_scenario|unknown", "source_section":"report section",
+  "source_type":"structural|report_scenario|oneil_breakout|unknown", "source_section":"report section",
   "evidence_ids":[], "asof":"source date or unknown", "holding_horizon":"intended horizon",
   "exit_model":"existing exit model", "reason":"target derivation or missing evidence"}.
   Use only supplied evidence IDs; [] if absent. Never invent IDs or dates. This is model-claimed
@@ -172,8 +190,10 @@ def buy_scenario_prompt_contract(language: str = 'ko') -> str:
   손익비 기준을 통과시키려고 더 먼 저항이나 임의 상승률을 선택하지 마세요.
   12개월 애널리스트 목표가를 단기 매매 목표로 자동 사용하지 마세요. 목표 근거 미확인은
   기업이 약하다는 증거가 아니므로 기업 품질 점수를 별도로 깎지 마세요.
+- source_type "oneil_breakout"은 매수 지침의 상단 매물 없는 돌파 조건을 모두 충족할 때만
+  쓰고, 이때 target_price는 정확히 entry_price × 1.20이어야 합니다(코드가 검증합니다).
 - target_provenance를 포함하세요: {"version":"target-v1", "status":"supported|unknown",
-  "source_type":"structural|report_scenario|unknown", "source_section":"보고서 절",
+  "source_type":"structural|report_scenario|oneil_breakout|unknown", "source_section":"보고서 절",
   "evidence_ids":[], "asof":"근거 기준일 또는 unknown", "holding_horizon":"보유 기간",
   "exit_model":"기존 청산 방식", "reason":"목표 산정 근거 또는 결측 설명"}.
   제공된 근거 ID만 사용하고 없으면 []로 두세요. ID·날짜를 만들지 마세요. 이는 모델의
