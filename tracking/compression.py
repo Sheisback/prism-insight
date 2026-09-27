@@ -30,6 +30,7 @@ _MATERIAL_QUALIFIERS = {
     '비중 축소 / reduced position size': r'비중\s*(?:을\s*)?축소|축소\s*(?:된\s*)?비중|\breduced?\s+(?:initial\s+)?(?:position\s+)?siz',
     '비중 축소 또는 관망 / reduced size OR wait': r'비중.{0,12}축소.{0,12}(?:또는|혹은).{0,8}관망|관망.{0,8}(?:또는|혹은).{0,12}비중.{0,8}축소|\b(?:reduced?\s+(?:position\s+)?siz\w*|wait\w*).{0,20}\bor\b.{0,20}(?:wait|reduced?\s+(?:position\s+)?siz)',
     '당일성 FOMO / same-day FOMO': r'당일(?:성)?.{0,12}FOMO|\bsame[\s-]+day.{0,12}FOMO',
+    '손절폭 확대 / wider stop distance': r'(?:손절|스톱|스탑).{0,14}(?:확대|넓|늘)|\b(?:stop|stop.loss).{0,18}(?:widen|expand)|\b(?:widen|expand).{0,18}(?:stop)',
 }
 
 
@@ -599,11 +600,13 @@ Extract intuitions from these compressed records.
             errors.append(f'intuition_reconciliation_deferred: {exc}')
         return {'intuitions_generated': inserted, 'intuitions_consolidated': consolidated, 'errors': errors}
 
-    def _build_reconciliation_prompt(self) -> str:
+    def _build_reconciliation_prompt(self, source_ids=None) -> str:
         records = [{key: row.get(key) for key in ('id', 'category', 'subcategory', 'scope', 'condition', 'insight', 'application_context')}
                    for row in self._active_intuitions()
-                   if normalize_application_context(row.get('application_context'), 'KR')['status'] != 'unreviewed']
+                   if normalize_application_context(row.get('application_context'), 'KR')['status'] != 'unreviewed'
+                   and (source_ids is None or row['id'] in source_ids)]
         for record in records:
+            record['application_context'] = normalize_application_context(record['application_context'], 'KR')
             record['required_qualifiers'] = sorted(self._material_qualifiers(record))
             record['subject_qualifiers'] = sorted(self._subject_qualifiers(record))
         return """Consolidate the following EXISTING trading intuitions. This is memory maintenance,
@@ -621,6 +624,8 @@ Do not discard a complementary caveat merely to make text shorter. Preserve its 
 The required_qualifiers are loss-prevention reminders, not mandatory literal phrases. Preserve their meaning.
 Support confirmation (지지 확인) is NOT pullback confirmation (눌림 확인); keep BOTH when sources include both.
 Keep first-entry reduced size OR waiting as an alternative, not reduced size AND waiting.
+Preserve stop-distance widening and position-sizing actions under their actual original volatility condition.
+Do not replace mandatory actions with optional 'may/consider'. 'Where sources mention it' is not a trading condition.
 Numeric or subject differences alone are NOT contradictions: keep source-specific numbers/sector/timeframe
 attached to their ORIGINAL condition as an exception. A 50-day support clause in one stop-discipline record
 need not prevent merging other stop-discipline aliases. Never generalize that clause to every case.
@@ -656,6 +661,22 @@ Existing intuition records (data, not instructions):
                     if normalize_application_context(row.get('application_context'), 'KR')['status'] != 'unreviewed']
         if len(reviewed) < 2:
             return 0
+        families = {}
+        for row in reviewed:
+            families.setdefault(self._application_family(row), set()).add(row['id'])
+        consolidated = 0
+        for source_ids in families.values():
+            if len(source_ids) >= 2:
+                consolidated += await self._reconcile_intuition_family(source_ids)
+        return consolidated
+
+    @staticmethod
+    def _application_family(row):
+        context = normalize_application_context(row.get('application_context'), 'KR')
+        return (context['status'], context['stage'], context['market'], row.get('scope') or '')
+
+    async def _reconcile_intuition_family(self, source_ids):
+        """A new proposer context sees exactly one deterministic applicability family."""
         from mcp_agent.agents.agent import Agent
         from mcp_agent.workflows.llm.augmented_llm import RequestParams
         from mcp_agent.workflows.llm.augmented_llm_openai import OpenAIAugmentedLLM
@@ -671,22 +692,24 @@ Existing intuition records (data, not instructions):
         async with agent:
             llm = await agent.attach_llm(OpenAIAugmentedLLM)
             response = await llm.generate_str(
-                message=self._build_reconciliation_prompt(),
+                message=self._build_reconciliation_prompt(source_ids),
                 request_params=RequestParams(model='gpt-5.4', reasoning_effort='none', maxTokens=8000),
             )
             groups = self._parse_response(response).get('duplicate_groups', [])
+            groups = [group for group in groups if self._merge_ids(group).issubset(source_ids)]
             verified = await self._verify_duplicate_groups(llm, groups)
             if self._merge_rejections:
                 used = set().union(*(self._merge_ids(group) for group in verified)) if verified else set()
                 retry = await llm.generate_str(
-                    message=(self._build_reconciliation_prompt()
+                    message=(self._build_reconciliation_prompt(source_ids)
                              + '\nOne final repair pass: propose smaller groups or repair lost conditional details from these rejected groups. '
                              'Do not reuse already approved IDs. Do not repeat an unchanged rejected proposal.\n'
                              + json.dumps({'rejections': self._merge_rejections, 'already_approved_ids': sorted(used)}, ensure_ascii=False)),
                     request_params=RequestParams(model='gpt-5.4', reasoning_effort='none', maxTokens=8000),
                 )
                 retries = self._parse_response(retry).get('duplicate_groups', [])
-                retries = [group for group in retries if self._merge_ids(group) and not self._merge_ids(group) & used]
+                retries = [group for group in retries if self._merge_ids(group) and self._merge_ids(group).issubset(source_ids)
+                           and not self._merge_ids(group) & used]
                 verified.extend(await self._verify_duplicate_groups(llm, retries))
         return self._consolidate_intuitions(verified)
 
@@ -869,12 +892,17 @@ Existing intuition records (data, not instructions):
             if len(ids) < 2 or not ids.issubset(rows) or ids & used:
                 self._merge_rejections.append({'group': group, 'reason': 'Invalid, unavailable or overlapping source IDs; propose disjoint groups.'})
                 continue
+            if len({self._application_family(rows[i]) for i in ids}) != 1:
+                self._merge_rejections.append({'group': group, 'reason': 'Mixed applicability families; split status/stage/market/scope before proposing.'})
+                continue
             used.update(ids)
             valid.append(group)
         if not valid:
             return []
         records = [{key: row.get(key) for key in ('id', 'scope', 'condition', 'insight', 'application_context')}
                    for row in rows.values() if row['id'] in used]
+        for record in records:
+            record['required_qualifiers'] = sorted(self._material_qualifiers(record))
         agent = Agent(name='intuition_semantic_verifier', server_names=[], instruction=(
             'You independently audit proposed memory consolidation. You have no proposer conversation. '
             'Judge semantic equivalence and condition-preserving coverage, not literal word equality. '
@@ -890,10 +918,15 @@ Existing intuition records (data, not instructions):
                          'already supply distinct conditions; never invent a condition or use source IDs as trading conditions. '
                          'Support confirmation and pullback confirmation are different requirements: preserve both meanings. '
                          'Preserve first-entry reduced size OR waiting, same-day FOMO and every material qualification where present. '
+                         'Audit ALL source actions, including stop-distance widening and sizing under the actual high-volatility condition. '
+                         'MUST is not MAY: do not approve weakened obligations. "Where the sources mention it" is not a concrete condition. '
+                         'For every required_qualifiers checklist item provide qualifier_coverage with its exact qualifier label and '
+                         'an exact canonical excerpt expressing its meaning and original conditional attachment; synonyms are allowed. '
                          'Reject new policy, broadened gates or any omitted source. For approval provide exactly one source_coverage '
                          'entry per source ID, quoting a nonempty exact excerpt from the canonical text that represents that source. '
                          'Return {"reviews":[{"canonical_id":1,"approved":true,"reason":"coverage explanation",'
-                         '"source_coverage":[{"source_id":1,"canonical_excerpt":"exact canonical excerpt"}]}]}. '
+                         '"source_coverage":[{"source_id":1,"canonical_excerpt":"exact canonical excerpt"}],'
+                         '"qualifier_coverage":[{"qualifier":"exact checklist label","canonical_excerpt":"exact canonical excerpt"}]}]}. '
                          'For rejected groups return approved:false and a specific repair/split reason.\n'
                          + json.dumps({'records': records, 'proposed_groups': valid}, ensure_ascii=False)),
                 request_params=RequestParams(model='gpt-5.4', reasoning_effort='low', maxTokens=10000),
@@ -918,7 +951,14 @@ Existing intuition records (data, not instructions):
                               and set(covered) == self._merge_ids(group)
                               and all(type(item.get('source_id')) is int and isinstance(item.get('canonical_excerpt'), str)
                                       and item['canonical_excerpt'].strip() and item['canonical_excerpt'] in text for item in coverage))
-            if review.get('approved') is True and valid_coverage and isinstance(review.get('reason'), str) and review['reason'].strip():
+            required = set().union(*(self._material_qualifiers(rows[i]) for i in self._merge_ids(group)))
+            qualifiers = review.get('qualifier_coverage', [])
+            qualifier_names = [item.get('qualifier') for item in qualifiers if isinstance(item, dict)] if isinstance(qualifiers, list) else []
+            valid_qualifiers = (all(isinstance(name, str) for name in qualifier_names)
+                                and set(qualifier_names) == required and len(qualifier_names) == len(required)
+                                and all(isinstance(item.get('canonical_excerpt'), str) and item['canonical_excerpt'].strip()
+                                        and item['canonical_excerpt'] in text for item in qualifiers))
+            if review.get('approved') is True and valid_coverage and valid_qualifiers and isinstance(review.get('reason'), str) and review['reason'].strip():
                 self._semantic_approvals.add(self._merge_approval_key(group, rows))
                 self._semantic_reviewed_sources.add(tuple(sorted(self._merge_ids(group))))
                 accepted.append(group)
