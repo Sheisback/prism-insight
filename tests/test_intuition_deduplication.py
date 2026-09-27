@@ -463,6 +463,8 @@ async def test_missing_stop_width_action_requires_semantic_checklist_coverage(mo
     llm = SimpleNamespace(generate_str=AsyncMock(return_value=json.dumps({'reviews': [review]})))
     stub_llm_dependencies(monkeypatch, llm)
     assert await mgr._verify_duplicate_groups(None, [group]) == []
+    assert '손절폭 확대 / wider stop distance' in mgr._merge_rejections[0]['reason']
+    assert mgr._merge_rejections[0]['reviewer_reason'] == review['reason']
     group['canonical_insight'] = '고변동성 구간에서는 보호 주문까지 거리를 더 두고 포지션 축소를 적용한다'
     review['source_coverage'] = [{'source_id': i, 'canonical_excerpt': group['canonical_insight']} for i in (1, 2)]
     review['qualifier_coverage'] = [{'qualifier': '손절폭 확대 / wider stop distance', 'canonical_excerpt': group['canonical_insight']}]
@@ -470,6 +472,42 @@ async def test_missing_stop_width_action_requires_semantic_checklist_coverage(mo
     approved = await mgr._verify_duplicate_groups(None, [group])
     assert approved == [group]  # Meaning preserved with different wording.
     assert mgr._consolidate_intuitions(approved) == 2
+
+
+@pytest.mark.asyncio
+async def test_repeated_qualifier_labels_with_valid_quotes_are_valid_coverage(monkeypatch):
+    mgr = manager()
+    for condition in ('눌림 확인 전', '되돌림 확인 전'):
+        mgr._save_intuition(dict(rule(), condition=condition, insight='진입을 보류한다'), [1, 2])
+    group = {'canonical_id': 1, 'duplicate_ids': [2], 'canonical_condition': '눌림 확인 전',
+             'canonical_insight': '진입을 보류한다. 되돌림 확인 후 판단한다.'}
+    review = {'canonical_id': 1, 'approved': True, 'reason': 'One label cited for each synonymous source.',
+              'source_coverage': [{'source_id': i, 'canonical_excerpt': '진입을 보류한다'} for i in (1, 2)],
+              'qualifier_coverage': [
+                  {'qualifier': '눌림 확인 / pullback confirmation', 'canonical_excerpt': '눌림 확인 전'},
+                  {'qualifier': '눌림 확인 / pullback confirmation', 'canonical_excerpt': '되돌림 확인 후 판단한다'},
+              ]}
+    llm = SimpleNamespace(generate_str=AsyncMock(return_value=json.dumps({'reviews': [review]})))
+    stub_llm_dependencies(monkeypatch, llm)
+    approved = await mgr._verify_duplicate_groups(None, [group])
+    assert approved == [group]
+    assert mgr._consolidate_intuitions(approved) == 2
+
+
+@pytest.mark.asyncio
+async def test_repeated_labels_do_not_cover_a_missing_distinct_qualifier(monkeypatch):
+    mgr = manager()
+    for condition in ('지지와 눌림 확인 전', '눌림 및 지지 확인 전'):
+        mgr._save_intuition(dict(rule(), condition=condition, insight='진입을 보류한다'), [1, 2])
+    group = {'canonical_id': 1, 'duplicate_ids': [2], 'canonical_insight': '눌림 확인 전 진입을 보류한다'}
+    coverage = {'qualifier': '눌림 확인 / pullback confirmation', 'canonical_excerpt': '눌림 확인 전'}
+    review = {'canonical_id': 1, 'approved': True, 'reason': 'Incorrectly overlooked support.',
+              'source_coverage': [{'source_id': i, 'canonical_excerpt': '진입을 보류한다'} for i in (1, 2)],
+              'qualifier_coverage': [coverage, coverage]}
+    llm = SimpleNamespace(generate_str=AsyncMock(return_value=json.dumps({'reviews': [review]})))
+    stub_llm_dependencies(monkeypatch, llm)
+    assert await mgr._verify_duplicate_groups(None, [group]) == []
+    assert '지지 확인 / support confirmation' in mgr._merge_rejections[0]['reason']
 
 
 @pytest.mark.parametrize('missing', ['첫 진입', '비중 축소 또는 관망', '당일성 FOMO'])
