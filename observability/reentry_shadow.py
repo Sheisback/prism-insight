@@ -1,0 +1,293 @@
+"""After-close re-entry SHADOW. Reads the trade DB read-only; no orders, holdings writes or LLMs.
+
+Watches two pre-registered sources on completed daily bars (policy
+``stopout_reentry_v1`` in ``prism_core/stopout_reentry.py``):
+
+* STOP_EXIT      - positions closed with exit_kind='stop'.
+* LOCATION_SKIP  - analysed but not entered, fundamentals passed and the
+                   score within two points of the regime minimum ("everything
+                   fine except the entry location").
+
+Each technical event records a benchmark re-check (close above its MA50) and a
+hypothetical next-open trade. Controls are stored beside it: holding the
+stopped position without the stop, and buying the skipped candidate at the
+next open. Every failure is explicit MISSING and never affects trading.
+"""
+from __future__ import annotations
+
+import fcntl
+import hashlib
+import json
+import os
+import sqlite3
+import tempfile
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+from observability.events import emit_event
+from prism_core import stopout_reentry as R
+
+ROOT = Path(__file__).resolve().parents[1]
+POLICY_PATH = ROOT / "trading/config/reentry_shadow.json"
+STATE_DIR = ROOT / "runtime"
+DB_PATH = ROOT / "stock_tracking_db.sqlite"
+POLICY = {"mode": "SHADOW", "policy_version": R.POLICY_VERSION, "markets": ["KR", "US"], "enabled": True}
+LOOKBACK_DAYS = 45          # calendar days of stop exits / analyses to enrol
+MAX_ACTIVE = 80             # per market, oldest dropped as MISSING(capacity)
+SCORE_GAP = 2               # LOCATION_SKIP: min_score - buy_score <= 2
+TABLES = {"KR": ("trading_history", "watchlist_history"), "US": ("us_trading_history", "us_watchlist_history")}
+SKIP_CATEGORIES = (
+    ("trend_gate", ("T1", "T2", "이동평균", "MA20", "MA50", "MA60", "MA200", "추세", "trend")),
+    ("risk_reward", ("R/R", "손익비", "loss width", "expected_loss", "손절", "stop")),
+    ("extension", ("과열", "이격", "RSI", "급등", "extended", "overheat")),
+    ("sector_or_slots", ("Sector concentration", "섹터 집중", "slots", "슬롯")),
+    ("score", ("점수 부족", "Insufficient score", "effective score")),
+)
+
+
+def enabled(market):
+    try:
+        policy = json.loads(POLICY_PATH.read_text())
+        return (policy.get("mode") == "SHADOW" and policy.get("enabled") is True
+                and policy.get("policy_version") == R.POLICY_VERSION and market in policy.get("markets", [])
+                and os.getenv("REENTRY_SHADOW_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"})
+    except (OSError, ValueError):
+        return False
+
+
+def _emit(event, market, **kwargs):
+    return emit_event(event, service="prism-" + market.lower() + "-reentry-shadow", market=market, **kwargs)
+
+
+def state_path(market):
+    return STATE_DIR / f"reentry_shadow_state_{market.lower()}_v1.json"
+
+
+def _load(path, market):
+    if not path.exists():
+        return {"schema_version": 1, "policy_version": R.POLICY_VERSION, "market": market, "watches": []}
+    if path.stat().st_size > 5_000_000:
+        raise ValueError("oversized_state")
+    state = json.loads(path.read_text())
+    if (state.get("schema_version") != 1 or state.get("policy_version") != R.POLICY_VERSION
+            or state.get("market") != market):
+        raise ValueError("state_version")
+    return state
+
+
+def _atomic(path, state):
+    name = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, prefix=".reentry-", delete=False) as file:
+            name = file.name
+            json.dump(state, file, allow_nan=False, ensure_ascii=False)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(name, path)
+    finally:
+        if name and os.path.exists(name):
+            os.unlink(name)
+
+
+def skip_category(text):
+    text = text or ""
+    return [name for name, keys in SKIP_CATEGORIES if any(k in text for k in keys)] or ["other"]
+
+
+def session_date(stamp, market):
+    """DB timestamps are server-local KST; a US row belongs to its New York session date."""
+    text = str(stamp)
+    if market != "US" or len(text) < 16:
+        return text[:10]
+    local = datetime.fromisoformat(text[:19].replace("T", " ")).replace(tzinfo=ZoneInfo("Asia/Seoul"))
+    return local.astimezone(ZoneInfo("America/New_York")).date().isoformat()
+
+
+def _scenario(raw):
+    try:
+        value = json.loads(raw or "{}")
+        return value if isinstance(value, dict) else {}
+    except ValueError:
+        return {}
+
+
+def _int(value):
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def candidates(db_path, market, completed, lookback_days=LOOKBACK_DAYS):
+    """Read-only enrolment rows; the DB is never written."""
+    trades, watch = TABLES[market]
+    since = (date.fromisoformat(completed) - timedelta(days=lookback_days)).isoformat()
+    until = (date.fromisoformat(completed) + timedelta(days=1)).isoformat()  # KST stamps of US rows run ahead
+    uri = "file:" + str(db_path) + "?mode=ro"
+    with sqlite3.connect(uri, uri=True, timeout=10) as conn:
+        conn.row_factory = sqlite3.Row
+        out = []
+        for row in conn.execute(
+                f"SELECT account_key, ticker, company_name, buy_date, buy_price, sell_date, sell_price, "  # nosec B608
+                f"profit_rate, trigger_type, exit_kind FROM {trades} "
+                "WHERE exit_kind = 'stop' AND substr(sell_date, 1, 10) >= ? AND substr(sell_date, 1, 10) <= ?",
+                (since, until)):
+            # Account identifiers never leave the DB; only a stable one-way reference.
+            account_ref = "acct-" + hashlib.sha256(str(row["account_key"]).encode()).hexdigest()[:12]
+            out.append({"source": "STOP_EXIT", "account_key": account_ref, "ticker": str(row["ticker"]),
+                        "company_name": row["company_name"], "entry_date": session_date(row["buy_date"], market),
+                        "entry_price": row["buy_price"], "exit_date": session_date(row["sell_date"], market),
+                        "exit_price": row["sell_price"], "trigger_type": row["trigger_type"],
+                        "exit_kind": row["exit_kind"], "realized_pct": row["profit_rate"]})
+        for row in conn.execute(
+                f"SELECT id, ticker, company_name, analyzed_date, current_price, buy_score, min_score, "  # nosec B608
+                f"decision, skip_reason, trigger_type, scenario FROM {watch} "
+                "WHERE substr(analyzed_date, 1, 10) >= ? AND substr(analyzed_date, 1, 10) <= ? "
+                "AND COALESCE(was_traded, 0) = 0", (since, until)):
+            scenario = _scenario(row["scenario"])
+            fundamentals = (scenario.get("fundamental_check") or {}).get("all_passed")
+            score, minimum = _int(row["buy_score"]), _int(row["min_score"])
+            if fundamentals is not True or score is None or minimum is None or minimum - score > SCORE_GAP:
+                continue
+            price = row["current_price"]
+            if not price:
+                continue
+            out.append({"source": "LOCATION_SKIP", "account_key": "analysis", "ticker": str(row["ticker"]),
+                        "company_name": row["company_name"], "entry_date": session_date(row["analyzed_date"], market),
+                        "entry_price": price, "exit_date": session_date(row["analyzed_date"], market),
+                        "exit_price": price,
+                        "trigger_type": row["trigger_type"], "exit_kind": None, "analysis_id": row["id"],
+                        "decision": row["decision"], "buy_score": score, "min_score": minimum,
+                        "skip_categories": skip_category(row["skip_reason"]),
+                        "decision_id": scenario.get("_decision_id")})
+        # Only rows whose session is complete; a forming session is enrolled next run.
+        return [r for r in out if r["exit_date"] <= completed]
+
+
+def _bench_ok(bench, day):
+    closes = [b["close"] for b in bench if b["date"] <= day]
+    if len(closes) < 55:
+        return None
+    ma50, ma50_prev = sum(closes[-50:]) / 50, sum(closes[-55:-5]) / 50
+    return {"close_above_ma50": closes[-1] > ma50, "ma50_rising": ma50 > ma50_prev,
+            "ok": closes[-1] > ma50}
+
+
+def _basis_ok(bars, entry_date, price):
+    day = next((b for b in bars if b["date"] == entry_date), None)
+    return day is not None and day["low"] * 0.97 <= float(price) <= day["high"] * 1.03
+
+
+def advance(state, rows, frames, completed, market):
+    """Enrol new rows once, re-evaluate active watches, return (state, new_events)."""
+    watches = {w["watch_id"]: w for w in state["watches"]}
+    active_tickers = {(w["source"], w["ticker"]) for w in watches.values()
+                      if w["status"] not in {"CLOSED", "MISSING_FINAL"}}
+    for row in rows:
+        wid = R.watch_id(market, row["account_key"], row["ticker"], row["entry_date"], row["exit_date"])
+        if wid in watches:
+            continue
+        if (row["source"], row["ticker"]) in active_tickers:
+            continue  # one live watch per ticker and source; a newer analysis never extends it
+        # Rows that finished before this SHADOW first ran are backfill, not forward evidence.
+        enrollment = "PROSPECTIVE" if row["exit_date"] >= state.setdefault("started_session", completed) else "LATE"
+        watches[wid] = {"watch_id": wid, "status": "PENDING_ENROLL", "row": row, "market": market,
+                        "source": row["source"], "ticker": row["ticker"], "enrolled_at": completed,
+                        "enrollment": enrollment}
+        active_tickers.add((row["source"], row["ticker"]))
+    bench = frames.get("__benchmark_rows", {})
+    fresh = []
+    for wid, watch in watches.items():
+        if watch["status"] in {"CLOSED", "MISSING_FINAL"}:
+            continue
+        bars = frames.get(watch["ticker"])
+        if not bars:
+            watch["last_missing"] = completed
+            continue
+        bars = [b for b in bars if b["date"] <= completed]
+        if watch["status"] == "PENDING_ENROLL":
+            row = watch["row"]
+            if not _basis_ok(bars, row["entry_date"], row["entry_price"]):
+                watch.update(status="MISSING_FINAL", reason="price_basis_mismatch")
+                continue
+            frozen = R.enroll(market, row["account_key"], row["ticker"], row["entry_date"], row["entry_price"],
+                              row["exit_date"], row["exit_price"], bars, trigger_type=row.get("trigger_type"),
+                              exit_kind=row.get("exit_kind"), source=row["source"])
+            watch.update(frozen=frozen, status=frozen["status"])
+            if frozen["status"] == "MISSING":
+                watch.update(status="MISSING_FINAL", reason=frozen.get("reason"))
+                continue
+        result = R.evaluate(watch["frozen"], bars)
+        bench_rows = bench.get(watch["ticker"]) or []
+        for event in result["events"]:
+            event["market_check"] = _bench_ok(bench_rows, event["date"]) if bench_rows else None
+        known = {e["event_id"]: e for e in watch.get("events", [])}
+        for event in result["events"]:
+            if event["event_id"] not in known:
+                fresh.append((watch, event))
+        watch["events"] = result["events"]
+        watch["status"], watch["reason"], watch["asof"] = result["status"], result.get("reason"), result.get("asof")
+        if watch["source"] == "STOP_EXIT":
+            watch["control"] = {"kind": "HOLD_WITHOUT_STOP", **R.hold_counterfactual(watch["frozen"], bars)}
+        else:
+            watch["control"] = {"kind": "IMMEDIATE_NEXT_OPEN", **R.simulate(bars, {
+                "kind": "IMMEDIATE", "date": watch["frozen"]["entry_date"], "swing_low": 0, "reclaim_level": 0})}
+        done = result["status"] in R.TERMINAL and all(
+            e["trade"].get("status") in {"CLOSED", "SKIPPED", "MISSING"} for e in result["events"]) \
+            and watch["control"].get("status") != "PENDING"
+        if done:
+            watch["status_final"] = watch["status"]
+            watch["status"] = "CLOSED"
+    live = [w for w in watches.values() if w["status"] not in {"CLOSED", "MISSING_FINAL"}]
+    live.sort(key=lambda w: w["row"]["exit_date"])
+    for watch in live[:-MAX_ACTIVE] if len(live) > MAX_ACTIVE else []:
+        watch.update(status="MISSING_FINAL", reason="capacity")
+    state["watches"] = list(watches.values())
+    return state, fresh
+
+
+def symbols_needed(state, rows):
+    tickers = [w["ticker"] for w in state["watches"] if w["status"] not in {"CLOSED", "MISSING_FINAL"}]
+    return list(dict.fromkeys(tickers + [r["ticker"] for r in rows]))
+
+
+def run(market, completed, *, collector, db_path=DB_PATH, path=None, dry_run=False):
+    """One idempotent pass for the completed session. Returns a summary dict."""
+    path = Path(path) if path else state_path(market)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.with_suffix(".lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        state = _load(path, market)
+        state.setdefault("started_session", completed)
+        rows = candidates(db_path, market, completed)
+        tickers = symbols_needed(state, rows)
+        frames = collector(tickers, completed) if tickers else {}
+        state, fresh = advance(state, rows, frames, completed, market)
+        state["last_completed"] = completed
+        if not dry_run:
+            _atomic(path, state)
+        now = datetime.now(timezone.utc)
+        sent = 0
+        for watch, event in fresh:
+            payload = {"mode": "SHADOW", "trading_impact": "none", "eligibility": "NOT_EVALUATED",
+                       "enrollment": watch.get("enrollment"),
+                       "policy_version": R.POLICY_VERSION, "source": watch["source"],
+                       "watch_ref": watch["watch_id"], "kind": event["kind"], "signal_date": event["date"],
+                       "market_check": event.get("market_check"), "volume_ratio": event.get("volume_ratio"),
+                       "reclaim_level": event.get("reclaim_level"), "trade": event.get("trade"),
+                       "skip_categories": watch["row"].get("skip_categories"),
+                       "decision_id": watch["row"].get("decision_id")}
+            if not dry_run and _emit("reentry.shadow_signal", market, event_id=event["event_id"],
+                                     ticker=watch["ticker"], attributes=payload, event_time=now) is not None:
+                sent += 1
+        counts = {}
+        for watch in state["watches"]:
+            counts[watch["status"]] = counts.get(watch["status"], 0) + 1
+        summary = {"mode": "SHADOW", "trading_impact": "none", "policy_version": R.POLICY_VERSION,
+                   "completed_session": completed, "enrol_rows": len(rows), "symbols": len(tickers),
+                   "collected": len([t for t in tickers if frames.get(t)]), "new_signals": len(fresh),
+                   "signals_emitted": sent, "status_counts": counts, "dry_run": dry_run}
+        if not dry_run:
+            _emit("reentry.shadow_run", market, attributes=summary, event_time=now)
+        return summary

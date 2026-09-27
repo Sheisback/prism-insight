@@ -1224,6 +1224,8 @@ class USStockTrackingAgent:
             # Observe existing inputs only, without inserting research into prompts.
             from observability.trend_research import cache_snapshot
             cache_snapshot(self, ticker, df, locals().get("idf"), market="US", source="existing_adjusted_us_trend_frames")
+            from observability.decision_inputs import capture_frame
+            capture_frame(self, ticker, df, market="US")
 
             # 게이트 판정 (deterministic)
             # T1: 종가가 50일선(오닐 10주선) 아래 = 핵심 라인 이탈. 기울기 무관 —
@@ -2223,6 +2225,9 @@ class USStockTrackingAgent:
                     source="us_batch_watchlist",
                     research_context=getattr(self, "_trend_research_snapshots", {}).get(ticker),
                 )
+                from observability.decision_inputs import emit_decision_inputs
+                emit_decision_inputs(self, market="US", ticker=ticker, decision_id=decision_id, scenario=scenario,
+                                     current_price=current_price, decision=decision, source="us_batch_watchlist")
             except EffectsFailure:
                 raise
             except Exception as context_error:
@@ -4416,6 +4421,10 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
                             source="us_batch_decision",
                             research_context=getattr(self, "_trend_research_snapshots", {}).get(ticker),
                         )
+                        from observability.decision_inputs import emit_decision_inputs
+                        emit_decision_inputs(self, market="US", ticker=ticker, decision_id=source_decision_id,
+                                             scenario=scenario, current_price=current_price, decision="Enter",
+                                             source="us_batch_decision")
 
                     if entry_eligible:
                         # is_add => pyramiding additional independent row (#288)
