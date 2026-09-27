@@ -118,6 +118,16 @@ def test_numeric_timeframe_conflict_fails_closed():
     assert mgr._consolidate_intuitions([{'canonical_id': 1, 'duplicate_ids': [2]}]) == 0
 
 
+def test_maintenance_prompt_has_no_journal_extraction_gate():
+    mgr = manager()
+    mgr._save_intuition(rule(), [1, 2])
+    prompt = mgr._build_reconciliation_prompt()
+    assert 'No new journal records are needed' in prompt
+    assert 'duplicate_groups' in prompt and 'canonical_insight' in prompt
+    assert '"id": 1' in prompt
+    assert 'new_intuitions' not in prompt and 'patterns appearing 2+' not in prompt
+
+
 def stub_llm_dependencies(monkeypatch, llm):
     params = ModuleType('mcp_agent.workflows.llm.augmented_llm')
     params.RequestParams = lambda **kw: kw
@@ -131,6 +141,9 @@ def stub_llm_dependencies(monkeypatch, llm):
     factory = ModuleType('cores.agents.memory_compressor_agent')
     factory.create_memory_compressor_agent = lambda language: agent
     monkeypatch.setitem(sys.modules, factory.__name__, factory)
+    agent_module = ModuleType('mcp_agent.agents.agent')
+    agent_module.Agent = lambda **kwargs: agent
+    monkeypatch.setitem(sys.modules, agent_module.__name__, agent_module)
 
 
 @pytest.mark.asyncio
