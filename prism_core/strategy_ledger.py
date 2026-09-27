@@ -237,6 +237,9 @@ class StrategyLedger:
         fee_rate, slippage_rate = Decimal(payload["fee_rate"]), Decimal(payload["slippage_rate"])
         policy_version, reason = payload["policy_version"], payload["reason"]
         book = self._get(db, "books", book_id)
+        if book.get("cohort") == "scenario-shadow-v1" and (
+                owner != "scenario-shadow-v1" or book["mode"] != "SHADOW"):
+            raise LedgerError("scenario-owned book rejects direct target")
         if not self._event(db, event_id, payload):
             return {**self._snapshot(db, book_id), "event_applied": False}
         self._book_chronology(db, book, timestamp)
@@ -510,70 +513,86 @@ class StrategyLedger:
                 raise LedgerError("expected units require campaign revision hash")
             payload["expected_normalized_units"] = str(_number(expected_normalized_units, positive=True))
         with self._transaction() as db:
-            campaign = self._get(db, "campaigns", campaign_id)
-            book_id = campaign["book_id"]
-            if not self._event(db, event_id, payload):
-                return {**self._snapshot(db, book_id), "event_applied": False}
-            if (expected_campaign_hash is not None
-                    and hashlib.sha256(_dump(campaign).encode()).hexdigest() != expected_campaign_hash):
-                raise LedgerError("campaign revision conflict")
-            if (expected_normalized_units is not None
-                    and Decimal(campaign["normalized_units"]) != Decimal(payload["expected_normalized_units"])):
-                raise LedgerError("campaign normalized-unit basis conflict")
-            book = self._get(db, "books", book_id)
-            self._book_chronology(db, book, timestamp)
-            self._chronology(campaign, timestamp)
-            held, cost = Decimal(campaign["normalized_units"]), Decimal(campaign["remaining_allocation"])
-            sold = held if requested is None else Decimal(requested)
-            if sold <= 0 or sold > held:
-                raise LedgerError("sell quantity exceeds holding or is zero")
-            allocated = cost if sold == held else cost * sold / held
-            entry_cost = Decimal(campaign["remaining_entry_cost"])
-            allocated_entry_cost = entry_cost if sold == held else entry_cost * sold / held
-            execution_price = price * (1 - slippage_rate)
-            gross_proceeds = sold * execution_price
-            exit_cost = gross_proceeds * fee_rate
-            pnl = gross_proceeds - exit_cost - allocated - allocated_entry_cost
-            campaign.update(
-                normalized_units=str(held - sold),
-                remaining_allocation=str(cost - allocated),
-                remaining_entry_cost=str(Decimal(campaign["remaining_entry_cost"]) - allocated_entry_cost),
-                add_permission="CANCELLED_BY_REDUCTION",
-                realized_contribution=str(Decimal(campaign["realized_contribution"]) + pnl),
-                last_event_at=timestamp,
-                mark_price=str(price),
-                mark_at=timestamp,
-                mark_basis="last_trade",
-            )
-            book.update(
-                realized_contribution=str(Decimal(book["realized_contribution"]) + pnl),
-            )
-            leg = {
-                "event_id": event_id,
-                "campaign_id": campaign_id,
-                "side": "SELL",
-                "normalized_units": str(sold),
-                "price": str(price),
-                "released_allocation": str(allocated),
-                "execution_price": str(execution_price),
-                "fee_rate": str(fee_rate),
-                "slippage_rate": str(slippage_rate),
-                "cost_contribution": str(exit_cost + allocated_entry_cost),
-                "occurred_at": timestamp,
-                "realized_contribution": str(pnl),
-            }
-            db.execute(
-                "INSERT INTO legs VALUES (?,?,?)", (event_id, campaign_id, _dump(leg))
-            )
-            if campaign.get("pilot"):
-                pilot = campaign["pilot"]
-                campaign["pilot"] = {**pilot, "state": "EXITED" if sold == held else "ADD_CANCELLED",
-                                     "reason": "STRATEGY_EXITED" if sold == held else "STRATEGY_REDUCED",
-                                     "revision": pilot["revision"] + 1, "last_evaluated_at": timestamp}
-            self._save(db, "campaigns", campaign_id, campaign)
-            self._save(db, "books", book_id, book)
-            self._notice(db, event_id, campaign_id, "SELL")
-            return {**self._snapshot(db, book_id), "event_applied": True}
+            return self._sell_in_transaction(db, event_id, payload)
+
+    def _sell_in_transaction(self, db, event_id, payload, *, owner=None):
+        """Shared accounting primitive for atomic owned policy transitions."""
+        campaign_id = payload["campaign_id"]
+        price = Decimal(payload["price"])
+        fee_rate, slippage_rate = Decimal(payload["fee_rate"]), Decimal(payload["slippage_rate"])
+        timestamp = payload["occurred_at"]
+        requested = payload["normalized_units"]
+        expected_campaign_hash = payload.get("expected_campaign_hash")
+        expected_normalized_units = payload.get("expected_normalized_units")
+        # The caller owns this transaction; policy and accounting commit together.
+        campaign = self._get(db, "campaigns", campaign_id)
+        book_id = campaign["book_id"]
+        book = self._get(db, "books", book_id)
+        if book.get("cohort") == "scenario-shadow-v1" and (
+                owner != "scenario-shadow-v1" or book["mode"] != "SHADOW"):
+            raise LedgerError("scenario-owned book rejects direct sell")
+        if not self._event(db, event_id, payload):
+            return {**self._snapshot(db, book_id), "event_applied": False}
+        if (expected_campaign_hash is not None
+                and hashlib.sha256(_dump(campaign).encode()).hexdigest() != expected_campaign_hash):
+            raise LedgerError("campaign revision conflict")
+        if (expected_normalized_units is not None
+                and Decimal(campaign["normalized_units"]) != Decimal(payload["expected_normalized_units"])):
+            raise LedgerError("campaign normalized-unit basis conflict")
+        book = self._get(db, "books", book_id)
+        self._book_chronology(db, book, timestamp)
+        self._chronology(campaign, timestamp)
+        held, cost = Decimal(campaign["normalized_units"]), Decimal(campaign["remaining_allocation"])
+        sold = held if requested is None else Decimal(requested)
+        if sold <= 0 or sold > held:
+            raise LedgerError("sell quantity exceeds holding or is zero")
+        allocated = cost if sold == held else cost * sold / held
+        entry_cost = Decimal(campaign["remaining_entry_cost"])
+        allocated_entry_cost = entry_cost if sold == held else entry_cost * sold / held
+        execution_price = price * (1 - slippage_rate)
+        gross_proceeds = sold * execution_price
+        exit_cost = gross_proceeds * fee_rate
+        pnl = gross_proceeds - exit_cost - allocated - allocated_entry_cost
+        campaign.update(
+            normalized_units=str(held - sold),
+            remaining_allocation=str(cost - allocated),
+            remaining_entry_cost=str(Decimal(campaign["remaining_entry_cost"]) - allocated_entry_cost),
+            add_permission="CANCELLED_BY_REDUCTION",
+            realized_contribution=str(Decimal(campaign["realized_contribution"]) + pnl),
+            last_event_at=timestamp,
+            mark_price=str(price),
+            mark_at=timestamp,
+            mark_basis="last_trade",
+        )
+        book.update(
+            realized_contribution=str(Decimal(book["realized_contribution"]) + pnl),
+        )
+        leg = {
+            "event_id": event_id,
+            "campaign_id": campaign_id,
+            "side": "SELL",
+            "normalized_units": str(sold),
+            "price": str(price),
+            "released_allocation": str(allocated),
+            "execution_price": str(execution_price),
+            "fee_rate": str(fee_rate),
+            "slippage_rate": str(slippage_rate),
+            "cost_contribution": str(exit_cost + allocated_entry_cost),
+            "occurred_at": timestamp,
+            "realized_contribution": str(pnl),
+        }
+        db.execute(
+            "INSERT INTO legs VALUES (?,?,?)", (event_id, campaign_id, _dump(leg))
+        )
+        if campaign.get("pilot"):
+            pilot = campaign["pilot"]
+            campaign["pilot"] = {**pilot, "state": "EXITED" if sold == held else "ADD_CANCELLED",
+                                 "reason": "STRATEGY_EXITED" if sold == held else "STRATEGY_REDUCED",
+                                 "revision": pilot["revision"] + 1, "last_evaluated_at": timestamp}
+        self._save(db, "campaigns", campaign_id, campaign)
+        self._save(db, "books", book_id, book)
+        self._notice(db, event_id, campaign_id, "SELL")
+        return {**self._snapshot(db, book_id), "event_applied": True}
 
     def mark(self, event_id, campaign_id, price, occurred_at, source_hash=None):
         price, timestamp = _number(price, positive=True), _time(occurred_at)
