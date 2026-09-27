@@ -44,7 +44,9 @@ jobs:
           path-to-document: https://github.com/dragon1086/prism-insight/blob/main/CLA.md
           path-to-signatures: signatures/cla.json
           branch: cla-signatures
-          allowlist: dragon1086,cokac-bot,dependabot[bot],github-actions[bot]
+          # lifrary..tkgo11 gave retroactive CLA v1.0 consent covering past and
+          # future contributions in issue #603 (comments dated 2026-08-22).
+          allowlist: dragon1086,cokac-bot,dependabot[bot],github-actions[bot],lifrary,don9x2E,bonggu-kang,willagio,cjinzy,tkgo11
           custom-notsigned-prcomment: >-
             Thank you for your contribution. Before this pull request can be
             merged, each contributor must read the
