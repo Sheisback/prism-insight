@@ -25,11 +25,22 @@ def test_compression_model_cannot_bypass_database_validation(monkeypatch):
         assert factory.create_memory_compressor_agent(language).server_names == []
 
 
+class ReviewedMemoryFixture(CompressionManager):
+    """Dedup tests seed already-reviewed records; policy approval has separate regressions."""
+
+    def _save_intuition(self, intuition, source_ids):
+        inserted = super()._save_intuition(intuition, source_ids)
+        reviewed = {'version': 1, 'status': 'current_pipeline', 'market': 'KR', 'stage': 'batch_buy',
+                    'required_capabilities': ['batch_report', 'entry_advisory'], 'reason': 'Offline fixture review.'}
+        self.conn.execute('UPDATE trading_intuitions SET application_context = ?', (json.dumps(reviewed),))
+        return inserted
+
+
 def manager():
     conn = sqlite3.connect(':memory:')
     conn.executescript(TABLE_TRADING_INTUITIONS)
     conn.execute("ALTER TABLE trading_intuitions ADD COLUMN market TEXT DEFAULT 'KR'")
-    return CompressionManager(conn.cursor(), conn, enable_journal=True)
+    return ReviewedMemoryFixture(conn.cursor(), conn, enable_journal=True)
 
 
 def rule(**overrides):

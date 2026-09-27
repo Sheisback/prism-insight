@@ -63,6 +63,21 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+async def _review_memory_application(manager, market):
+    """Keep failed offline reviews unapproved without misreporting completed compression."""
+    try:
+        result = await manager.review_memory_applicability(market=market)
+        if market == 'KR' and not result.get('errors'):
+            result['consolidated'] = await manager._reconcile_existing_intuitions()
+            if result['consolidated']:
+                result['post_consolidation_review'] = await manager.review_memory_applicability(market=market)
+        logger.info('%s memory applicability review: %s', market, result)
+        return result
+    except Exception as exc:
+        logger.warning('%s memory applicability review deferred: %s', market, exc)
+        return {'reviewed': 0, 'errors': [str(exc)]}
+
+
 def _log_journal_influence_stats(cursor, table: str = "trading_history", days: int = 90) -> None:
     """Measure whether journal-influenced buys outperformed non-influenced ones (#280).
 
@@ -253,12 +268,14 @@ async def run_compression(
         effective_min = 1 if force else min_entries
         if layer1_count < effective_min and layer2_count < effective_min:
             logger.info(f"\n⏭️  Skipping compression: Not enough entries (min: {min_entries})")
+            application_review = await _review_memory_application(agent.compression_manager, 'KR')
             agent.conn.close()
             return {
                 "status": "skipped",
                 "reason": "Not enough entries",
                 "layer1_count": layer1_count,
-                "layer2_count": layer2_count
+                "layer2_count": layer2_count,
+                "application_review": application_review
             }
 
         # Run compression
@@ -268,6 +285,8 @@ async def run_compression(
             layer2_age_days=layer2_age_days,
             min_entries_for_compression=effective_min
         )
+        application_review = await _review_memory_application(agent.compression_manager, 'KR')
+        results['application_review'] = application_review
 
         # Get stats after compression
         stats_after = agent.get_compression_stats()
@@ -456,6 +475,10 @@ async def run_us_compression(
         logger.info(f"  US Layer 1 → 2: {results['layer1_to_layer2']['compressed']} compressed")
         logger.info(f"  US Layer 2 → 3: {results['layer2_to_layer3']['compressed']} compressed")
         logger.info(f"  US Intuitions generated: {results['intuitions_generated']}")
+
+        from tracking.compression import CompressionManager
+        application_manager = CompressionManager(cursor, conn, enable_journal=True)
+        results['application_review'] = await _review_memory_application(application_manager, 'US')
 
         cleanup_results = {}
         if not skip_cleanup:

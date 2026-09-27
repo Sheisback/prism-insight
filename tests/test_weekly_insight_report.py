@@ -1,6 +1,7 @@
 """Offline regression coverage at the rendered weekly-message boundary."""
 import asyncio
 import importlib.util
+import json
 from pathlib import Path
 import sqlite3
 import sys
@@ -35,10 +36,33 @@ def make_db(path):
         conn.execute("CREATE TABLE analysis_performance_tracker (trigger_type, tracking_status, tracked_30d_return, was_traded, analyzed_date)")
         conn.execute("CREATE TABLE us_analysis_performance_tracker (trigger_type, return_30d, was_traded, analysis_date)")
         conn.execute("CREATE TABLE trading_principles (market, is_active, created_at)")
-        conn.execute("CREATE TABLE trading_intuitions (condition, insight, confidence, success_rate, market, is_active, created_at)")
+        conn.execute("CREATE TABLE trading_intuitions (condition, insight, confidence, success_rate, market, is_active, created_at, application_context)")
         conn.executemany("INSERT INTO analysis_performance_tracker VALUES ('횡보 거래량', 'completed', ?, 0, '2026-01-01')", [(0.2,), (0.1,), (-0.1,), (None,)])
         conn.executemany("INSERT INTO us_analysis_performance_tracker VALUES ('Volume', ?, ?, '2026-01-01')", [(0.2, 0), (0.3, 0), (-0.1, 0), (-0.9, None), (7.6, None)])
-        conn.execute("INSERT INTO trading_intuitions VALUES ('조건', '직관', .97, NULL, 'KR', 1, '2026-01-01')")
+        context = {'version': 1, 'status': 'current_pipeline', 'market': 'KR',
+                   'stage': 'batch_buy', 'required_capabilities': ['batch_report', 'entry_advisory'],
+                   'reason': 'Existing batch inputs support this independently reviewed reference.'}
+        conn.execute("INSERT INTO trading_intuitions VALUES ('조건', '직관', .97, NULL, 'KR', 1, '2026-01-01', ?)", (json.dumps(context),))
+
+
+def test_current_memory_and_future_improvements_are_reported_separately(report, tmp_path):
+    path = tmp_path / 'memory-applicability.sqlite'
+    make_db(path)
+    future = {'version': 1, 'status': 'improvement', 'market': 'KR',
+              'stage': 'system_design', 'required_capabilities': [],
+              'reason': 'A new monitoring and entry workflow is required.'}
+    with sqlite3.connect(path) as conn:
+        conn.execute("INSERT INTO trading_intuitions VALUES ('미래 기능', '자동 후속 진입 개발', .99, NULL, 'KR', 1, '2026-01-01', ?)", (json.dumps(future),))
+        conn.execute("INSERT INTO trading_intuitions VALUES ('미분류', '검토 안 된 지시', .99, NULL, 'KR', 1, '2026-01-01', NULL)")
+    message = asyncio.run(report.generate_weekly_report(str(path)))
+    assert '현재 적용 참고: 1개' in message
+    assert '적용성 검토 대기: 1개' in message
+    assert '향후 시스템 개선 검토' in message
+    before_future, future_section = message.split('향후 시스템 개선 검토', 1)
+    assert '조건 → 직관' in before_future
+    assert '자동 후속 진입 개발' not in before_future
+    assert '자동 후속 진입 개발' in future_section
+    assert '검토 안 된 지시' not in message
 
 
 def test_report_observations_do_not_imply_strategy_quality(report, tmp_path):

@@ -18,6 +18,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from trading import kis_auth as ka
+from trading_memory_policy import normalize_application_context
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -215,52 +216,46 @@ async def _get_sell_evaluation(cursor, week_start_str: str) -> str | None:
 
 
 def _get_ai_intuitions(cursor, week_start_str: str) -> str:
-    """Get AI long-term learning intuitions section."""
-    new_count = _safe_query(cursor, """
-        SELECT COUNT(*) FROM trading_intuitions
-        WHERE is_active=1 AND created_at >= ?
-    """, (week_start_str,))
-
-    kr_intuitions = _safe_query_all(cursor, """
-        SELECT condition, insight, confidence
-        FROM trading_intuitions WHERE is_active=1 AND (market='KR' OR market IS NULL)
-        ORDER BY confidence DESC LIMIT 3
+    """Keep current references, development ideas and unreviewed memory distinct."""
+    rows = _safe_query_all(cursor, """
+        SELECT * FROM trading_intuitions WHERE is_active=1 ORDER BY confidence DESC
     """)
-
-    us_intuitions = _safe_query_all(cursor, """
-        SELECT condition, insight, confidence
-        FROM trading_intuitions WHERE is_active=1 AND market='US'
-        ORDER BY confidence DESC LIMIT 3
-    """)
-
-    stats = _safe_query(cursor, """
-        SELECT COUNT(*), AVG(confidence), AVG(success_rate)
-        FROM trading_intuitions WHERE is_active=1
-    """)
-    if stats is None or new_count is None or kr_intuitions is None or us_intuitions is None:
+    if rows is None:
         return "장기 학습 데이터 조회 실패: 누적 직관과 신뢰도를 확인할 수 없습니다."
-    new_count = new_count[0]
-    total_count = stats[0] or 0
-    avg_conf = stats[1]
-
-    if total_count == 0:
+    if not rows:
         return "아직 데이터 축적 중입니다. 매매 기록이 쌓이면 AI가 패턴을 학습합니다."
-
-    new_count_str = f"{new_count}개" if new_count > 0 else "없음"
-    avg_conf_str = f"{avg_conf * 100:.0f}%" if avg_conf is not None else "미확인"
+    columns = [column[0] for column in cursor.description]
+    records = [dict(zip(columns, row)) for row in rows]
+    current, improvements = [], []
+    new_count = sum(str(row.get('created_at') or '') >= week_start_str for row in records)
+    for row in records:
+        market = 'KR' if row.get('market') is None else row['market']
+        context = normalize_application_context(row.get('application_context'), market)
+        row['application_context'] = context
+        if context['status'] == 'current_pipeline':
+            current.append(row)
+        elif context['status'] == 'improvement':
+            improvements.append(row)
     lines = [
-        f"이번 주 신규: {new_count_str} | 누적 활성 직관: {total_count}개 | 평균 신뢰도(모델 자체 평가): {avg_conf_str}"
+        f"이번 주 신규 활성: {new_count}개 | 누적 활성 직관: {len(records)}개",
+        f"현재 적용 참고: {len(current)}개 | 개선 제안: {len(improvements)}개 | "
+        f"적용성 검토 대기: {len(records) - len(current) - len(improvements)}개",
+        "※ 신뢰도는 검증된 적중률이 아닌 모델 자체 평가입니다.",
     ]
-
-    all_intuitions = kr_intuitions + us_intuitions
-    if all_intuitions:
-        lines.append("")
-        lines.append("※ 신뢰도는 검증된 적중률이 아닌 모델 자체 평가입니다.")
-        lines.append("💡 주요 직관:")
-        for i, (condition, insight, confidence) in enumerate(all_intuitions[:5], 1):
+    if current:
+        lines.append("\n💡 현재 시스템에서 참고할 직관:")
+        for index, row in enumerate(current[:3], 1):
+            confidence = row.get('confidence')
             confidence_text = f"{confidence * 100:.0f}%" if confidence is not None else "미확인"
-            lines.append(f"  {i}. {condition} = {insight} (신뢰도 {confidence_text})")
-
+            context = row['application_context']
+            stage = '진입 판단' if context['stage'] == 'batch_buy' else '보유 관리'
+            lines.append(f"  {index}. [{context['market']}·{stage}] {row['condition']} → {row['insight']} (신뢰도 {confidence_text})")
+    else:
+        lines.append("현재 시스템 적용성 검토를 통과한 직관이 아직 없습니다.")
+    if improvements:
+        row = improvements[0]
+        lines.append("\n🔧 향후 시스템 개선 검토 (매매 판단에는 전달하지 않음):")
+        lines.append(f"  {row['condition']} → {row['insight']}")
     return "\n".join(lines)
 
 
@@ -332,9 +327,9 @@ def _get_trigger_section(cursor, market: str, week_start_str: str) -> str:
         else:
             lines.append("📊 관측 상승 비율: 트리거별 표본 3건 미만")
     if principles is None:
-        lines.append("📌 매매 원칙 조회 실패")
+        lines.append("📌 교훈 조회 실패")
     else:
-        lines.append(f"📌 이번 주 새 매매 원칙: {principles[0] or 0}개 추가 (누적 활성 {principles[1]}개)")
+        lines.append(f"📌 이번 주 등록 교훈: {principles[0] or 0}개 (누적 활성 {principles[1]}개, 적용성 별도 검토)")
     return "\n".join(lines)
 
 
@@ -406,8 +401,8 @@ async def generate_weekly_report(db_path: str = DB_PATH) -> str:
 • 미매수 후 하락/상승 = 미매수로 기록된 분석 건의 30일 수익률이 -5% 미만/+10% 초과인 경우
 • 상승 비율 = 30일 수익률이 확인된 분석 건 중 양수인 비율(실제 매매 승률 아님)
 • 분석 건은 같은 종목의 반복 분석을 포함할 수 있으며, 가격·기업행사 조정 품질은 별도 검증이 필요합니다.
-• 매매 원칙 = AI가 과거 매매 경험에서 스스로 학습한 규칙
-• 직관 = AI가 반복 패턴에서 추출한 매매 원칙"""
+• 교훈·직관 = 과거 거래와 반복 패턴에서 추출한 참고사항이며, 기존 매매 규칙을 바꾸는 권한은 아닙니다.
+• 개선 제안 = 기능 구현과 별도 검증이 필요한 내용으로, 현재 매매 판단에는 전달하지 않습니다."""
 
     return message
 

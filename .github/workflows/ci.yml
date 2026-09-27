@@ -38,7 +38,11 @@ jobs:
         env:
           PRISM_DISABLE_SIGNAL_PUBLISH: "1"
         run: |
-          python -m pytest tests/test_weekly_insight_report.py tests/test_intuition_deduplication.py tests/test_journal_intuition_noise.py -q
+          python -m pytest tests/test_weekly_insight_report.py tests/test_intuition_deduplication.py \
+            tests/test_trading_memory_policy.py tests/test_journal_application_context.py \
+            tests/test_journal_intuition_noise.py tests/test_journal_influence_capture.py \
+            tests/test_journal_recent_loss_penalty.py -q
+          python -m pytest prism-us/tests/test_journal_recent_loss_penalty.py -q
           python -m pytest tests/test_us_stock_universe.py tests/test_us_batched_snapshots.py tests/test_us_expanded_universe_integration.py -q
           python -m pytest tests/test_screening_quality.py tests/test_screening_quality_handoff.py tests/test_screening_quality_tracker_integration.py tests/test_buy_gate_volatility_contract.py tests/test_volatility_producer_integration.py -q
           python -m pytest tests/test_dart_standalone_resolution.py tests/test_report_synthesis_reference_contract.py tests/test_report_macro_synthesis.py tests/test_kr_market_source_guard_integration.py tests/test_telegram_bot_shutdown.py -q
