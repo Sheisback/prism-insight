@@ -292,3 +292,38 @@ def test_merge_preserves_earliest_creation_and_latest_actual_validation(rewrite)
         group['canonical_condition'] = '변동성이 높은 구간의 추격 진입'
     mgr._consolidate_intuitions([group])
     assert mgr.conn.execute('SELECT created_at, last_validated_at FROM trading_intuitions WHERE is_active=1').fetchall() == [('2026-01-01', '2026-09-27')]
+
+
+@pytest.mark.asyncio
+async def test_model_approved_merge_cannot_drop_observed_support_qualifier(monkeypatch):
+    mgr = manager()
+    original, paraphrase = rule(), rule()
+    original['insight'] = '추세 정렬·변동성 축소·지지 확인 전 추격 진입 금지'
+    paraphrase['insight'] = '추세 정렬과 눌림 확인 전 FOMO 진입 금지, 첫 진입은 비중 축소 또는 관망 우선, 당일성 FOMO 금지'
+    mgr._save_intuition(original, [1, 2])
+    mgr._save_intuition(paraphrase, [2, 3])
+    group = {'canonical_id': 1, 'duplicate_ids': [2],
+             'canonical_insight': '추세 정렬·변동성 축소·눌림 확인 전 추격 금지. 첫 진입은 비중 축소 또는 관망 우선, 당일성 FOMO 금지'}
+    llm = SimpleNamespace(generate_str=AsyncMock(return_value=json.dumps({'approved_groups': [group]})))
+    stub_llm_dependencies(monkeypatch, llm)
+    approved = await mgr._verify_duplicate_groups(llm, [group])
+    assert approved == [group]  # Reproduce the real model's incorrect approval.
+    assert mgr._consolidate_intuitions(approved) == 0
+    assert mgr.conn.execute('SELECT COUNT(*) FROM trading_intuitions WHERE is_active=1').fetchone()[0] == 2
+    prompt = mgr._build_reconciliation_prompt()
+    assert 'required_qualifiers' in prompt and '지지 확인 / support confirmation' in prompt
+    group['canonical_insight'] = group['canonical_insight'].replace('눌림 확인', '지지 확인과 눌림 확인')
+    assert mgr._consolidate_intuitions([group]) == 2
+
+
+@pytest.mark.parametrize('missing', ['첫 진입', '비중 축소 또는 관망', '당일성 FOMO'])
+def test_material_source_qualifiers_cannot_be_silently_removed(missing):
+    mgr = manager()
+    first, second = rule(), rule()
+    first['insight'] = '눌림 확인 전 금지. 첫 진입: 비중 축소 또는 관망. 당일성 FOMO 금지'
+    second['condition'] = '변동성 높은 구간 추격 진입'
+    second['insight'] = first['insight']
+    mgr._save_intuition(first, [1, 2])
+    mgr._save_intuition(second, [2, 3])
+    group = {'canonical_id': 1, 'duplicate_ids': [2], 'canonical_insight': first['insight'].replace(missing, '')}
+    assert mgr._consolidate_intuitions([group]) == 0
