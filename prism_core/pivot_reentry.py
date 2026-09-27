@@ -185,14 +185,22 @@ def simulate_production(bars, i, entry, *, intraday=True, bull=None, close_stop=
         j = i + k - 1
         mfe, mae = max(mfe, bar["high"] / entry - 1), min(mae, bar["low"] / entry - 1)
         first_intraday = k == 1 and intraday
+        if first_intraday:
+            # Entry-day intraday order is unknown: a momentum entry is usually bought after the
+            # session low, so the day's low must not count as a stop. Judge day 0 on its close.
+            if bar["close"] <= hard:
+                return _prod_close(entry, bar["close"], "tier1_day0_close", j, k, mfe, max(mae, bar["close"] / entry - 1))
+            peak = max(peak, bar["close"])
+            mfe, mae = max(bar["close"] / entry - 1, 0.0), min(bar["close"] / entry - 1, 0.0)
+            continue
         if close_stop:
             if bar["low"] <= floor:
-                price = floor if first_intraday or bar["open"] > floor else bar["open"]
+                price = floor if bar["open"] > floor else bar["open"]
                 return _prod_close(entry, price, "tier1_floor", j, k, mfe, mae)
             if bar["close"] <= hard:
                 return _prod_close(entry, bar["close"], "tier1_close", j, k, mfe, mae)
         elif bar["low"] <= hard:
-            price = hard if first_intraday or bar["open"] > hard else bar["open"]
+            price = hard if bar["open"] > hard else bar["open"]
             return _prod_close(entry, price, "tier1_stop", j, k, mfe, mae)
         closes = [b["close"] for b in bars[:j + 1]]
         ma50 = _avg(closes[-50:])

@@ -98,3 +98,15 @@ def test_production_exit_trailing_and_hypotheses():
     fade = _bars([(110, 116, 109.5, 116, 900), (116, 116.5, 108, 108.5, 900)], start=date(2026, 6, 1))
     lock = P.simulate_production(base + fade, i, 110.0, bull=lambda d: True, breakeven_lock=True)
     assert lock["exit_reason"] == "tier2_trail" and lock["ret"] < 0 and lock["ret"] == round(108.5 / 110 - 1, 6)
+
+
+def test_production_exit_ignores_entry_day_low_for_intraday_entries():
+    base = _bars(_uptrend_then_base(last_close=106.0))
+    i = len(base)
+    # Bought intraday at 110 after the session low of 100; closes 111 -> no day-0 stop.
+    day0 = _bars([(101, 112, 100, 111, 900)] + [(111, 112, 110, 111.5, 900)] * 70, start=date(2026, 6, 1))
+    trade = P.simulate_production(base + day0, i, 110.0, intraday=True, bull=lambda d: True)
+    assert trade["exit_reason"] != "tier1_stop" and trade["exit_reason"] != "tier1_day0_close"
+    # A close below the stop on day 0 still exits at that close.
+    crash = _bars([(110, 111, 100, 101, 900)], start=date(2026, 6, 1))
+    assert P.simulate_production(base + crash, i, 110.0, intraday=True)["exit_reason"] == "tier1_day0_close"
