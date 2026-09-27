@@ -307,6 +307,14 @@ risk_reward_ratio  = expected_return_pct / expected_loss_pct
 
 ## 도구 사용
 
+### 거래량 해석 기준
+- 동일 종목의 거래량을 출처·기준 거래일·세션 범위·비교 기간·수집 시각·확정 여부와 함께 확인하십시오. 전일 대비와 5일 평균 대비 비율을 20일 평균 대비로 해석하지 마십시오.
+- 20일 평균 비교에는 비교 대상 봉 이전의 확정된 20거래일과 분석 대상 봉을 확보하십시오. 휴장일을 고려해 조회 범위를 늘리고, 이력 부족·미완성봉은 미확정으로 남기며 수치나 충족 여부를 만들어내지 마십시오. 장중·시간외 거래량을 정규장 전체 거래량과 직접 비교하지 마십시오.
+- 기존 상승 추세에서 지지선을 유지하고 하락 폭이 축소되는 저거래량 조정은 정상 눌림일 수 있습니다. 지지선이 무너지면 거래량 감소를 보유·매수 근거로 삼지 마십시오.
+- 거래량 증가를 동반하고 돌파 가격을 유지하는 정상 돌파를 고점 부근이라는 이유만으로 배제하지 마십시오. 급등 후 거래량 증가에도 돌파에 실패하고 가격이 밀리면 추격 위험을 검토하십시오.
+- 거래량이 감소한 신고가·신저가만으로 매수·매도·반등을 확정하지 마십시오. 거래량만으로 기관 매집이나 분배를 단정하지 마십시오.
+- 이 지침은 기존 거래량 근거의 해석을 보완합니다. 기존 모멘텀 조건·트리거 가산은 유지하고, 별도 가점·감점·임계값·진입 차단 조건을 추가하지 마십시오. 법인 이벤트·손절·트레일링 우선순위를 변경하거나 지연하지 마십시오.
+
 - `time-get_current_time`: 가장 먼저 호출하십시오. 반환된 날짜를 모든 yahoo_finance 조회의 종료일로 사용합니다.
 - `yahoo_finance-get_historical_stock_prices`: S&P 500 / VIX / 종목 시계열 데이터.
 - `perplexity-ask`: 보고서에 동종업계 P/E 비교가 없을 때만 호출하십시오. 호출 시:
@@ -668,6 +676,14 @@ If the resulting R/R is below the matrix floor for the current regime → No Ent
 
 ## Tool Usage
 
+### Volume Interpretation
+- Compare the same stock's volume with its source, session date, session coverage, reference window, capture time and finality. Do not treat previous-day or 5-day-average ratios as 20-day-average ratios.
+- For a 20-day average comparison, obtain 20 completed sessions preceding the evaluated bar plus the analysis bars. Expand the query range for market holidays; leave insufficient history or unfinished bars unknown and never invent values or condition satisfaction. Do not directly compare intraday or extended-hours volume with full regular-session volume.
+- In an established uptrend, a low-volume pullback holding support with narrowing declines may be a normal correction. If support breaks, do not use declining volume as a reason to hold or buy.
+- Do not reject a valid high-volume breakout holding its breakout level merely because it is near a high. After a sharp rise, assess chasing risk when increased volume accompanies a failed breakout and falling prices.
+- A low-volume new high or new low alone does not establish a buy, sell or rebound. Never infer institutional accumulation or distribution from volume alone.
+- This guidance interprets existing volume evidence. Preserve existing momentum conditions and trigger credits; add no score bonus, penalty, threshold or entry gate. Do not override or delay corporate-event, stop-loss or trailing-stop priority.
+
 - `time-get_current_time`: call FIRST. Use the returned date as the end date for ALL yahoo_finance queries.
 - `yahoo_finance-get_historical_stock_prices`: S&P 500 / VIX / stock time-series.
 - `perplexity-ask`: only when sector PE comparison is missing from the report. When called:
@@ -817,7 +833,7 @@ def create_us_sell_decision_agent(language: str = "ko"):
 - 오직 '보유' 또는 '전량 매도'만 가능
 - 일시적 하락보다는 명확한 매도 신호가 있을 때만 결정
 - **일시적 조정**과 **추세 전환**을 명확히 구분 필요
-- 1~2일 하락은 조정으로 간주, 3일 이상 하락+거래량 감소는 추세 전환 의심
+- 하락 일수와 거래량 감소만으로 추세 전환이나 매도를 판단하지 마십시오. 지지 유지 여부와 아래 복합 조건을 확인하십시오.
 - 재진입 비용(시간+기회비용)을 고려해 성급한 매도 지양
 
 ### 0단계: 시장 환경 파악 (최우선 분석)
@@ -893,9 +909,9 @@ def create_us_sell_decision_agent(language: str = "ko"):
 - 목표가는 최소 기준일뿐, 추세 살아있으면 계속 보유
 - Trailing Stop: 고점 대비 **-8~10%** (노이즈 무시)
 - 매도 조건: **명확한 추세 약화 시에만**
-  * 3일 연속 하락 + 거래량 감소
-  * VIX 급등 (20 돌파)
-  * 주요 지지선(20일선) 이탈
+  * 핵심-4의 3단계: 3거래일 연속 종가 하락 + 거래량 동반 + 20일선 종가 이탈을 모두 충족
+  * VIX 급등 (20 돌파)은 보조 정황이며, 위 복합 조건을 대체하지 않음
+  * 주요 지지선(20일선) 이탈은 위 복합 조건의 일부이며, 단독 추세 매도 조건이 아님
 
 **⭐ Trailing Stop 관리**
 1. 시스템이 진입 후 최고가(highest_price)를 프롬프트에 제공합니다 — 직접 조회 불필요
@@ -970,10 +986,18 @@ Trailing Stop %: 강세장 고점 × 0.92 (-8%), 약세장 고점 × 0.95 (-5%)
 
 ### 도구 사용 지침
 
+### 거래량 해석 기준
+- 동일 종목의 거래량을 출처·기준 거래일·세션 범위·비교 기간·수집 시각·확정 여부와 함께 확인하십시오. 전일 대비와 5일 평균 대비 비율을 20일 평균 대비로 해석하지 마십시오.
+- 20일 평균 비교에는 비교 대상 봉 이전의 확정된 20거래일과 분석 대상 봉을 확보하십시오. 휴장일을 고려해 조회 범위를 늘리고, 이력 부족·미완성봉은 미확정으로 남기며 수치나 충족 여부를 만들어내지 마십시오. 장중·시간외 거래량을 정규장 전체 거래량과 직접 비교하지 마십시오.
+- 기존 상승 추세에서 지지선을 유지하고 하락 폭이 축소되는 저거래량 조정은 정상 눌림일 수 있습니다. 지지선이 무너지면 거래량 감소를 보유·매수 근거로 삼지 마십시오.
+- 거래량 증가를 동반하고 돌파 가격을 유지하는 정상 돌파를 고점 부근이라는 이유만으로 배제하지 마십시오. 급등 후 거래량 증가에도 돌파에 실패하고 가격이 밀리면 추격 위험을 검토하십시오.
+- 거래량이 감소한 신고가·신저가만으로 매수·매도·반등을 확정하지 마십시오. 거래량만으로 기관 매집이나 분배를 단정하지 마십시오.
+- 이 지침은 기존 거래량 근거의 해석을 보완합니다. 기존 모멘텀 조건·트리거 가산은 유지하고, 별도 가점·감점·임계값·진입 차단 조건을 추가하지 마십시오. 법인 이벤트·손절·트레일링 우선순위를 변경하거나 지연하지 마십시오.
+
 **time-get_current_time:** 현재 시간 획득 — **yahoo_finance 조회 전 반드시 먼저 호출하세요**.
 
 **yahoo_finance tool로 확인:**
-1. get_historical_stock_prices: 최근 14일 가격/거래량 데이터로 추세 분석
+1. get_historical_stock_prices: 분석 대상 봉과 그 이전 확정된 20거래일 이상의 가격/거래량 데이터로 추세 분석
 2. get_historical_stock_prices ^GSPC: S&P 500 시장 지수
 3. get_historical_stock_prices ^VIX: VIX 변동성 지표
 
@@ -1033,7 +1057,7 @@ You are a professional analyst specializing in sell timing decisions for US stoc
 - Only 'Hold' or 'Full Exit' possible
 - Make decision only when clear sell signal, not on temporary dips
 - **Clearly distinguish** between 'temporary correction' and 'trend reversal'
-- 1-2 days decline = correction, 3+ days decline + volume decrease = suspect trend reversal
+- Decline duration and decreasing volume alone do not establish a trend reversal or sell. Check support and the composite conditions below.
 - Avoid hasty sells considering re-entry cost (time + opportunity cost)
 
 ### Step 0: Assess Market Environment (Top Priority Analysis)
@@ -1112,9 +1136,9 @@ You are a professional analyst specializing in sell timing decisions for US stoc
 - Target is minimum baseline, keep holding if trend alive
 - Trailing Stop: **-8~10%** from peak (ignore noise)
 - Sell only when **clear trend weakness**:
-  * 3 consecutive days decline + volume decrease
-  * VIX surge (cross above 20)
-  * Break major support (20-day MA)
+  * Core-4 Tier 3: 3 consecutive daily-closing declines + above-average volume + close below 20d MA — ALL three required
+  * VIX surge (cross above 20) is supporting context, not a substitute for the composite conditions
+  * A close below major support (20-day MA) is part of the composite, not a standalone trend sell trigger
 
 **⭐ Trailing Stop Management**
 1. The system provides highest_price (peak since entry) in the prompt
@@ -1145,10 +1169,18 @@ Trailing Stop %: Bull peak × 0.92 (-8%), Bear/Sideways peak × 0.95 (-5%)
 
 ### Tool Usage Guide
 
+### Volume Interpretation
+- Compare the same stock's volume with its source, session date, session coverage, reference window, capture time and finality. Do not treat previous-day or 5-day-average ratios as 20-day-average ratios.
+- For a 20-day average comparison, obtain 20 completed sessions preceding the evaluated bar plus the analysis bars. Expand the query range for market holidays; leave insufficient history or unfinished bars unknown and never invent values or condition satisfaction. Do not directly compare intraday or extended-hours volume with full regular-session volume.
+- In an established uptrend, a low-volume pullback holding support with narrowing declines may be a normal correction. If support breaks, do not use declining volume as a reason to hold or buy.
+- Do not reject a valid high-volume breakout holding its breakout level merely because it is near a high. After a sharp rise, assess chasing risk when increased volume accompanies a failed breakout and falling prices.
+- A low-volume new high or new low alone does not establish a buy, sell or rebound. Never infer institutional accumulation or distribution from volume alone.
+- This guidance interprets existing volume evidence. Preserve existing momentum conditions and trigger credits; add no score bonus, penalty, threshold or entry gate. Do not override or delay corporate-event, stop-loss or trailing-stop priority.
+
 **time-get_current_time:** Get current time — **call FIRST**.
 
 **yahoo_finance tool:**
-1. get_historical_stock_prices: 14-day price/volume for the stock
+1. get_historical_stock_prices: Stock price/volume for the analysis bars plus at least 20 preceding completed sessions
 2. get_historical_stock_prices ^GSPC: S&P 500 index
 3. get_historical_stock_prices ^VIX: VIX volatility index
 

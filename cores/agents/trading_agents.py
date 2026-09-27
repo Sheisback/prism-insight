@@ -284,6 +284,14 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
 
         ## Tool Usage
 
+        ### Volume Interpretation
+        - Compare the same stock's volume with its source, session date, session coverage, reference window, capture time and finality. Do not treat previous-day or 5-day-average ratios as 20-day-average ratios.
+        - For a 20-day average comparison, obtain 20 completed sessions preceding the evaluated bar plus the analysis bars. Expand the query range for market holidays; leave insufficient history or unfinished bars unknown and never invent values or condition satisfaction. Do not directly compare intraday or extended-hours volume with full regular-session volume.
+        - In an established uptrend, a low-volume pullback holding support with narrowing declines may be a normal correction. If support breaks, do not use declining volume as a reason to hold or buy.
+        - Do not reject a valid high-volume breakout holding its breakout level merely because it is near a high. After a sharp rise, assess chasing risk when increased volume accompanies a failed breakout and falling prices.
+        - A low-volume new high or new low alone does not establish a buy, sell or rebound. Never infer institutional accumulation or distribution from volume alone.
+        - This guidance interprets existing volume evidence. Preserve existing momentum conditions and trigger credits; add no score bonus, penalty, threshold or entry gate. Do not override or delay corporate-event, stop-loss or trailing-stop priority.
+
         - `time-get_current_time`: call FIRST. Use the returned date as the end date for ALL kospi_kosdaq queries.
         - `kospi_kosdaq-get_stock_ohlcv` / `get_stock_trading_volume` / `get_index_ohlcv`: market and stock data.
         - DO NOT call `kospi_kosdaq-load_all_tickers`.
@@ -638,6 +646,14 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
 
         ## 도구 사용
 
+        ### 거래량 해석 기준
+        - 동일 종목의 거래량을 출처·기준 거래일·세션 범위·비교 기간·수집 시각·확정 여부와 함께 확인하십시오. 전일 대비와 5일 평균 대비 비율을 20일 평균 대비로 해석하지 마십시오.
+        - 20일 평균 비교에는 비교 대상 봉 이전의 확정된 20거래일과 분석 대상 봉을 확보하십시오. 휴장일을 고려해 조회 범위를 늘리고, 이력 부족·미완성봉은 미확정으로 남기며 수치나 충족 여부를 만들어내지 마십시오. 장중·시간외 거래량을 정규장 전체 거래량과 직접 비교하지 마십시오.
+        - 기존 상승 추세에서 지지선을 유지하고 하락 폭이 축소되는 저거래량 조정은 정상 눌림일 수 있습니다. 지지선이 무너지면 거래량 감소를 보유·매수 근거로 삼지 마십시오.
+        - 거래량 증가를 동반하고 돌파 가격을 유지하는 정상 돌파를 고점 부근이라는 이유만으로 배제하지 마십시오. 급등 후 거래량 증가에도 돌파에 실패하고 가격이 밀리면 추격 위험을 검토하십시오.
+        - 거래량이 감소한 신고가·신저가만으로 매수·매도·반등을 확정하지 마십시오. 거래량만으로 기관 매집이나 분배를 단정하지 마십시오.
+        - 이 지침은 기존 거래량 근거의 해석을 보완합니다. 기존 모멘텀 조건·트리거 가산은 유지하고, 별도 가점·감점·임계값·진입 차단 조건을 추가하지 마십시오. 법인 이벤트·손절·트레일링 우선순위를 변경하거나 지연하지 마십시오.
+
         - `time-get_current_time`: 가장 먼저 호출하십시오. 반환된 날짜를 모든 kospi_kosdaq 조회의 종료일로 사용합니다.
         - `kospi_kosdaq-get_stock_ohlcv` / `get_stock_trading_volume` / `get_index_ohlcv`: 시장/종목 데이터.
         - `kospi_kosdaq-load_all_tickers` 호출 금지.
@@ -801,7 +817,7 @@ def create_sell_decision_agent(language: str = "ko"):
         - Only 'Hold' or 'Full Exit' possible
         - Make decision only when clear sell signal, not on temporary dips
         - **Clearly distinguish** between 'temporary correction' and 'trend reversal'
-        - 1-2 days decline = correction, 3+ days decline + volume decrease = suspect trend reversal
+        - Decline duration and decreasing volume alone do not establish a trend reversal or sell. Check support and the composite conditions below.
         - Avoid hasty sells considering re-entry cost (time + opportunity cost)
 
         ### Step 0: Assess Market Environment (Top Priority Analysis)
@@ -839,7 +855,7 @@ def create_sell_decision_agent(language: str = "ko"):
         - All stop_loss and trailing-stop judgements are based on the **closing price**.
         - An intraday low that briefly touches stop_loss (intraday wick) is NEVER a sell reason on its own.
         - Stop loss fires only when the closing price closes below stop_loss.
-        - During morning session (09:30~10:30 KST equivalent), use the previous day's confirmed close. After 14:50 KST equivalent or after market close, today's close is usable.
+        - Use today's close only when the source confirms a completed session and captured-data finality. Otherwise use the latest verified completed session and state its date; time alone cannot finalize a bar.
 
         **Core-2) Interpret buy-scenario take-profit conditions as milestones:**
         - In stock_holdings.scenario.trading_scenarios.sell_triggers, phrases like "sell when target reached" or "take profit 1: target/resistance reached" are **milestones, not automatic sell orders**.
@@ -878,9 +894,9 @@ def create_sell_decision_agent(language: str = "ko"):
         - Target is minimum baseline, keep holding if trend alive
         - Trailing Stop: **-8~10%** from peak (ignore noise)
         - Sell only when **clear trend weakness**:
-          * 3 consecutive days decline + volume decrease
-          * Both foreigner/institution turn to net selling
-          * Break major support (20-day line)
+          * Core-4 Tier 3: 3 consecutive daily-closing declines + above-average volume + close below 20d MA — ALL three required
+          * Foreign/institutional net selling is supporting context, not a substitute for the composite conditions
+          * A close below major support (20-day MA) is part of the composite, not a standalone trend sell trigger
 
         **⭐ Trailing Stop Management (Execute Every Run)**
         1. The system provides highest_price (peak since entry) in the prompt — use it directly, no need to query separately
@@ -918,13 +934,13 @@ def create_sell_decision_agent(language: str = "ko"):
         - Today's sharp moves are "ongoing movement" reference only, not confirmed sell basis
         - Especially for stop/profit decisions, compare with previous day close
 
-        **During afternoon session (14:50+):**
-        - Today's volume/candle/price changes all **confirmed complete**
-        - Can actively use today's data for technical analysis
-        - Volume surge/decline, candle patterns, price moves etc. are reliable for judgment
+        **During afternoon session (including 14:50+):**
+        - Time alone does not establish finality. Check the source, session date, session completion and capture time.
+        - A pre-close capture remains unfinished even if read after close. If finality is unverified, record BAR_FINALITY_UNKNOWN and use the latest verified completed session for closing-price decisions.
+        - Treat ongoing volume/price changes as context only, not confirmed full-session comparisons.
 
         **Core Principle:**
-        During market = Previous confirmed data / Afternoon session = All data including today
+        Use verified completed-session data for closing-price decisions, regardless of execution time.
 
         ### Analysis Elements
 
@@ -951,10 +967,18 @@ def create_sell_decision_agent(language: str = "ko"):
 
         ### Tool Usage Guide
 
+        ### Volume Interpretation
+        - Compare the same stock's volume with its source, session date, session coverage, reference window, capture time and finality. Do not treat previous-day or 5-day-average ratios as 20-day-average ratios.
+        - For a 20-day average comparison, obtain 20 completed sessions preceding the evaluated bar plus the analysis bars. Expand the query range for market holidays; leave insufficient history or unfinished bars unknown and never invent values or condition satisfaction. Do not directly compare intraday or extended-hours volume with full regular-session volume.
+        - In an established uptrend, a low-volume pullback holding support with narrowing declines may be a normal correction. If support breaks, do not use declining volume as a reason to hold or buy.
+        - Do not reject a valid high-volume breakout holding its breakout level merely because it is near a high. After a sharp rise, assess chasing risk when increased volume accompanies a failed breakout and falling prices.
+        - A low-volume new high or new low alone does not establish a buy, sell or rebound. Never infer institutional accumulation or distribution from volume alone.
+        - This guidance interprets existing volume evidence. Preserve existing momentum conditions and trigger credits; add no score bonus, penalty, threshold or entry gate. Do not override or delay corporate-event, stop-loss or trailing-stop priority.
+
         **time-get_current_time:** Get current time — **call this FIRST before any kospi_kosdaq query**. Use the returned date as the end date for all OHLCV/volume queries. Never assume or guess the current date.
 
         **kospi_kosdaq tool to check:**
-        1. get_stock_ohlcv: Analyze trend with recent 14 days price/volume data (end date = date from time-get_current_time)
+        1. get_stock_ohlcv: Analyze trend with the analysis bars plus at least 20 preceding completed sessions of price/volume data (end date = date from time-get_current_time)
         2. get_stock_trading_volume: Check institutional/foreign trading trends (end date = date from time-get_current_time)
         3. get_index_ohlcv: Check KOSPI/KOSDAQ market index info (end date = date from time-get_current_time)
 
@@ -1015,7 +1039,7 @@ def create_sell_decision_agent(language: str = "ko"):
         - 오직 '보유' 또는 '전량 매도'만 가능
         - 일시적 하락보다는 명확한 매도 신호가 있을 때만 결정
         - **일시적 조정**과 **추세 전환**을 명확히 구분 필요
-        - 1~2일 하락은 조정으로 간주, 3일 이상 하락+거래량 감소는 추세 전환 의심
+        - 하락 일수와 거래량 감소만으로 추세 전환이나 매도를 판단하지 마십시오. 지지 유지 여부와 아래 복합 조건을 확인하십시오.
         - 재진입 비용(시간+기회비용)을 고려해 성급한 매도 지양
 
         ### 0단계: 시장 환경 파악 (최우선 분석)
@@ -1052,7 +1076,7 @@ def create_sell_decision_agent(language: str = "ko"):
         - 모든 손절가·trailing stop 판단은 **종가(closing price)** 기준입니다.
         - 장중 저가가 stop_loss를 일시적으로 터치(intraday wick)한 것만으로는 절대 매도하지 마십시오.
         - 종가가 stop_loss 아래로 마감했을 때만 손절 발동합니다.
-        - 오전장(09:30~10:30 KST) 분석 시에는 전일 종가 기준으로 판단하고, 오후장(14:50+) 분석 시에만 당일 종가를 사용하십시오.
+        - 출처에서 해당 세션의 종료와 수집 데이터의 확정을 확인한 경우에만 당일 종가를 사용하십시오. 그 외에는 최근 확정 거래일의 종가와 기준일을 사용하며, 시각만으로 봉을 확정하지 마십시오.
 
         **핵심-2) 매수 시나리오의 익절 조건은 마일스톤으로 해석:**
         - 보유 종목의 stock_holdings.scenario.trading_scenarios.sell_triggers 중 "목표가 도달 시 매도", "익절 조건 1: 목표가/저항선 도달" 등의 문구는 **자동 매도 명령이 아니라 1차 마일스톤**입니다.
@@ -1091,9 +1115,9 @@ def create_sell_decision_agent(language: str = "ko"):
         - 목표가는 최소 기준일뿐, 추세 살아있으면 계속 보유
         - Trailing Stop: 고점 대비 **-8~10%** (노이즈 무시)
         - 매도 조건: **명확한 추세 약화 시에만**
-          * 3일 연속 하락 + 거래량 감소
-          * 외국인/기관 동반 순매도 전환
-          * 주요 지지선(20일선) 이탈
+          * 핵심-4의 3단계: 3거래일 연속 종가 하락 + 거래량 동반 + 20일선 종가 이탈을 모두 충족
+          * 외국인/기관 동반 순매도 전환은 보조 정황이며, 위 복합 조건을 대체하지 않음
+          * 주요 지지선(20일선) 이탈은 위 복합 조건의 일부이며, 단독 추세 매도 조건이 아님
 
         **⭐ Trailing Stop 관리**
         1. 시스템이 진입 후 최고가(highest_price)를 프롬프트에 제공합니다 — 직접 조회 불필요
@@ -1135,13 +1159,13 @@ def create_sell_decision_agent(language: str = "ko"):
         - 당일 급변동은 "진행 중인 움직임" 정도만 참고, 확정 매도 근거로 사용 금지
         - 특히 손절/익절 판단 시 전일 종가 기준으로 비교
 
-        **오후 장(14:50 이후) 분석 시:**
-        - 당일 거래량/캔들/가격 변화 모두 **확정 완료**
-        - 당일 데이터를 적극 활용한 기술적 분석 가능
-        - 거래량 급증/급감, 캔들 패턴, 가격 변동 등 신뢰도 높은 판단 가능
+        **오후 장(14:50 이후 포함) 분석 시:**
+        - 시각만으로 확정을 판단하지 마십시오. 출처·기준 거래일·세션 종료·수집 시각을 확인하십시오.
+        - 장 마감 전에 수집한 값은 마감 후 읽어도 미완성입니다. 확정 여부가 불명확하면 BAR_FINALITY_UNKNOWN으로 남기고 종가 판단에는 최근 확정 거래일을 사용하십시오.
+        - 진행 중인 거래량·가격 변화는 참고 정보이며 확정된 전체 세션과 비교하지 마십시오.
 
         **핵심 원칙:**
-        오전장 실행 = 전일 확정 데이터로 판단 / 오후 장 이후 = 당일 포함 모든 데이터 활용
+        실행 시각과 무관하게 종가 판단에는 검증된 확정 세션 데이터를 사용하십시오.
 
         ### 분석 요소
 
@@ -1168,10 +1192,18 @@ def create_sell_decision_agent(language: str = "ko"):
 
         ### 도구 사용 지침
 
+        ### 거래량 해석 기준
+        - 동일 종목의 거래량을 출처·기준 거래일·세션 범위·비교 기간·수집 시각·확정 여부와 함께 확인하십시오. 전일 대비와 5일 평균 대비 비율을 20일 평균 대비로 해석하지 마십시오.
+        - 20일 평균 비교에는 비교 대상 봉 이전의 확정된 20거래일과 분석 대상 봉을 확보하십시오. 휴장일을 고려해 조회 범위를 늘리고, 이력 부족·미완성봉은 미확정으로 남기며 수치나 충족 여부를 만들어내지 마십시오. 장중·시간외 거래량을 정규장 전체 거래량과 직접 비교하지 마십시오.
+        - 기존 상승 추세에서 지지선을 유지하고 하락 폭이 축소되는 저거래량 조정은 정상 눌림일 수 있습니다. 지지선이 무너지면 거래량 감소를 보유·매수 근거로 삼지 마십시오.
+        - 거래량 증가를 동반하고 돌파 가격을 유지하는 정상 돌파를 고점 부근이라는 이유만으로 배제하지 마십시오. 급등 후 거래량 증가에도 돌파에 실패하고 가격이 밀리면 추격 위험을 검토하십시오.
+        - 거래량이 감소한 신고가·신저가만으로 매수·매도·반등을 확정하지 마십시오. 거래량만으로 기관 매집이나 분배를 단정하지 마십시오.
+        - 이 지침은 기존 거래량 근거의 해석을 보완합니다. 기존 모멘텀 조건·트리거 가산은 유지하고, 별도 가점·감점·임계값·진입 차단 조건을 추가하지 마십시오. 법인 이벤트·손절·트레일링 우선순위를 변경하거나 지연하지 마십시오.
+
         **time-get_current_time:** 현재 시간 획득 — **kospi_kosdaq 조회 전 반드시 먼저 호출하세요**. 반환된 날짜를 모든 OHLCV/거래량 조회의 종료일(end date)로 사용하세요. 현재 날짜를 임의로 가정하거나 추측하지 마세요.
 
         **kospi_kosdaq tool로 확인:**
-        1. get_stock_ohlcv: 최근 14일 가격/거래량 데이터로 추세 분석 (종료일 = time-get_current_time으로 획득한 날짜)
+        1. get_stock_ohlcv: 분석 대상 봉과 그 이전 확정된 20거래일 이상의 가격/거래량 데이터로 추세 분석 (종료일 = time-get_current_time으로 획득한 날짜)
         2. get_stock_trading_volume: 기관/외국인 매매 동향 확인 (종료일 = time-get_current_time으로 획득한 날짜)
         3. get_index_ohlcv: 코스피/코스닥 시장 지수 정보 확인 (종료일 = time-get_current_time으로 획득한 날짜)
         4. load_all_tickers 사용 금지!!!

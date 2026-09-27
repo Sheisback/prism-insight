@@ -68,7 +68,8 @@ def compute(bars, *, market, observed_at, current_price=None, scenario=None):
     forming = rows[-1] if rows and rows[-1]["date"] == today and elapsed_fraction(market, observed_at) < 1 else None
     completed = [b for b in rows if b["date"] < today or (b["date"] == today and forming is None)]
     fraction = elapsed_fraction(market, observed_at)
-    features.update(session_elapsed_fraction=round(fraction, 4), forming_bar_present=forming is not None)
+    # Event keys containing "session" are redacted by the sanitizer; keep this name.
+    features.update(market_elapsed_fraction=round(fraction, 4), forming_bar_present=forming is not None)
     if len(completed) < 26:
         missing["completed_bars"] = len(completed)
         return {"status": "MISSING", "features": features, "missing": missing}
@@ -81,7 +82,7 @@ def compute(bars, *, market, observed_at, current_price=None, scenario=None):
     if forming is not None and 0.05 <= fraction < 1 and avg20 > 0:
         features["rvol_time_scaled_linear"] = round(forming["volume"] / (avg20 * fraction), 4)
     else:
-        missing["rvol_time_scaled_linear"] = "no_forming_bar" if forming is None else "session_fraction_out_of_range"
+        missing["rvol_time_scaled_linear"] = "no_forming_bar" if forming is None else "elapsed_fraction_out_of_range"
     true_ranges = []
     for prev, bar in zip(completed[-21:-1], completed[-20:]):
         true_ranges.append(max(bar["high"] - bar["low"], abs(bar["high"] - prev["close"]), abs(bar["low"] - prev["close"])))

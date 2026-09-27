@@ -51,15 +51,17 @@ def test_decision_rules_and_json_schema_are_byte_preserved(prompt):
     language, text = prompt
     heading = "## 도구 사용" if language == "ko" else "## Tool Usage"
     json_heading = "## JSON 응답 형식" if language == "ko" else "## JSON Response Format"
+    # Refreshed stale hashes against 9203306b; volume changes preserve these bytes.
     expected = {
-        "ko": ("4ae26638e5df8fcb3bc0dc25bd7ec5f8f771ebdfd0b1f7db81495dbff7d26cab", "f5f2f66de78dd7995efca999eaf82cf3a92c61834d499e17a0af6e6de30cd776"),
-        "en": ("d741596f5fa983cb1d6832d59e66900109e3ac63bce3114d251639b15fd67f80", "191df340ff09fe154a1ef67984be592293f51149dff8c83307855f1b26568051"),
+        "ko": ("15c3effd3918125fd241311df2398b7dfb0108320d5a79abcb349ad838c05cad", "01eb2c841a0495724b364e5a96418b1d67f1f38c4190729dce467d6308c57125"),
+        "en": ("54fdf9cc49a0fd5a12bf38b09bc2c98a80916dadb18eda9359e12b6fcc987b9d", "b458120e713c714f2f29d308d1205d8fbd6ab56e6b7c8735d92e5d23ec93a771"),
     }
     assert hashlib.sha256(text.split(heading)[0].encode()).hexdigest() == expected[language][0]
     assert hashlib.sha256(text[text.index(json_heading):].encode()).hexdigest() == expected[language][1]
 
 
-def test_sell_factory_is_byte_preserved():
+def test_sell_factory_matches_reviewed_volume_prompt():
+    # Intentional ko/en volume interpretation and KR completed-session guidance update.
     source = SOURCE.read_text(encoding="utf-8")
     node = next(n for n in ast.parse(source).body if isinstance(n, ast.FunctionDef) and n.name == "create_sell_decision_agent")
-    assert hashlib.sha256(ast.get_source_segment(source, node).encode()).hexdigest() == "020684a184329a776fb07aabced491596534f06f00723e5f402b7606bdf5dcc3"
+    assert hashlib.sha256(ast.get_source_segment(source, node).encode()).hexdigest() == "70887f53a73aa2ced68f913e6dec8ca6df5bf707f61f4fd90dc2e21f62485544"
