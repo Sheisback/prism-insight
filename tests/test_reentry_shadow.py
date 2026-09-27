@@ -213,3 +213,25 @@ def test_kr_collector_spaces_and_retries(tmp_path, monkeypatch):
     out = T.collect_kr(["000001"], bars[-1]["date"], source=Source(), master=Master(), cache_dir=tmp_path)
     assert out["000001"][-1]["date"] == bars[-1]["date"] and calls == ["000001", "000001"]
     assert out["__benchmark_rows"]["000001"]
+
+
+def test_enrolment_is_point_in_time_and_independent_of_run_count():
+    bars, row = _stopped_setup()
+    # Second stop-out on the same ticker: one while the first watch is live, one after it ended.
+    during = dict(row, entry_date=bars[63]["date"], exit_date=bars[64]["date"])
+    frames = {"000001": bars, "__benchmark_rows": {}}
+    fail = [dict(b) for b in bars]
+    for b in fail[63:]:
+        b.update(open=80.0, high=80.5, low=79.5, close=80.0)   # deep failure ends the first watch on bar 63
+    after = dict(row, entry_date=fail[64]["date"], exit_date=fail[65]["date"], entry_price=80.0, exit_price=80.0)
+
+    def once(rows, frame_set, runs):
+        state = {"schema_version": 1, "policy_version": R.POLICY_VERSION, "market": "KR", "watches": []}
+        for _ in range(runs):
+            state, _ = S.advance(state, rows, frame_set, bars[-1]["date"], "KR")
+        return sorted(w["row"]["exit_date"] for w in state["watches"])
+
+    assert once([row, during], frames, 1) == once([row, during], frames, 3) == [row["exit_date"]]
+    fail_frames = {"000001": fail, "__benchmark_rows": {}}
+    first, again = once([row, after], fail_frames, 1), once([row, after], fail_frames, 3)
+    assert first == again == [row["exit_date"], after["exit_date"]]
