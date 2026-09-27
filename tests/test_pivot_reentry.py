@@ -78,3 +78,35 @@ def test_run_watch_market_gate_and_ready_control():
     assert blocked["status"] in {"EXPIRED", "PENDING"} and blocked["events"]["market_blocked"] >= 1
     ok = P.run_watch(bars, start, "KR", market_ok=lambda d: True)
     assert ok["status"] == "TRIGGERED" and ok["ready_control"]["index"] <= ok["index"]
+
+
+def test_production_exit_trailing_and_hypotheses():
+    base = _bars(_uptrend_then_base(last_close=106.0))
+    i = len(base)
+    # Entry 110, closes run to 121 (+10%), then fall to 110.5: bull band line = 121*0.92*0.995 = 110.76.
+    path = _bars([(110, 112, 109.5, 111, 900), (111, 121.5, 110.5, 121, 900), (120, 120.5, 110, 110.5, 900)],
+                 start=date(2026, 6, 1))
+    trade = P.simulate_production(base + path, i, 110.0, bull=lambda d: True)
+    assert trade["exit_reason"] == "tier2_trail" and trade["ret"] == round(110.5 / 110 - 1, 6)
+    weak = P.simulate_production(base + path, i, 110.0, bull=lambda d: False)
+    assert weak["exit_reason"] == "tier2_trail"
+    # Intraday wick to -8% that closes flat: default stops out, H1 close-based stop survives.
+    wick = _bars([(110, 111, 101, 110, 900)] + [(110, 111, 109.5, 110.2, 900)] * 70, start=date(2026, 6, 1))
+    assert P.simulate_production(base + wick, i, 110.0, intraday=False)["exit_reason"] == "tier1_stop"
+    assert P.simulate_production(base + wick, i, 110.0, intraday=False, close_stop=True)["exit_reason"] != "tier1_stop"
+    # H2: an activated winner never closes below entry.
+    fade = _bars([(110, 116, 109.5, 116, 900), (116, 116.5, 108, 108.5, 900)], start=date(2026, 6, 1))
+    lock = P.simulate_production(base + fade, i, 110.0, bull=lambda d: True, breakeven_lock=True)
+    assert lock["exit_reason"] == "tier2_trail" and lock["ret"] < 0 and lock["ret"] == round(108.5 / 110 - 1, 6)
+
+
+def test_production_exit_ignores_entry_day_low_for_intraday_entries():
+    base = _bars(_uptrend_then_base(last_close=106.0))
+    i = len(base)
+    # Bought intraday at 110 after the session low of 100; closes 111 -> no day-0 stop.
+    day0 = _bars([(101, 112, 100, 111, 900)] + [(111, 112, 110, 111.5, 900)] * 70, start=date(2026, 6, 1))
+    trade = P.simulate_production(base + day0, i, 110.0, intraday=True, bull=lambda d: True)
+    assert trade["exit_reason"] != "tier1_stop" and trade["exit_reason"] != "tier1_day0_close"
+    # A close below the stop on day 0 still exits at that close.
+    crash = _bars([(110, 111, 100, 101, 900)], start=date(2026, 6, 1))
+    assert P.simulate_production(base + crash, i, 110.0, intraday=True)["exit_reason"] == "tier1_day0_close"
