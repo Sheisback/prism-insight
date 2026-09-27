@@ -267,31 +267,48 @@ def _get_ai_intuitions(cursor, week_start_str: str) -> str:
 def _get_trigger_section(cursor, market: str, week_start_str: str) -> str:
     """Render cumulative observations; absent data and query failures stay distinct."""
     if market == "KR":
-        table, returns, date = "analysis_performance_tracker", "tracked_30d_return", "analyzed_date"
-        mature = "tracking_status='completed' AND tracked_30d_return IS NOT NULL"
+        stats_query = """
+            SELECT
+                SUM(CASE WHEN was_traded=0 AND tracked_30d_return < -0.05 THEN 1 ELSE 0 END),
+                AVG(CASE WHEN was_traded=0 AND tracked_30d_return < -0.05 THEN tracked_30d_return * 100 END),
+                SUM(CASE WHEN was_traded=0 AND tracked_30d_return > 0.10 THEN 1 ELSE 0 END),
+                MAX(CASE WHEN was_traded=0 AND tracked_30d_return > 0.10 THEN tracked_30d_return * 100 END),
+                MIN(analyzed_date), MAX(analyzed_date), COUNT(*),
+                SUM(CASE WHEN was_traded IS NULL THEN 1 ELSE 0 END)
+            FROM analysis_performance_tracker
+            WHERE tracking_status='completed' AND tracked_30d_return IS NOT NULL
+        """
+        best_query = """
+            SELECT trigger_type, COUNT(*) AS samples,
+                   SUM(CASE WHEN tracked_30d_return > 0 THEN 1 ELSE 0 END) AS wins
+            FROM analysis_performance_tracker
+            WHERE tracking_status='completed' AND tracked_30d_return IS NOT NULL
+              AND trigger_type IS NOT NULL
+            GROUP BY trigger_type HAVING COUNT(*) >= 3
+            ORDER BY (wins * 1.0 / samples) DESC, samples DESC, trigger_type LIMIT 1
+        """
     else:
-        table, returns, date = "us_analysis_performance_tracker", "return_30d", "analysis_date"
-        mature = "return_30d IS NOT NULL"
+        stats_query = """
+            SELECT
+                SUM(CASE WHEN was_traded=0 AND return_30d < -0.05 THEN 1 ELSE 0 END),
+                AVG(CASE WHEN was_traded=0 AND return_30d < -0.05 THEN return_30d * 100 END),
+                SUM(CASE WHEN was_traded=0 AND return_30d > 0.10 THEN 1 ELSE 0 END),
+                MAX(CASE WHEN was_traded=0 AND return_30d > 0.10 THEN return_30d * 100 END),
+                MIN(analysis_date), MAX(analysis_date), COUNT(*),
+                SUM(CASE WHEN was_traded IS NULL THEN 1 ELSE 0 END)
+            FROM us_analysis_performance_tracker WHERE return_30d IS NOT NULL
+        """
+        best_query = """
+            SELECT trigger_type, COUNT(*) AS samples,
+                   SUM(CASE WHEN return_30d > 0 THEN 1 ELSE 0 END) AS wins
+            FROM us_analysis_performance_tracker
+            WHERE return_30d IS NOT NULL AND trigger_type IS NOT NULL
+            GROUP BY trigger_type HAVING COUNT(*) >= 3
+            ORDER BY (wins * 1.0 / samples) DESC, samples DESC, trigger_type LIMIT 1
+        """
 
-    stats = _safe_query(cursor, f"""
-        SELECT
-            SUM(CASE WHEN was_traded=0 AND {returns} < -0.05 THEN 1 ELSE 0 END),
-            AVG(CASE WHEN was_traded=0 AND {returns} < -0.05 THEN {returns} * 100 END),
-            SUM(CASE WHEN was_traded=0 AND {returns} > 0.10 THEN 1 ELSE 0 END),
-            MAX(CASE WHEN was_traded=0 AND {returns} > 0.10 THEN {returns} * 100 END),
-            MIN({date}), MAX({date}), COUNT(*),
-            SUM(CASE WHEN was_traded IS NULL THEN 1 ELSE 0 END)
-        FROM {table} WHERE {mature}
-    """)
-    best = _safe_query_all(cursor, f"""
-        SELECT trigger_type, COUNT(*) AS samples,
-               SUM(CASE WHEN {returns} > 0 THEN 1 ELSE 0 END) AS wins
-        FROM {table}
-        WHERE {mature} AND trigger_type IS NOT NULL
-        GROUP BY trigger_type HAVING COUNT(*) >= 3
-        ORDER BY (wins * 1.0 / samples) DESC, samples DESC, trigger_type
-        LIMIT 1
-    """)
+    stats = _safe_query(cursor, stats_query)
+    best = _safe_query_all(cursor, best_query)
     principles = _safe_query(cursor, """
         SELECT SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END), COUNT(*)
         FROM trading_principles WHERE is_active=1 AND market=?

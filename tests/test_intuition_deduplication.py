@@ -240,3 +240,35 @@ async def test_review_outage_retains_originals_and_reports_partial_counts(monkey
     assert result['intuitions_generated'] == 1 and result['intuitions_consolidated'] == 0
     assert result['errors'] == ['intuition_reconciliation_deferred: review unavailable']
     assert mgr.conn.execute('SELECT COUNT(*) FROM trading_intuitions WHERE is_active=1').fetchone()[0] == 2
+
+
+@pytest.mark.asyncio
+async def test_refresh_filters_market_before_limit_and_preserves_summary_fallback(monkeypatch):
+    mgr = manager()
+    mgr.conn.execute('CREATE TABLE trading_journal (id INTEGER, ticker TEXT, company_name TEXT, trade_date TEXT, profit_rate REAL, compressed_summary TEXT, one_line_summary TEXT, pattern_tags TEXT, buy_scenario TEXT, market TEXT)')
+    mgr.conn.executemany('INSERT INTO trading_journal VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [
+        (1, 'KR_TEST', '한국', '2099-01-01', 1., None, 'fallback KR evidence', '[]', '{}', 'KR'),
+        (2, 'US_TEST', '미국', '2099-01-02', 2., None, 'US evidence', '[]', '{}', 'US'),
+    ])
+    llm = SimpleNamespace(generate_str=AsyncMock(return_value='{"new_intuitions": [], "duplicate_groups": []}'))
+    stub_llm_dependencies(monkeypatch, llm)
+    result = await mgr.refresh_intuitions(limit=1, min_entries=1)
+    assert result['errors'] == [] and result['corpus'] == 1
+    prompt = llm.generate_str.call_args.kwargs['message']
+    assert 'fallback KR evidence' in prompt and 'US evidence' not in prompt
+
+
+@pytest.mark.parametrize('rewrite', [False, True])
+def test_merge_preserves_earliest_creation_and_latest_actual_validation(rewrite):
+    mgr = manager()
+    mgr._save_intuition(rule(), [1, 2])
+    other = rule()
+    other['condition'] = '변동성 높은 구간 추격 진입'
+    mgr._save_intuition(other, [2, 3])
+    mgr.conn.execute("UPDATE trading_intuitions SET created_at='2026-01-01', last_validated_at='2026-02-01' WHERE id=1")
+    mgr.conn.execute("UPDATE trading_intuitions SET created_at='2026-02-01', last_validated_at='2026-09-27' WHERE id=2")
+    group = {'canonical_id': 1, 'duplicate_ids': [2]}
+    if rewrite:
+        group['canonical_condition'] = '변동성이 높은 구간의 추격 진입'
+    mgr._consolidate_intuitions([group])
+    assert mgr.conn.execute('SELECT created_at, last_validated_at FROM trading_intuitions WHERE is_active=1').fetchall() == [('2026-01-01', '2026-09-27')]

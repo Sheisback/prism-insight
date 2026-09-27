@@ -37,16 +37,18 @@ class CompressionManager:
         self.language = language
         self.enable_journal = enable_journal
 
-    def _market_filter(self, table: str) -> str:
-        """Old KR-only databases have no market column; shared databases do."""
-        columns = {row[1] for row in self.conn.execute(f"PRAGMA table_info({table})")}
-        return "COALESCE(market, 'KR') = 'KR'" if 'market' in columns else '1 = 1'
+    @staticmethod
+    def _kr_rows(cursor) -> List[Dict[str, Any]]:
+        """Filter shared and legacy KR-only rows before applying corpus limits."""
+        columns = [d[0] for d in cursor.description]
+        rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        return [row for row in rows if (row.get('market') or 'KR') == 'KR']
 
     def _active_intuitions(self) -> List[Dict[str, Any]]:
         cursor = self.conn.execute(
-            f"SELECT * FROM trading_intuitions WHERE is_active = 1 AND {self._market_filter('trading_intuitions')} ORDER BY id"
+            "SELECT * FROM trading_intuitions WHERE is_active = 1 ORDER BY id"
         )
-        return [dict(zip([d[0] for d in cursor.description], row)) for row in cursor.fetchall()]
+        return self._kr_rows(cursor)
 
     def _ensure_evidence_column(self):
         columns = {row[1] for row in self.conn.execute('PRAGMA table_info(trading_intuitions)')}
@@ -93,16 +95,13 @@ class CompressionManager:
             cutoff_layer2 = (datetime.now() - timedelta(days=layer2_age_days)).strftime("%Y-%m-%d")
 
             # Layer 1 -> Layer 2
-            self.cursor.execute(f"""
-                SELECT id, ticker, company_name, trade_date, profit_rate,
-                       situation_analysis, judgment_evaluation, lessons,
-                       pattern_tags, one_line_summary, buy_scenario, sell_price
+            self.cursor.execute("""
+                SELECT *
                 FROM trading_journal
-                WHERE compression_layer = 1 AND trade_date < ? AND {self._market_filter('trading_journal')}
+                WHERE compression_layer = 1 AND trade_date < ?
                 ORDER BY trade_date ASC
             """, (cutoff_layer1,))
-            layer1_entries = [dict(zip([d[0] for d in self.cursor.description], row))
-                              for row in self.cursor.fetchall()]
+            layer1_entries = self._kr_rows(self.cursor)
 
             if len(layer1_entries) >= min_entries:
                 logger.info(f"Compressing {len(layer1_entries)} Layer 1 entries")
@@ -110,15 +109,13 @@ class CompressionManager:
                 results["layer1_to_layer2"] = result
 
             # Layer 2 -> Layer 3
-            self.cursor.execute(f"""
-                SELECT id, ticker, company_name, trade_date, profit_rate,
-                       compressed_summary, pattern_tags, buy_scenario
+            self.cursor.execute("""
+                SELECT *
                 FROM trading_journal
-                WHERE compression_layer = 2 AND trade_date < ? AND {self._market_filter('trading_journal')}
+                WHERE compression_layer = 2 AND trade_date < ?
                 ORDER BY trade_date ASC
             """, (cutoff_layer2,))
-            layer2_entries = [dict(zip([d[0] for d in self.cursor.description], row))
-                              for row in self.cursor.fetchall()]
+            layer2_entries = self._kr_rows(self.cursor)
 
             if len(layer2_entries) >= min_entries:
                 logger.info(f"Compressing {len(layer2_entries)} Layer 2 entries")
@@ -257,17 +254,16 @@ class CompressionManager:
             from mcp_agent.workflows.llm.augmented_llm_openai import OpenAIAugmentedLLM
 
             cutoff = (datetime.now() - timedelta(days=window_days)).strftime("%Y-%m-%d")
-            self.cursor.execute(f"""
-                SELECT id, ticker, company_name, trade_date, profit_rate,
-                       COALESCE(compressed_summary, one_line_summary) AS compressed_summary,
-                       pattern_tags, buy_scenario
+            self.cursor.execute("""
+                SELECT *
                 FROM trading_journal
-                WHERE trade_date >= ? AND {self._market_filter('trading_journal')}
+                WHERE trade_date >= ?
                 ORDER BY trade_date DESC
-                LIMIT ?
-            """, (cutoff, limit))
-            entries = [dict(zip([d[0] for d in self.cursor.description], row))
-                       for row in self.cursor.fetchall()]
+            """, (cutoff,))
+            entries = self._kr_rows(self.cursor)[:limit]
+            for entry in entries:
+                if entry.get('compressed_summary') is None:
+                    entry['compressed_summary'] = entry.get('one_line_summary')
             results["corpus"] = len(entries)
             if len(entries) < min_entries and len(self._active_intuitions()) < 2:
                 results["reason"] = "insufficient_corpus"
@@ -641,6 +637,10 @@ Extract intuitions from these compressed records.
             except (TypeError, ValueError):
                 continue
             supporting = max(len(verified), *(rows[i].get('supporting_trades') or 0 for i in ids | {canonical_id}))
+            created_at = min(rows[i]['created_at'] for i in ids | {canonical_id})
+            validation_dates = [rows[i]['last_validated_at'] for i in ids | {canonical_id}
+                                if rows[i].get('last_validated_at')]
+            last_validated_at = max(validation_dates) if validation_dates else None
             condition = group.get('canonical_condition', canonical['condition'])
             insight = group.get('canonical_insight', canonical['insight'])
             if not isinstance(condition, str) or not condition.strip() or not isinstance(insight, str) or not insight.strip():
@@ -650,17 +650,27 @@ Extract intuitions from these compressed records.
             # A rewritten union gets a new row so ALL original wording stays recoverable.
             with self.conn:
                 if condition != canonical['condition'] or insight != canonical['insight']:
-                    copy = dict(canonical)
-                    copy.pop('id')
-                    copy.update(condition=condition, insight=insight, source_journal_ids=encoded,
-                                verified_source_journal_ids=json.dumps(sorted(verified)), supporting_trades=supporting)
-                    columns = list(copy)
-                    self.conn.execute(f"INSERT INTO trading_intuitions ({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})",
-                                      [copy[key] for key in columns])
+                    inserted = self.conn.execute("""
+                        INSERT INTO trading_intuitions
+                        (category, subcategory, condition, insight, confidence, supporting_trades,
+                         success_rate, source_journal_ids, created_at, last_validated_at,
+                         is_active, verified_source_journal_ids)
+                        SELECT category, subcategory, ?, ?, confidence, ?, success_rate, ?,
+                               ?, ?, is_active, ?
+                        FROM trading_intuitions WHERE id = ?
+                    """, (condition, insight, supporting, encoded, created_at, last_validated_at,
+                          json.dumps(sorted(verified)), canonical_id))
+                    if 'scope' in canonical:
+                        self.conn.execute('UPDATE trading_intuitions SET scope = ? WHERE id = ?',
+                                          (canonical['scope'], inserted.lastrowid))
+                    if 'market' in canonical:
+                        self.conn.execute('UPDATE trading_intuitions SET market = ? WHERE id = ?',
+                                          (canonical['market'], inserted.lastrowid))
                     ids.add(canonical_id)
                 else:
-                    self.conn.execute('UPDATE trading_intuitions SET source_journal_ids = ?, verified_source_journal_ids = ?, supporting_trades = ? WHERE id = ?',
-                                      (encoded, json.dumps(sorted(verified)), supporting, canonical_id))
+                    self.conn.execute('UPDATE trading_intuitions SET source_journal_ids = ?, verified_source_journal_ids = ?, supporting_trades = ?, created_at = ?, last_validated_at = ? WHERE id = ?',
+                                      (encoded, json.dumps(sorted(verified)), supporting,
+                                       created_at, last_validated_at, canonical_id))
                 for duplicate_id in ids:
                     self.conn.execute('UPDATE trading_intuitions SET is_active = 0 WHERE id = ?', (duplicate_id,))
             consolidated += len(ids)
