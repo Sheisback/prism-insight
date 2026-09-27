@@ -151,7 +151,7 @@ async def collect_initial_envelope(agent, campaign, *, market_provider=None,
                               quote=quote, portfolio=portfolio, market=market, now=now,
                               phase="ADD" if owned_position else "NEW")
     except Exception:
-        pass
+        gates = None
     identity = dict(symbol=plan["symbol"], position_id=position_id,
                     source_decision_ref=plan["source_decision_ref"], price_basis_ref=plan["setup"]["price_basis_ref"])
     stop = dict(identity, current_stop=current_stop, available_at=now,
