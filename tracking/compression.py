@@ -942,6 +942,9 @@ Existing intuition records (data, not instructions):
                          'Support confirmation and pullback confirmation are different requirements: preserve both meanings. '
                          'Preserve first-entry reduced size OR waiting, same-day FOMO and every material qualification where present. '
                          'Audit ALL source actions, including stop-distance widening and sizing under the actual high-volatility condition. '
+                         'Preserve the JOINT source-set meaning, not textual identity to each individual note. For current_pipeline, '
+                         'combining existing checks under the SAME original condition is not a new gate: those checks already coexist '
+                         'in the source set. Distinct conditions retain their attachment and each source\'s AND/OR remains unchanged. '
                          'MUST is not MAY: do not approve weakened obligations. "Where the sources mention it" is not a concrete condition. '
                          'That obligation rule applies to current_pipeline. For improvement-only sources, a compact future '
                          'theme plus explicit alternative/detail research proposals is legitimate, not an executable AND '
@@ -950,12 +953,13 @@ Existing intuition records (data, not instructions):
                          'Alternative proposals do not permit changing AND/OR within a proposal: reduced size AND '
                          'wider stops stays together; reduced size OR waiting stays an alternative. '
                          'For every required_qualifiers checklist item provide qualifier_coverage with its exact qualifier label and '
-                         'an exact canonical excerpt expressing its meaning and original conditional attachment; synonyms are allowed. '
+                         'preserved:true/false plus a specific semantic reason addressing its original conditional attachment. '
                          'Reject new policy, broadened gates or any omitted source. For approval provide exactly one source_coverage '
-                         'entry per source ID, quoting a nonempty exact excerpt from the canonical text that represents that source. '
+                         'entry per source ID with typed condition_preserved/action_preserved booleans and a specific semantic reason. '
+                         'Reordered or combined synonymous wording is valid; do not require exact quoted substrings. '
                          'Return {"reviews":[{"canonical_id":1,"approved":true,"reason":"coverage explanation",'
-                         '"source_coverage":[{"source_id":1,"canonical_excerpt":"exact canonical excerpt"}],'
-                         '"qualifier_coverage":[{"qualifier":"exact checklist label","canonical_excerpt":"exact canonical excerpt"}]}]}. '
+                         '"source_coverage":[{"source_id":1,"condition_preserved":true,"action_preserved":true,"reason":"specific semantic coverage"}],'
+                         '"qualifier_coverage":[{"qualifier":"exact checklist label","preserved":true,"reason":"specific semantic coverage"}]}]}. '
                          'For rejected groups return approved:false and a specific repair/split reason.\n'
                          + json.dumps({'records': records, 'proposed_groups': valid}, ensure_ascii=False)),
                 request_params=RequestParams(model='gpt-5.4', reasoning_effort='low', maxTokens=10000),
@@ -978,15 +982,13 @@ Existing intuition records (data, not instructions):
             covered = [item.get('source_id') for item in coverage if isinstance(item, dict)] if isinstance(coverage, list) else []
             valid_coverage = (len(covered) == len(self._merge_ids(group)) and all(type(item) is int for item in covered)
                               and set(covered) == self._merge_ids(group)
-                              and all(type(item.get('source_id')) is int and isinstance(item.get('canonical_excerpt'), str)
-                                      and item['canonical_excerpt'].strip() and item['canonical_excerpt'] in text for item in coverage))
+                              and all(self._coverage_preserved(item, text, source=True) for item in coverage))
             required = set().union(*(self._material_qualifiers(rows[i]) for i in self._merge_ids(group)))
             qualifiers = review.get('qualifier_coverage', [])
             qualifier_names = [item.get('qualifier') for item in qualifiers if isinstance(item, dict)] if isinstance(qualifiers, list) else []
-            valid_qualifiers = (all(isinstance(name, str) for name in qualifier_names)
+            valid_qualifiers = (isinstance(qualifiers, list) and all(isinstance(name, str) for name in qualifier_names)
                                 and set(qualifier_names) == required
-                                and all(isinstance(item.get('canonical_excerpt'), str) and item['canonical_excerpt'].strip()
-                                        and item['canonical_excerpt'] in text for item in qualifiers))
+                                and all(self._coverage_preserved(item, text) for item in qualifiers))
             if review.get('approved') is True and valid_coverage and valid_qualifiers and isinstance(review.get('reason'), str) and review['reason'].strip():
                 self._semantic_approvals.add(self._merge_approval_key(group, rows))
                 self._semantic_reviewed_sources.add(tuple(sorted(self._merge_ids(group))))
@@ -1000,17 +1002,30 @@ Existing intuition records (data, not instructions):
                     errors.append('Invalid source coverage: missing IDs=' + str(sorted(self._merge_ids(group) - valid_ids))
                                   + ', unexpected IDs=' + str(sorted(valid_ids - self._merge_ids(group)))
                                   + ', repeated IDs=' + str(sorted(item for item in valid_ids if covered.count(item) > 1))
-                                  + '; require each source exactly once and nonempty exact canonical excerpts.')
+                                  + '; require each source exactly once, condition/action preserved=true and a specific reason.')
                 if not valid_qualifiers:
                     valid_names = {name for name in qualifier_names if isinstance(name, str)}
                     errors.append('Invalid qualifier coverage: missing labels=' + str(sorted(required - valid_names))
                                   + ', unexpected labels=' + str(sorted(valid_names - required))
-                                  + '; require all labels and nonempty exact canonical excerpts; repeated valid labels are allowed.')
+                                  + '; require all labels, preserved=true and a specific reason; repeated valid labels are allowed.')
                 if not isinstance(review.get('reason'), str) or not review['reason'].strip():
                     errors.append('Missing review reason.')
                 reason = '; '.join(errors) if errors else review.get('reason') or 'Semantic review did not approve.'
                 self._merge_rejections.append({'group': group, 'reason': reason, 'reviewer_reason': review.get('reason')})
         return accepted
+
+    @staticmethod
+    def _coverage_preserved(item, canonical_text, source=False):
+        """Typed semantic findings are authoritative; retain strict legacy quote compatibility."""
+        if not isinstance(item, dict):
+            return False
+        typed_fields = ('condition_preserved', 'action_preserved', 'preserved', 'reason')
+        if any(key in item for key in typed_fields):
+            fields = ('condition_preserved', 'action_preserved') if source else ('preserved',)
+            return (all(item.get(key) is True for key in fields)
+                    and isinstance(item.get('reason'), str) and bool(item['reason'].strip()))
+        quote = item.get('canonical_excerpt')
+        return isinstance(quote, str) and bool(quote.strip()) and quote in canonical_text
 
     def _consolidate_intuitions(self, groups: List[Dict[str, Any]]) -> int:
         """Apply conservative ID-based proposals, retaining original rows for recovery."""

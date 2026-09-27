@@ -510,6 +510,42 @@ async def test_repeated_labels_do_not_cover_a_missing_distinct_qualifier(monkeyp
     assert '지지 확인 / support confirmation' in mgr._merge_rejections[0]['reason']
 
 
+@pytest.mark.asyncio
+async def test_typed_semantic_coverage_accepts_reordered_meaning_without_exact_quote(monkeypatch):
+    mgr = manager()
+    for condition in ('눌림 확인 전', '되돌림 확인 전'):
+        mgr._save_intuition(dict(rule(), condition=condition, insight='진입을 보류한다'), [1, 2])
+    group = {'canonical_id': 1, 'duplicate_ids': [2], 'canonical_condition': '되돌림 확인 전',
+             'canonical_insight': '확인이 끝날 때까지 진입을 보류한다'}
+    review = {'canonical_id': 1, 'approved': True, 'reason': 'Joint source meaning is retained.',
+              'source_coverage': [{'source_id': i, 'condition_preserved': True, 'action_preserved': True,
+                                   'reason': '진입을 보류하고 눌림이 확인되어야 한다는 의미가 유지됩니다.'} for i in (1, 2)],
+              'qualifier_coverage': [{'qualifier': '눌림 확인 / pullback confirmation', 'preserved': True,
+                                     'reason': '되돌림 확인은 여기서 눌림 확인과 같은 조건입니다.'}]}
+    llm = SimpleNamespace(generate_str=AsyncMock(return_value=json.dumps({'reviews': [review]})))
+    stub_llm_dependencies(monkeypatch, llm)
+    approved = await mgr._verify_duplicate_groups(None, [group])
+    assert approved == [group]
+    assert mgr._consolidate_intuitions(approved) == 2
+
+
+@pytest.mark.parametrize('patch', [
+    {'action_preserved': False}, {'condition_preserved': False}, {'action_preserved': 'true'},
+    {'condition_preserved': None}, {'reason': ''},
+])
+def test_typed_coverage_rejects_false_missing_or_untyped_flags_even_with_valid_quote(patch):
+    coverage = {'source_id': 1, 'condition_preserved': True, 'action_preserved': True,
+                'reason': 'Preserved.', 'canonical_excerpt': 'exact valid text'}
+    coverage.update(patch)
+    assert not CompressionManager._coverage_preserved(coverage, 'exact valid text', source=True)
+
+
+def test_typed_qualifier_coverage_requires_preserved_and_specific_reason():
+    assert not CompressionManager._coverage_preserved({'preserved': False, 'reason': 'Missing condition'}, '')
+    assert not CompressionManager._coverage_preserved({'preserved': True, 'reason': ''}, '')
+    assert not CompressionManager._coverage_preserved({'reason': 'Flag omitted', 'canonical_excerpt': 'valid'}, 'valid')
+
+
 @pytest.mark.parametrize('missing', ['첫 진입', '비중 축소 또는 관망', '당일성 FOMO'])
 def test_material_source_qualifiers_cannot_be_silently_removed(missing):
     mgr = manager()
