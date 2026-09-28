@@ -37,19 +37,25 @@ def _number(value, positive=False):
 
 
 def build_intraday_inputs(*, symbol, bars, calendar, as_of, retrieved_at,
-                          price_basis_ref, source_ref, kind, retrieval_started_at=None):
+                          price_basis_ref, source_ref, kind, retrieval_started_at=None,
+                          volume_required=True):
     """Require all 21 exact regular-session prefixes, never fill missing bars.
 
     ``calendar`` has ``calendar_ref`` and exactly 21 chronological ``sessions``
     with trade_date/open_at/close_at. Bars use raw provider_timestamp/OHLCV plus
     dividends and stock_splits. Timestamps identify five-minute bucket starts.
+
+    ``volume_required=False`` (adaptive v2, where volume never gates) keeps the
+    current-session prefix strict but makes the matched-volume block best-effort:
+    an unmatched comparison (short/half-day prior session, prior prefix gap or a
+    zero prior denominator) yields ``volume=None`` instead of a non-OK status.
     """
     result = {"contract_version": VERSION, "symbol": symbol, "kind": kind,
               "source_ref": source_ref, "price_basis_ref": price_basis_ref,
               "as_of": as_of, "retrieved_at": retrieved_at,
               "retrieval_started_at": retrieval_started_at,
               "status": "INVALID", "reason_codes": [], "bars": [],
-              "volume": None, "market_window": None,
+              "volume": None, "market_window": None, "trend": None,
               "usable_for_prospective": False, "input_hash": None}
 
     def fail(code, status="INVALID"):
@@ -96,13 +102,16 @@ def build_intraday_inputs(*, symbol, bars, calendar, as_of, retrieved_at,
         if not opened < now <= closed or (now - opened) % STEP:
             return fail("AS_OF_NOT_COMPLETED_REGULAR_BOUNDARY")
         elapsed = now - opened
-        if any(end - start < elapsed for _, start, end in periods):
+        short_prior = any(end - start < elapsed for _, start, end in periods)
+        if short_prior and volume_required:
             return fail("PRIOR_SESSION_TOO_SHORT", "MISSING")
+        current_expected = {opened + STEP * index for index in range(int(elapsed / STEP))}
         expected = {start + STEP * index
-                    for _, start, _ in periods
+                    for _, start, end in periods if end - start >= elapsed
                     for index in range(int(elapsed / STEP))}
         period_by_date = {day: (start, end) for day, start, end in periods}
         normalized = {}
+        session_closes = {}
         action_unknown = False
         action_present = False
         for raw in bars:
@@ -121,6 +130,16 @@ def build_intraday_inputs(*, symbol, bars, calendar, as_of, retrieved_at,
                     action_unknown = True
                 elif _number(raw[field]):
                     action_present = True
+            day = stamp.astimezone(NY).date().isoformat()
+            if day != current_day and stamp + STEP == period[1]:
+                # Final regular bar of a completed prior session = its daily close.
+                # A duplicate/invalid one only removes trend evidence, never the
+                # existing matched-prefix input used by the first entry.
+                try:
+                    close = _number(raw["close"], True)
+                except (KeyError, ValueError, TypeError, InvalidOperation):
+                    close = None
+                session_closes[day] = None if day in session_closes else close
             if stamp not in expected:
                 continue
             if stamp in normalized:
@@ -135,23 +154,30 @@ def build_intraday_inputs(*, symbol, bars, calendar, as_of, retrieved_at,
             return fail("CORPORATE_ACTION_BASIS_UNVERIFIED", "MISSING")
         if action_unknown:
             return fail("CORPORATE_ACTION_EVIDENCE_MISSING", "MISSING")
-        if set(normalized) != expected:
+        if not current_expected <= set(normalized) or (
+                volume_required and set(normalized) != expected):
             return fail("REGULAR_PREFIX_GAP", "MISSING")
         minutes = int(elapsed.total_seconds() / 60)
         samples = []
-        for day, start, _ in periods:
-            total = sum((Decimal(normalized[start + STEP * index]["volume"])
-                         for index in range(int(elapsed / STEP))), Decimal(0))
-            samples.append({"trade_date": day, "elapsed_minutes": minutes,
-                            "cumulative_volume": str(total), "complete": True,
-                            "regular": True, "source_ref": source_ref})
-        if not sum(Decimal(sample["cumulative_volume"]) for sample in samples[:-1]):
-            return fail("MISSING_VOLUME_DENOMINATOR", "MISSING")
+        matched = not short_prior and set(normalized) == expected
+        if matched:
+            for day, start, _ in periods:
+                total = sum((Decimal(normalized[start + STEP * index]["volume"])
+                             for index in range(int(elapsed / STEP))), Decimal(0))
+                samples.append({"trade_date": day, "elapsed_minutes": minutes,
+                                "cumulative_volume": str(total), "complete": True,
+                                "regular": True, "source_ref": source_ref})
+            matched = bool(sum(Decimal(sample["cumulative_volume"]) for sample in samples[:-1]))
+            if not matched and volume_required:
+                return fail("MISSING_VOLUME_DENOMINATOR", "MISSING")
         result["bars"] = [{"start_at": stamp.isoformat(), "end_at": (stamp + STEP).isoformat(),
                            "close": normalized[stamp]["close"], "complete": True,
                            "regular": True, "source_ref": source_ref}
-                          for stamp in sorted(expected) if opened <= stamp < now][-2:]
-        result["volume"] = {"as_of": now.isoformat(), "elapsed_minutes": minutes,
+                          for stamp in sorted(current_expected) if opened <= stamp < now][-2:]
+        if not matched:
+            # Best-effort only: never a negative signal and never a gate for v2.
+            result["reason_codes"] = ["MATCHED_VOLUME_UNAVAILABLE"]
+        result["volume"] = None if not matched else {"as_of": now.isoformat(), "elapsed_minutes": minutes,
                             "basis": "MATCHED_REGULAR_CUMULATIVE", "complete": True,
                             "regular": True, "calendar_ref": calendar_ref,
                             "source_ref": source_ref,
@@ -161,13 +187,23 @@ def build_intraday_inputs(*, symbol, bars, calendar, as_of, retrieved_at,
         result["market_window"] = {"trade_date": current_day, "open_at": opened.isoformat(),
                                    "close_at": closed.isoformat(), "verified": True,
                                    "source_ref": calendar_ref}
+        # Completed-daily trend for adaptive adds: the 20 sessions strictly before
+        # the current trade date. Any missing close leaves it absent, never true.
+        prior = periods[:-1]
+        if all(session_closes.get(day) is not None for day, _, _ in prior):
+            result["trend"] = {"basis": "COMPLETED_DAILY_CLOSE_SMA20",
+                               "as_of": prior[-1][2].isoformat(),
+                               "trade_dates": [day for day, _, _ in prior],
+                               "closes": [str(session_closes[day]) for day, _, _ in prior],
+                               "calendar_ref": calendar_ref, "source_ref": source_ref}
         payload = {"symbol": symbol, "kind": kind, "source_ref": source_ref,
                    "price_basis_ref": price_basis_ref, "calendar_ref": calendar_ref,
                    "periods": [(day, start.isoformat(), end.isoformat())
                                for day, start, end in periods],
                    "as_of": now.isoformat(), "retrieved_at": retrieved.isoformat(),
                    "retrieval_started_at": retrieval_started_at,
-                   "bars": {key.isoformat(): value for key, value in sorted(normalized.items())}}
+                   "bars": {key.isoformat(): value for key, value in sorted(normalized.items())},
+                   "trend": result["trend"]}
         result["input_hash"] = hashlib.sha256(json.dumps(
             payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
         result.update(status="OK", usable_for_prospective=kind == "LIVE_CAPTURE")

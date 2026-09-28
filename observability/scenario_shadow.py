@@ -231,7 +231,7 @@ def _adaptive_setup(linked, *, ticker, decision_id, current_price, initial_stop,
     source spans here and export only strict policy fields, never report prose.
     Missing or rejected setup must not prevent the original capture/protection.
     """
-    result = {"policy_version": "oneil-adaptive-v1", "status": "MISSING",
+    result = {"policy_version": "oneil-adaptive-v2", "status": "MISSING",
               "reason": "LINKED_REVIEW_UNAVAILABLE", "broker_execution": False}
     try:
         from prism_core.oneil_adaptive_policy import create_plan as adaptive_plan

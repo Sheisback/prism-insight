@@ -1,14 +1,19 @@
-"""Deterministic caller-attested fixtures; not historical performance evidence."""
+"""Deterministic caller-attested fixtures; not historical performance evidence.
+
+This is the frozen v1 regression suite: existing v1 plans and campaigns must keep
+validating and evaluating with their original rules. v2 (B3) is covered in
+test_oneil_adaptive_v2.py.
+"""
 from copy import deepcopy
 from decimal import Decimal
 
 import pytest
 
-from prism_core.oneil_adaptive_policy import create_plan, evaluate_target
+from prism_core.oneil_adaptive_policy import V1_VERSION, create_plan, evaluate_target
 
 
 def plan(fee_bps=10):
-    return create_plan(symbol="TEST", entry_reference="100", initial_stop="90",
+    return create_plan(policy_version=V1_VERSION, symbol="TEST", entry_reference="100", initial_stop="90",
                        entry_eligible=True,
                        source_decision_ref="decision-test", created_at="2026-09-25T13:30:00Z",
                        setup={"proper_base": "VERIFIED", "pivot": "100",
@@ -68,7 +73,7 @@ def test_initial_capped_at_half():
 
 def test_initial_entry_can_use_fresh_bar_already_known_at_plan_creation():
     original = plan()
-    frozen = create_plan(symbol="TEST", entry_reference="100", initial_stop="90",
+    frozen = create_plan(symbol="TEST", entry_reference="100", initial_stop="90", policy_version=V1_VERSION,
                          source_decision_ref="decision-test", created_at="2026-09-25T13:40:45Z",
                          setup=original["setup"], entry_eligible=True)
     initial = evaluate(frozen=frozen, cumulative_allocation=0, remaining_allocation=0,
@@ -220,7 +225,7 @@ def test_setup_cannot_be_inferred_from_admission(key, value):
     setup = plan()["setup"]
     setup[key] = value
     with pytest.raises(ValueError):
-        create_plan(symbol="TEST", entry_reference=100, initial_stop=90,
+        create_plan(symbol="TEST", entry_reference=100, initial_stop=90, policy_version=V1_VERSION,
                     entry_eligible=True,
                     source_decision_ref="decision", created_at="2026-09-25T13:30:00Z", setup=setup)
 
@@ -262,7 +267,7 @@ def test_early_close_attestation_accepted_before_close():
 
 def test_strict_setup_no_raw_llm_and_entry_band():
     kwargs = {"symbol": "TEST", "entry_reference": 100, "initial_stop": 90,
-              "entry_eligible": True, "source_decision_ref": "decision",
+              "policy_version": V1_VERSION, "entry_eligible": True, "source_decision_ref": "decision",
               "created_at": "2026-09-25T13:30:00Z", "setup": plan()["setup"]}
     kwargs["setup"]["llm_prose"] = "not a structured attestation"
     with pytest.raises(ValueError):

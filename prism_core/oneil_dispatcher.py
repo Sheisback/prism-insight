@@ -10,7 +10,7 @@ import inspect
 import logging
 import time
 
-from prism_core.oneil_adaptive_policy import _num, _time
+from prism_core.oneil_adaptive_policy import V1_VERSION, _num, _time
 from prism_core.oneil_broker import OneilBroker
 from prism_core.oneil_runtime import OneilRuntime
 from prism_core.order_intents import OrderIntent
@@ -121,13 +121,23 @@ def _validator(execution, reserved, clock, authorize_add=None):
                 raise ValueError("QUOTE_ABOVE_RESERVED_LIMIT")
             if current["status"] != "ACTIVE" or current["revision"] != state["revision"]:
                 raise ValueError("ADD_AUTHORITY_CHANGED")
-            pivot = _num(current["plan"]["setup"]["pivot"], True)
-            if not pivot <= _num(price) <= pivot * Decimal("1.05") or _num(price) <= _num(current["current_stop"]):
-                raise ValueError("RESERVED_PRICE_OUTSIDE_POLICY")
+            plan = current["plan"]
+            pivot = _num(plan["setup"]["pivot"], True)
             persisted_order = next(order for order in current["orders"] if order["intent"]["id"] == intent.id)
             target = _num(persisted_order["target_allocation"])
-            threshold = pivot * (Decimal("1.04") if target > Decimal(".8") else
-                                 Decimal("1.02") if target > Decimal(".5") else Decimal(1))
+            if plan["policy_version"] == V1_VERSION:
+                upper = pivot * Decimal("1.05")
+                threshold = pivot * (Decimal("1.04") if target > Decimal(".8") else
+                                     Decimal("1.02") if target > Decimal(".5") else Decimal(1))
+            else:
+                # v2 mirrors the policy: first entry keeps the pivot buy band;
+                # later steps are relative to the frozen entry, capped at +10%.
+                entry, initial = _num(plan["entry_reference"], True), _num(plan["initial_nominal"], True)
+                upper = entry * Decimal("1.10") if current["confirmed_quantity"] else pivot * Decimal("1.05")
+                threshold = (entry * Decimal("1.04") if target > Decimal(".8") else
+                             entry * Decimal("1.02") if target > initial else pivot)
+            if not pivot <= _num(price) <= upper or _num(price) <= _num(current["current_stop"]):
+                raise ValueError("RESERVED_PRICE_OUTSIDE_POLICY")
             if observed < threshold:
                 raise ValueError("TARGET_PRICE_CONFIRMATION_LOST")
             if current["confirmed_quantity"] and observed * current["confirmed_quantity"] <= (

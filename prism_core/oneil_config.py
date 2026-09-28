@@ -9,7 +9,11 @@ from prism_core.oneil_adaptive_policy import _hash, _num, _time
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PATH = ROOT / "runtime/oneil-execution.json"
-POLICY = "oneil-adaptive-v1"
+POLICY = "oneil-adaptive-v2"
+# Operator files written before v2 still name v1. They remain valid for OFF and
+# SHADOW (new SHADOW campaigns freeze v2 plans regardless); LIVE requires v2 in
+# both the configuration and its explicit approval record.
+LEGACY_POLICIES = frozenset({"oneil-adaptive-v1"})
 ARM = "INITIAL_POLICY_50"
 
 
@@ -21,7 +25,11 @@ def implementation_hash():
                "prism-us/us_stock_tracking_agent.py", "prism_core/oneil_service.py",
                "tools/hardstop_seller.py", "tools/trend_exit_seller.py", "prism_core/oneil_config.py",
                "cores/buy_gate.py", "cores/regime_policy.py", "prism_core/order_intents.py",
-               "prism_core/oneil_current_capture.py", "prism_core/oneil_input_bridge.py")
+               "prism_core/oneil_current_capture.py", "prism_core/oneil_input_bridge.py",
+               # v2 sizing (ATR14), add trend (MA20), and SHADOW/LIVE ownership.
+               "prism_core/oneil_auto_review.py", "prism_core/oneil_auto_review_output.py",
+               "prism_core/oneil_setup_inputs.py", "prism_core/oneil_intraday_inputs.py",
+               "prism_core/oneil_runtime.py", "prism_core/strategy_ledger.py")
     return _hash({name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in sources})
 
 
@@ -45,8 +53,12 @@ def validate(config, *, now=None, check_approval=True):
         raise ConfigurationError("unknown configuration fields")
     value = {**defaults(), **config}
     if (value["config_version"] != 1 or value["mode"] not in {"OFF", "SHADOW", "LIVE"}
-            or value["policy"] != POLICY or value["initial_arm"] != ARM):
+            or value["policy"] not in {POLICY, *LEGACY_POLICIES} or value["initial_arm"] != ARM):
         raise ConfigurationError("unsupported mode or policy")
+    # Protection-only loads must keep working for an existing LIVE file; only
+    # new-risk authority requires the current policy (and its approval record).
+    if check_approval and value["mode"] == "LIVE" and value["policy"] != POLICY:
+        raise ConfigurationError("LIVE_REQUIRES_CURRENT_POLICY")
     accounts = value["accounts"]
     if (not isinstance(accounts, list) or len(accounts) > 10
             or any(not isinstance(a, str) or not a.strip() for a in accounts)

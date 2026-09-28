@@ -359,7 +359,7 @@ class OneilExecution:
                     return dict(status="BELOW_ONE_SHARE", campaign=state, decision=decision, intent=None)
             token = _hash([cid, side, decision["bar_end"] if decision else state["revision"]])
             intent = OrderIntent.create(market="US", account_id=state["account_id"], symbol=state["symbol"],
-                side=side, order_style="limit", source="oneil-adaptive-v1", source_decision_id=token,
+                side=side, order_style="limit", source=plan["policy_version"], source_decision_id=token,
                 source_position_id=token if side == "SELL" else state["position_id"],
                 execution_mode=self.mode.lower(), quantity=quantity, limit_price=price, reason=state["exit_reason"] or "ADAPTIVE_TARGET")
             inserted, reservation = self.store.reserve_in_transaction(db, intent)

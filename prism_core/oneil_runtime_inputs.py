@@ -325,4 +325,6 @@ class IntradayProvider:
             return value
 
         source = collect_source(symbol, as_of, calendar_name, fetcher=cached)
-        return build_packet(source, kind="LIVE_CAPTURE")["intraday"]
+        # Matched volume is best-effort here: adaptive v2 never gates on it, and
+        # the input bridge still requires it for frozen v1 plans.
+        return build_packet(source, kind="LIVE_CAPTURE", volume_required=False)["intraday"]

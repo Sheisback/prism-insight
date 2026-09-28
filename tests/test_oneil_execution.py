@@ -332,7 +332,8 @@ def test_claim_context_is_atomic_and_retry_immutable(tmp_path, monkeypatch):
 
 def test_expired_zero_without_pending_releases_owner(tmp_path):
     core, cid, args, account = start(tmp_path)
-    args["now"] = "2026-09-30T13:41:00Z"
+    # v2 plans expire 14 calendar days after creation (10 trading sessions).
+    args["now"] = "2026-10-09T13:41:00Z"
     args["quote"] = None
     args["gates"] = None
     result = reserve(core, cid, args, account)

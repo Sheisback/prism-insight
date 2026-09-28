@@ -21,6 +21,12 @@ def fixture():
                          "open": 102, "high": 105, "low": 101, "close": 104,
                          "volume": 75 if day == dates[-1] else 50,
                          "dividends": 0, "stock_splits": 0})
+        if day != dates[-1]:
+            # Final regular bar = completed daily close; rising closes -> above SMA20.
+            close = 80 + len(sessions)
+            bars.append({"provider_timestamp": (opened + timedelta(minutes=385)).isoformat(),
+                         "open": close, "high": close, "low": close, "close": close,
+                         "volume": 50, "dividends": 0, "stock_splits": 0})
     return dict(symbol="TEST", bars=bars, calendar={"calendar_ref": "exchange-fixture",
                 "sessions": sessions}, as_of="2026-09-25T13:40:00Z",
                 retrieved_at="2026-09-25T13:40:30Z", price_basis_ref="unadjusted-v1",

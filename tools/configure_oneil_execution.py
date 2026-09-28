@@ -12,7 +12,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from prism_core.oneil_config import DEFAULT_PATH, defaults, implementation_hash, validate  # noqa: E402
+from prism_core.oneil_config import DEFAULT_PATH, POLICY, defaults, implementation_hash, validate  # noqa: E402
 
 
 def active_entry_batches():
@@ -110,6 +110,8 @@ def main():
         elif args.accounts:
             value["accounts"] = args.accounts
         value["mode"] = args.mode
+        # An explicit reconfiguration records the current registered policy.
+        value["policy"] = POLICY
         if args.since:
             value["capture_since"] = args.since
         elif not value["capture_since"]:

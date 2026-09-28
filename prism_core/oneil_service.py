@@ -273,7 +273,8 @@ class OneilService:
                         except (ValueError, KeyError, TypeError):
                             allow_add = False
                     if runtime is not None:
-                        runtime_id = runtime.campaign_id_for_position(campaign["position_id"])
+                        runtime_id = runtime.campaign_id_for_position(
+                            campaign["position_id"], campaign["plan"]["policy_version"])
                         snap = runtime.snapshot(runtime_id)
                         if not snap["state"]["closed"]:
                             runtime.advance(runtime_id, envelope, expected_revision=snap["revision"])

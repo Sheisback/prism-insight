@@ -208,6 +208,30 @@ def _base(snapshot, cutoff, sessions):
     return _result("REJECTED", sorted(set(failures)), metrics={"candidates": candidates}, pivot=None)
 
 
+def _volatility(snapshot, cutoff, sessions, local_date):
+    """ATR14 over the 14 scheduled sessions strictly before the review's NY date.
+
+    True range needs the previous close, so 15 completed daily bars are required.
+    Each bar must have closed before the price source observation (see _bars).
+    """
+    prices = snapshot.get("prices")
+    _source(prices, snapshot["symbol"], cutoff, snapshot["price_basis_ref"])
+    days = sorted(day for day, (_, close) in sessions.items() if day < local_date and close <= cutoff)[-15:]
+    if len(days) != 15:
+        _fail("MISSING", "INSUFFICIENT_15_SESSIONS")
+    bars = _bars(prices, days, sessions)
+    ranges = []
+    for previous, day in zip(days, days[1:]):
+        high, low, prior = bars[day]["high"], bars[day]["low"], bars[previous]["close"]
+        ranges.append(max(high - low, abs(high - prior), abs(low - prior)))
+    atr = (sum(ranges) / 14).quantize(Decimal("0.000001"))
+    if atr <= 0:
+        _fail("INVALID", "NONPOSITIVE_ATR")
+    return _result(VALIDATED_STATUS, metrics={"start_date": str(days[1]), "end_date": str(days[-1]),
+                                              "true_ranges": 14, "basis": "UNADJUSTED_DAILY_TRUE_RANGE"},
+                   atr14=str(atr), last_trade_date=str(days[-1]), source_ref=prices["source_ref"])
+
+
 def _leadership(snapshot, cutoff, sessions, local_date):
     financials = snapshot.get("financials")
     _source(financials, snapshot["symbol"], cutoff)
@@ -316,8 +340,14 @@ def evaluate_auto_review(snapshot, *, as_of):
                 output[name] = _result(error.status, [error.reason], **({"pivot": None} if name == "base" else {}))
         statuses = {output[name]["status"] for name in ("base", "leadership")}
         output["status"] = next((status for status in ("INVALID", "MISSING", "REJECTED") if status in statuses), VALIDATED_STATUS)
+        # Plan-sizing evidence only; it never changes the setup classification.
+        try:
+            output["volatility"] = _volatility(snapshot, cutoff, sessions, local_date)
+        except _EvidenceError as error:
+            output["volatility"] = _result(error.status, [error.reason], atr14=None)
     except _EvidenceError as error:
         output["status"] = error.status
         output["base"] = _result(error.status, [error.reason], pivot=None)
         output["leadership"] = _result(error.status, [error.reason])
+        output["volatility"] = _result(error.status, [error.reason], atr14=None)
     return output
