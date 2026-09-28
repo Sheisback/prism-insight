@@ -9,7 +9,7 @@ import sqlite3
 from prism_core.oneil_adaptive_policy import _hash, _time
 from prism_core.oneil_current_capture import capture_current_record
 from prism_core.oneil_live_boundary import readiness
-from prism_core.oneil_runtime import OneilRuntime
+from prism_core.oneil_runtime import OWNER, OWNERS, OneilRuntime
 from prism_core.oneil_runtime_inputs import (
     IntradayProvider, current_gates, fetch_market_snapshot, fetch_quote, quote_input,
 )
@@ -133,7 +133,10 @@ class ShadowRunner:
         try:
             captures = read_captures(self.capture_db, self.since)
             for capture in captures:
-                cid = self.runtime.campaign_id_for_position(capture["position_id"])
+                # Each campaign keeps the owner of its frozen plan version.
+                frozen = (capture.get("attributes", {}).get("adaptive_setup") or {}).get("plan") or {}
+                version = frozen.get("policy_version") if frozen.get("policy_version") in OWNERS else OWNER
+                cid = self.runtime.campaign_id_for_position(capture["position_id"], version)
                 if _time(capture["event_time"]) > _time(self.clock()):
                     rows.append(dict(campaign_id=cid, status="ERROR", error_type="FUTURE_CAPTURE"))
                     continue

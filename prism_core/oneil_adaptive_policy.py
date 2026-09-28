@@ -6,8 +6,16 @@ import hashlib
 import json
 from zoneinfo import ZoneInfo
 
-VERSION = "oneil-adaptive-v1"
-EVIDENCE_VERSION = "oneil-adaptive-evidence-v1"
+VERSION = "oneil-adaptive-v2"
+EVIDENCE_VERSION = "oneil-adaptive-evidence-v2"
+# Frozen v1 plans and campaigns stay readable and keep their original rules.
+V1_VERSION = "oneil-adaptive-v1"
+V1_EVIDENCE_VERSION = "oneil-adaptive-evidence-v1"
+VERSIONS = (V1_VERSION, VERSION)
+NY = ZoneInfo("America/New_York")
+_SETUP_V1 = frozenset({"proper_base", "pivot", "as_of", "source_ref", "price_basis_ref",
+                       "fundamental_leader", "fundamental_source_ref", "fundamental_as_of"})
+_SETUP_V2 = _SETUP_V1 | {"atr14", "atr14_source_ref", "atr14_as_of", "atr14_last_trade_date"}
 
 
 def _num(value, positive=False):
@@ -40,19 +48,33 @@ def _hash(value):
                                      allow_nan=False).encode()).hexdigest()
 
 
+def evidence_version(plan):
+    return V1_EVIDENCE_VERSION if plan["policy_version"] == V1_VERSION else EVIDENCE_VERSION
+
+
+def initial_sizing(entry_reference, atr14):
+    """B3 volatility-scaled first allocation; there is no default size."""
+    entry, atr = _num(entry_reference, True), _num(atr14, True)
+    proxy = min(max(Decimal("1.5") * atr / entry, Decimal(".04")), Decimal(".10"))
+    proxy = proxy.quantize(Decimal(".000001"), rounding=ROUND_DOWN)
+    initial = min(max(Decimal(".5") * Decimal(".07") / proxy, Decimal(".30")), Decimal(".80"))
+    return proxy, initial.quantize(Decimal(".0001"), rounding=ROUND_DOWN)
+
+
 def create_plan(*, symbol, entry_reference, initial_stop, source_decision_ref,
-                created_at, setup, entry_eligible, fee_bps=10):
+                created_at, setup, entry_eligible, fee_bps=10, policy_version=VERSION):
     """Freeze explicit proper-base and leader attestations, never infer them."""
     entry, stop = _num(entry_reference, True), _num(initial_stop, True)
     created, fee = _time(created_at), _num(fee_bps) / 10000
+    if policy_version not in VERSIONS:
+        raise ValueError("registered policy version required")
     if entry_eligible is not True or stop >= entry or fee_bps not in (10, 25):
         raise ValueError("eligible entry, valid stop and registered fee required")
     _ref(symbol)
     _ref(source_decision_ref)
     if setup["proper_base"] != "VERIFIED" or setup["fundamental_leader"] is not True:
         raise ValueError("explicit base and leader evidence required")
-    if set(setup) != {"proper_base", "pivot", "as_of", "source_ref", "price_basis_ref",
-                      "fundamental_leader", "fundamental_source_ref", "fundamental_as_of"}:
+    if set(setup) != (_SETUP_V1 if policy_version == V1_VERSION else _SETUP_V2):
         raise ValueError("strict structured setup required")
     pivot = _num(setup["pivot"], True)
     for key in ("source_ref", "price_basis_ref", "fundamental_source_ref"):
@@ -61,12 +83,36 @@ def create_plan(*, symbol, entry_reference, initial_stop, source_decision_ref,
         raise ValueError("future setup")
     if not pivot <= entry <= pivot * Decimal("1.05"):
         raise ValueError("entry outside pivot band")
+    if policy_version == V1_VERSION:
+        plan = {"policy_version": V1_VERSION, "mode": "RESEARCH_ONLY", "market": "US",
+                "symbol": symbol, "entry_reference": str(entry), "initial_stop": str(stop),
+                "source_decision_ref": source_decision_ref, "created_at": created.isoformat(),
+                "expires_at": (created + timedelta(days=5)).isoformat(),
+                "setup": deepcopy(setup), "fee_rate": str(fee),
+                "risk_limit": str((entry - stop) / entry),
+                "authority": "CALLER_ATTESTED_NOT_AUTHENTICATED"}
+        plan["plan_hash"] = _hash(plan)
+        return plan
+    # ATR14 is frozen point-in-time evidence: its 14 completed sessions end
+    # strictly before both its own observation date and the plan's NY date.
+    _ref(setup["atr14_source_ref"])
+    atr_as_of = _time(setup["atr14_as_of"])
+    if not isinstance(setup["atr14_last_trade_date"], str):
+        raise ValueError("ATR session date required")
+    last_trade_date = date.fromisoformat(setup["atr14_last_trade_date"])
+    if (atr_as_of > created or last_trade_date >= created.astimezone(NY).date()
+            or last_trade_date >= atr_as_of.astimezone(NY).date()):
+        raise ValueError("future or same-session ATR")
+    stop_proxy, initial = initial_sizing(entry, setup["atr14"])
     plan = {"policy_version": VERSION, "mode": "RESEARCH_ONLY", "market": "US",
             "symbol": symbol, "entry_reference": str(entry), "initial_stop": str(stop),
             "source_decision_ref": source_decision_ref, "created_at": created.isoformat(),
-            "expires_at": (created + timedelta(days=5)).isoformat(),
+            # B3 expiry is 10 trading sessions. The plan carries no exchange
+            # calendar, so this uses the calendar-day equivalent of 14 days.
+            "expires_at": (created + timedelta(days=14)).isoformat(),
             "setup": deepcopy(setup), "fee_rate": str(fee),
             "risk_limit": str((entry - stop) / entry),
+            "stop_proxy": str(stop_proxy), "initial_nominal": str(initial),
             "authority": "CALLER_ATTESTED_NOT_AUTHENTICATED"}
     plan["plan_hash"] = _hash(plan)
     return plan
@@ -75,16 +121,41 @@ def create_plan(*, symbol, entry_reference, initial_stop, source_decision_ref,
 def _validate(plan):
     content = deepcopy(plan)
     digest = content.pop("plan_hash", None)
-    if content.get("policy_version") != VERSION or digest != _hash(content):
+    if content.get("policy_version") not in VERSIONS or digest != _hash(content):
         raise ValueError("plan version or hash mismatch")
     rebuilt = create_plan(symbol=plan["symbol"], entry_reference=plan["entry_reference"],
                           initial_stop=plan["initial_stop"],
                           source_decision_ref=plan["source_decision_ref"],
                           created_at=plan["created_at"], setup=plan["setup"],
                           entry_eligible=True,
-                          fee_bps=int(_num(plan["fee_rate"]) * 10000))
+                          fee_bps=int(_num(plan["fee_rate"]) * 10000),
+                          policy_version=plan["policy_version"])
     if rebuilt != plan:
         raise ValueError("noncanonical plan")
+
+
+def _trend_above_sma20(trend, today, opened, calendar_ref):
+    """Latest completed daily close versus SMA20 of the last 20 completed sessions.
+
+    Every session ends strictly before the current trade date and comes from the
+    same verified calendar as the market window. The flag is recomputed here.
+    """
+    _ref(trend["source_ref"])
+    if trend["basis"] != "COMPLETED_DAILY_CLOSE_SMA20" or trend["calendar_ref"] != calendar_ref:
+        raise ValueError("trend basis or calendar")
+    days, closes = trend["trade_dates"], trend["closes"]
+    if (not isinstance(days, list) or not isinstance(closes, list) or len(days) != 20
+            or len(closes) != 20 or len(set(days)) != 20 or days != sorted(days)):
+        raise ValueError("trend population")
+    if any(date.fromisoformat(day) >= today or date.fromisoformat(day).weekday() >= 5
+           for day in days):
+        raise ValueError("future trend session")
+    as_of = _time(trend["as_of"])
+    if (as_of.astimezone(NY).date() != date.fromisoformat(days[-1]) or as_of > opened
+            or opened - as_of > timedelta(days=5)):
+        raise ValueError("stale or future trend")
+    values = [_num(close, True) for close in closes]
+    return values[-1] > sum(values) / 20
 
 
 def evaluate_target(plan, evidence, *, now, cumulative_allocation, remaining_allocation,
@@ -92,6 +163,7 @@ def evaluate_target(plan, evidence, *, now, cumulative_allocation, remaining_all
                     last_add_bar_end=None, add_permission="AVAILABLE"):
     """Return a sizing intent only; persisted last-add clock is caller-owned."""
     _validate(plan)
+    v2 = plan["policy_version"] == VERSION
     current = _time(now)
     deployed, remaining, units, cost, stop = map(_num, (
         cumulative_allocation, remaining_allocation, normalized_units, remaining_entry_cost, current_stop))
@@ -119,7 +191,7 @@ def evaluate_target(plan, evidence, *, now, cumulative_allocation, remaining_all
     # Identity and fresh quote are required even for protection. Add-only gates,
     # expiry and pending intents cannot suppress a valid protective signal.
     try:
-        if (facts["contract_version"] != EVIDENCE_VERSION or facts["symbol"] != plan["symbol"]
+        if (facts["contract_version"] != evidence_version(plan) or facts["symbol"] != plan["symbol"]
                 or facts["price_basis_ref"] != plan["setup"]["price_basis_ref"]):
             raise ValueError("identity mismatch")
         _ref(facts["source_ref"])
@@ -148,8 +220,7 @@ def evaluate_target(plan, evidence, *, now, cumulative_allocation, remaining_all
         _ref(session["source_ref"])
         opened, closed = _time(session["open_at"]), _time(session["close_at"])
         today = date.fromisoformat(session["trade_date"])
-        local_open, local_close = (stamp.astimezone(ZoneInfo("America/New_York"))
-                                  for stamp in (opened, closed))
+        local_open, local_close = (stamp.astimezone(NY) for stamp in (opened, closed))
         if session["verified"] is not True or not opened <= current < closed:
             raise ValueError("regular session")
         if (local_open.date() != today or local_close.date() != today or today.weekday() >= 5
@@ -190,50 +261,73 @@ def evaluate_target(plan, evidence, *, now, cumulative_allocation, remaining_all
                 or gates["market_pulse"] != "UPTREND"
                 or gates["regime"] not in ("moderate_bull", "strong_bull", "parabolic")):
             return result("ADD_GATE_NOT_MET", evidence_status="CONDITION_NOT_MET")
-        volume = facts["volume"]
-        _ref(volume["calendar_ref"])
-        _ref(volume["source_ref"])
-        elapsed = (ended - opened).total_seconds() / 60
-        if (_time(volume["as_of"]) != ended or volume["elapsed_minutes"] != elapsed
-                or volume["complete"] is not True or volume["regular"] is not True
-                or volume["basis"] != "MATCHED_REGULAR_CUMULATIVE"):
-            raise ValueError("volume period")
-        expected = volume["expected_prior_trade_dates"]
-        if len(expected) != 20 or len(set(expected)) != 20 or expected != sorted(expected):
-            raise ValueError("comparison dates")
-        if any(date.fromisoformat(day) >= today or date.fromisoformat(day).weekday() >= 5
-               for day in expected):
-            raise ValueError("future volume")
-        samples = volume["samples"]
-        if len(samples) != 20 or sorted(x["trade_date"] for x in samples) != expected:
-            raise ValueError("comparison population")
-        total = Decimal(0)
-        for sample in samples:
-            _ref(sample["source_ref"])
-            if (sample["elapsed_minutes"] != elapsed or sample["complete"] is not True
-                    or sample["regular"] is not True):
-                raise ValueError("unmatched volume")
-            total += _num(sample["cumulative_volume"])
-        if not total:
-            return result("MISSING_VOLUME_DENOMINATOR", evidence_status="MISSING")
-        if _num(volume["cumulative_volume"]) / (total / 20) < Decimal("1.5"):
-            return result("VOLUME_NOT_CONFIRMED", evidence_status="CONDITION_NOT_MET")
+        if v2:
+            # B3: volume evidence may be recorded (it is in evidence_hash) but it
+            # never gates. Adds after the first entry need a completed-daily trend.
+            if deployed:
+                trend = facts.get("trend")
+                if trend is None:
+                    return result("MISSING_TREND_EVIDENCE", evidence_status="MISSING")
+                if not _trend_above_sma20(trend, today, opened, session["source_ref"]):
+                    return result("TREND_NOT_CONFIRMED", evidence_status="CONDITION_NOT_MET")
+        else:
+            volume = facts["volume"]
+            _ref(volume["calendar_ref"])
+            _ref(volume["source_ref"])
+            elapsed = (ended - opened).total_seconds() / 60
+            if (_time(volume["as_of"]) != ended or volume["elapsed_minutes"] != elapsed
+                    or volume["complete"] is not True or volume["regular"] is not True
+                    or volume["basis"] != "MATCHED_REGULAR_CUMULATIVE"):
+                raise ValueError("volume period")
+            expected = volume["expected_prior_trade_dates"]
+            if len(expected) != 20 or len(set(expected)) != 20 or expected != sorted(expected):
+                raise ValueError("comparison dates")
+            if any(date.fromisoformat(day) >= today or date.fromisoformat(day).weekday() >= 5
+                   for day in expected):
+                raise ValueError("future volume")
+            samples = volume["samples"]
+            if len(samples) != 20 or sorted(x["trade_date"] for x in samples) != expected:
+                raise ValueError("comparison population")
+            total = Decimal(0)
+            for sample in samples:
+                _ref(sample["source_ref"])
+                if (sample["elapsed_minutes"] != elapsed or sample["complete"] is not True
+                        or sample["regular"] is not True):
+                    raise ValueError("unmatched volume")
+                total += _num(sample["cumulative_volume"])
+            if not total:
+                return result("MISSING_VOLUME_DENOMINATOR", evidence_status="MISSING")
+            if _num(volume["cumulative_volume"]) / (total / 20) < Decimal("1.5"):
+                return result("VOLUME_NOT_CONFIRMED", evidence_status="CONDITION_NOT_MET")
     except KeyError:
         return result("MISSING_ADD_EVIDENCE", evidence_status="MISSING")
     except (TypeError, ValueError, AttributeError):
         return result("ADD_EVIDENCE_REJECTED")
     pivot = _num(plan["setup"]["pivot"])
+    entry = _num(plan["entry_reference"])
     closing = _num(bars[-1]["close"])
-    if not all(pivot <= p <= pivot * Decimal("1.05") for p in (closing, price)):
-        return result("OUTSIDE_BUY_BAND")
-    nominal = Decimal(".5")
     persistent = len(bars) == 2 and all(_num(b["close"]) > pivot for b in bars)
-    if deployed and persistent:
-        if min(closing, price) >= pivot * Decimal("1.04"):
-            nominal = Decimal(1)
-        elif min(closing, price) >= pivot * Decimal("1.02"):
-            nominal = Decimal(".8")
-    if deployed and (price <= _num(plan["entry_reference"]) or price * units <= remaining + cost):
+    if v2 and deployed:
+        # B3 ladder is relative to the frozen entry and adds stop above +10%.
+        if not all(pivot <= p <= entry * Decimal("1.10") for p in (closing, price)):
+            return result("OUTSIDE_ADD_BAND")
+        initial = _num(plan["initial_nominal"], True)
+        nominal = initial
+        if persistent:
+            if min(closing, price) >= entry * Decimal("1.04"):
+                nominal = Decimal(1)
+            elif min(closing, price) >= entry * Decimal("1.02") and initial < Decimal(".8"):
+                nominal = Decimal(".8")
+    else:
+        if not all(pivot <= p <= pivot * Decimal("1.05") for p in (closing, price)):
+            return result("OUTSIDE_BUY_BAND")
+        nominal = _num(plan["initial_nominal"], True) if v2 else Decimal(".5")
+        if deployed and persistent:
+            if min(closing, price) >= pivot * Decimal("1.04"):
+                nominal = Decimal(1)
+            elif min(closing, price) >= pivot * Decimal("1.02"):
+                nominal = Decimal(".8")
+    if deployed and (price <= entry or price * units <= remaining + cost):
         return result("NOT_PROFITABLE")
     if nominal <= deployed:
         return result("TARGET_ALREADY_REACHED")

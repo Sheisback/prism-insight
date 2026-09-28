@@ -85,7 +85,7 @@ def _validate_campaign(campaign):
                                  initial_stop=plan["initial_stop"],
                                  source_decision_ref=plan["source_decision_ref"],
                                  created_at=tick["occurred_at"], setup=plan["setup"],
-                                 entry_eligible=True)
+                                 entry_eligible=True, policy_version=plan["policy_version"])
         probe = evaluate_target(probe_plan, facts, now=tick["occurred_at"],
                                 cumulative_allocation=0, remaining_allocation=0,
                                 normalized_units=0, remaining_entry_cost=0,
@@ -110,7 +110,7 @@ def _run(campaign, bps, directory):
                        initial_stop=original["initial_stop"],
                        source_decision_ref=original["source_decision_ref"],
                        created_at=original["created_at"], setup=original["setup"],
-                       entry_eligible=True, fee_bps=bps)
+                       entry_eligible=True, fee_bps=bps, policy_version=original["policy_version"])
     ledger = StrategyLedger(Path(directory) / f"{bps}.sqlite")
     fee = str(Decimal(bps) / 10000)
     for arm, target in (("baseline", 100), ("adaptive", 10)):

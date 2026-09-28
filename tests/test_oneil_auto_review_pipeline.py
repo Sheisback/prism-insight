@@ -11,6 +11,7 @@ from prism_core.oneil_adaptive_policy import create_plan, evaluate_target
 from prism_core.oneil_setup_inputs import build_setup_input
 from test_oneil_auto_review import AS_OF, valid_snapshot
 from test_oneil_adaptive_policy import evidence
+from test_oneil_adaptive_v2 import trend
 from tools.build_oneil_auto_review import build_packet, financial_frame_records
 
 
@@ -31,6 +32,7 @@ def test_automatic_review_to_setup_to_target_without_manual_approval():
         entry_eligible=True,
     )
     facts = json.loads(json.dumps(evidence()).replace("2026-09-25", "2026-09-28"))
+    facts["contract_version"] = "oneil-adaptive-evidence-v2"
     facts["price_basis_ref"] = snapshot["price_basis_ref"]
     facts["quote"]["price"] = str(pivot * Decimal("1.04"))
     facts["bars"][0]["close"] = str(pivot * Decimal("1.02"))
@@ -39,6 +41,7 @@ def test_automatic_review_to_setup_to_target_without_manual_approval():
     facts["volume"]["expected_prior_trade_dates"] = dates
     for sample, day in zip(facts["volume"]["samples"], dates):
         sample["trade_date"] = day
+    facts["trend"] = dict(trend(as_of="2026-09-25T20:00:00Z"), trade_dates=dates)
     decision = evaluate_target(
         plan,
         facts,

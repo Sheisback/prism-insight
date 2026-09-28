@@ -9,7 +9,11 @@ from prism_core.oneil_adaptive_policy import _hash, _num, _time
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PATH = ROOT / "runtime/oneil-execution.json"
-POLICY = "oneil-adaptive-v1"
+POLICY = "oneil-adaptive-v2"
+# Operator files written before v2 still name v1. They remain valid for OFF and
+# SHADOW (new SHADOW campaigns freeze v2 plans regardless); LIVE requires v2 in
+# both the configuration and its explicit approval record.
+LEGACY_POLICIES = frozenset({"oneil-adaptive-v1"})
 ARM = "INITIAL_POLICY_50"
 
 
@@ -45,7 +49,8 @@ def validate(config, *, now=None, check_approval=True):
         raise ConfigurationError("unknown configuration fields")
     value = {**defaults(), **config}
     if (value["config_version"] != 1 or value["mode"] not in {"OFF", "SHADOW", "LIVE"}
-            or value["policy"] != POLICY or value["initial_arm"] != ARM):
+            or value["policy"] not in {POLICY, *LEGACY_POLICIES} or value["initial_arm"] != ARM
+            or (value["mode"] == "LIVE" and value["policy"] != POLICY)):
         raise ConfigurationError("unsupported mode or policy")
     accounts = value["accounts"]
     if (not isinstance(accounts, list) or len(accounts) > 10

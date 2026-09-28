@@ -3,11 +3,12 @@
 from copy import deepcopy
 
 from prism_core.oneil_adaptive_policy import (
-    EVIDENCE_VERSION,
+    VERSION,
     _hash,
     _num,
     _time,
     _validate,
+    evidence_version,
 )
 
 
@@ -82,7 +83,7 @@ def assemble_evidence(
         ):
             return fail("CURRENT_SOURCE_MISSING")
         facts = dict(
-            contract_version=EVIDENCE_VERSION,
+            contract_version=evidence_version(plan),
             symbol=plan["symbol"],
             source=source,
             price_basis_ref=plan["setup"]["price_basis_ref"],
@@ -96,6 +97,9 @@ def assemble_evidence(
                 for k in ("bars", "volume", "market_window")
             }
         )
+        if plan["policy_version"] == VERSION:
+            # Absent trend stays absent; the policy blocks adds, not the first entry.
+            facts["trend"] = deepcopy(intraday_input.get("trend"))
         return dict(
             result,
             status="OK",

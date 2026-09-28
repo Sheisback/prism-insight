@@ -13,6 +13,15 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, localcontext
 from pathlib import Path
 
+# Adaptive paired-SHADOW owners. Each version guards only its own cohort prefix;
+# v1 books remain readable and v2 is accepted exactly like v1 (SHADOW only).
+ADAPTIVE_OWNERS = ("oneil-adaptive-v1", "oneil-adaptive-v2")
+
+
+def _adaptive_owner(book):
+    cohort = str(book.get("cohort") or "")
+    return next((owner for owner in ADAPTIVE_OWNERS if cohort.startswith(owner + ":")), None)
+
 
 class LedgerError(ValueError):
     """Invalid input, conflicting event, or policy/accounting violation."""
@@ -237,8 +246,8 @@ class StrategyLedger:
         fee_rate, slippage_rate = Decimal(payload["fee_rate"]), Decimal(payload["slippage_rate"])
         policy_version, reason = payload["policy_version"], payload["reason"]
         book = self._get(db, "books", book_id)
-        if str(book.get("cohort") or "").startswith("oneil-adaptive-v1:") and (
-                owner != "oneil-adaptive-v1" or book["mode"] != "SHADOW"):
+        adaptive_owner = _adaptive_owner(book)
+        if adaptive_owner and (owner != adaptive_owner or book["mode"] != "SHADOW"):
             raise LedgerError("adaptive-owned book rejects direct target")
         if book.get("cohort") == "scenario-shadow-v1" and (
                 owner != "scenario-shadow-v1" or book["mode"] != "SHADOW"):
@@ -283,8 +292,8 @@ class StrategyLedger:
             Decimal(campaign["remaining_allocation"]),
         )
         pending_adaptive = (
-            owner == "oneil-adaptive-v1"
-            and str(book.get("cohort") or "").startswith("oneil-adaptive-v1:")
+            adaptive_owner is not None
+            and owner == adaptive_owner
             and book["mode"] == "SHADOW"
             and (campaign.get("oneil_runtime") or {}).get("initial_arm") == "INITIAL_POLICY_50"
             and (campaign.get("oneil_runtime") or {}).get("closed") is False
@@ -540,8 +549,8 @@ class StrategyLedger:
         campaign = self._get(db, "campaigns", campaign_id)
         book_id = campaign["book_id"]
         book = self._get(db, "books", book_id)
-        if str(book.get("cohort") or "").startswith("oneil-adaptive-v1:") and (
-                owner != "oneil-adaptive-v1" or book["mode"] != "SHADOW"):
+        adaptive_owner = _adaptive_owner(book)
+        if adaptive_owner and (owner != adaptive_owner or book["mode"] != "SHADOW"):
             raise LedgerError("adaptive-owned book rejects direct sell")
         if book.get("cohort") == "scenario-shadow-v1" and (
                 owner != "scenario-shadow-v1" or book["mode"] != "SHADOW"):
@@ -621,7 +630,7 @@ class StrategyLedger:
         with self._transaction() as db:
             campaign = self._get(db, "campaigns", campaign_id)
             book = self._get(db, "books", campaign["book_id"])
-            if str(book.get("cohort") or "").startswith("oneil-adaptive-v1:"):
+            if _adaptive_owner(book):
                 raise LedgerError("adaptive-owned book rejects direct mark")
             applied = self._event(db, event_id, payload)
             if applied:

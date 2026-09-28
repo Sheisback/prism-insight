@@ -49,7 +49,7 @@ def build_intraday_inputs(*, symbol, bars, calendar, as_of, retrieved_at,
               "as_of": as_of, "retrieved_at": retrieved_at,
               "retrieval_started_at": retrieval_started_at,
               "status": "INVALID", "reason_codes": [], "bars": [],
-              "volume": None, "market_window": None,
+              "volume": None, "market_window": None, "trend": None,
               "usable_for_prospective": False, "input_hash": None}
 
     def fail(code, status="INVALID"):
@@ -103,6 +103,7 @@ def build_intraday_inputs(*, symbol, bars, calendar, as_of, retrieved_at,
                     for index in range(int(elapsed / STEP))}
         period_by_date = {day: (start, end) for day, start, end in periods}
         normalized = {}
+        session_closes = {}
         action_unknown = False
         action_present = False
         for raw in bars:
@@ -121,6 +122,16 @@ def build_intraday_inputs(*, symbol, bars, calendar, as_of, retrieved_at,
                     action_unknown = True
                 elif _number(raw[field]):
                     action_present = True
+            day = stamp.astimezone(NY).date().isoformat()
+            if day != current_day and stamp + STEP == period[1]:
+                # Final regular bar of a completed prior session = its daily close.
+                # A duplicate/invalid one only removes trend evidence, never the
+                # existing matched-prefix input used by the first entry.
+                try:
+                    close = _number(raw["close"], True)
+                except (KeyError, ValueError, TypeError, InvalidOperation):
+                    close = None
+                session_closes[day] = None if day in session_closes else close
             if stamp not in expected:
                 continue
             if stamp in normalized:
@@ -161,13 +172,23 @@ def build_intraday_inputs(*, symbol, bars, calendar, as_of, retrieved_at,
         result["market_window"] = {"trade_date": current_day, "open_at": opened.isoformat(),
                                    "close_at": closed.isoformat(), "verified": True,
                                    "source_ref": calendar_ref}
+        # Completed-daily trend for adaptive adds: the 20 sessions strictly before
+        # the current trade date. Any missing close leaves it absent, never true.
+        prior = periods[:-1]
+        if all(session_closes.get(day) is not None for day, _, _ in prior):
+            result["trend"] = {"basis": "COMPLETED_DAILY_CLOSE_SMA20",
+                               "as_of": prior[-1][2].isoformat(),
+                               "trade_dates": [day for day, _, _ in prior],
+                               "closes": [str(session_closes[day]) for day, _, _ in prior],
+                               "calendar_ref": calendar_ref, "source_ref": source_ref}
         payload = {"symbol": symbol, "kind": kind, "source_ref": source_ref,
                    "price_basis_ref": price_basis_ref, "calendar_ref": calendar_ref,
                    "periods": [(day, start.isoformat(), end.isoformat())
                                for day, start, end in periods],
                    "as_of": now.isoformat(), "retrieved_at": retrieved.isoformat(),
                    "retrieval_started_at": retrieval_started_at,
-                   "bars": {key.isoformat(): value for key, value in sorted(normalized.items())}}
+                   "bars": {key.isoformat(): value for key, value in sorted(normalized.items())},
+                   "trend": result["trend"]}
         result["input_hash"] = hashlib.sha256(json.dumps(
             payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
         result.update(status="OK", usable_for_prospective=kind == "LIVE_CAPTURE")

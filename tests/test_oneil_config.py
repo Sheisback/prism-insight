@@ -23,7 +23,7 @@ def test_live_requires_explicit_policy_bound_unexpired_approval():
     value = dict(config(), mode="LIVE")
     with pytest.raises(ConfigurationError, match="APPROVAL"):
         validate(value)
-    approval = dict(policy="oneil-adaptive-v1", initial_arm="INITIAL_POLICY_50",
+    approval = dict(policy="oneil-adaptive-v2", initial_arm="INITIAL_POLICY_50",
                     scope="NEW_CAMPAIGNS_ONLY", accounts=["primary"], approved_by="test-operator",
                     approved_at="2026-09-27T00:00:00Z", expires_at="2026-09-28T00:00:00Z",
                     max_unit_budget_usd="1000", implementation_hash=implementation_hash())

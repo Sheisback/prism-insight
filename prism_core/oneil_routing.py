@@ -215,7 +215,7 @@ async def _materialize_initial_unlocked(agent, execution, reserved):
                 raise ValueError("EXISTING_STRATEGY_NOT_ADOPTED")
             return execution.link_strategy_position(campaign["campaign_id"], f"legacy:US:{row['id']}")
     scenario = deepcopy(context["scenario"])
-    scenario["_oneil_execution"] = dict(owner="oneil-adaptive-v1", campaign_id=campaign["campaign_id"],
+    scenario["_oneil_execution"] = dict(owner=campaign["plan"]["policy_version"], campaign_id=campaign["campaign_id"],
                                          position_id=campaign["position_id"], initial_arm="INITIAL_POLICY_50")
     result = await agent._buy_stock_with_position(campaign["symbol"], context.get("company_name", campaign["symbol"]),
         float(reserved["intent"].limit_price), scenario, context.get("rank_change_msg", ""), is_add=False)

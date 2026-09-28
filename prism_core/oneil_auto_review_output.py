@@ -33,6 +33,18 @@ def build_review_bundle(snapshot, *, reviewed_at):
         text += "Metrics: " + json.dumps(component["metrics"], sort_keys=True) + "\n"
         text += "Reasons: " + json.dumps(component["reason_codes"]) + "\n"
         spans[name] = dict(start=start, end=len(text), sha256=text_hash(text[start:]))
+    volatility = assessment["volatility"]
+    start = len(text)
+    text += f"\n## volatility\nStatus: {volatility['status']}\n"
+    atr_span = None
+    if volatility["status"] == PASS:
+        text += "ATR14 USD: "
+        atr_start = len(text)
+        text += volatility["atr14"]
+        atr_span = dict(start=atr_start, end=len(text), sha256=text_hash(volatility["atr14"]))
+        text += f"\nLast completed session: {volatility['last_trade_date']}\n"
+    text += "Reasons: " + json.dumps(volatility["reason_codes"]) + "\n"
+    volatility_span = dict(start=start, end=len(text), sha256=text_hash(text[start:]))
     review = dict(
         contract_version="oneil-setup-review-v1",
         market="US",
@@ -61,6 +73,16 @@ def build_review_bundle(snapshot, *, reviewed_at):
         )
     if pivot_span:
         review["base"].update(pivot=assessment["base"]["pivot"], pivot_span=pivot_span)
+    review["volatility"] = dict(
+        status="CONFIRMED" if atr_span else "MISSING",
+        criteria_ref=VERSION + ":volatility",
+        data_as_of=reviewed_at,
+        evidence_spans=[volatility_span],
+    )
+    if atr_span:
+        review["volatility"].update(atr14=volatility["atr14"], atr14_span=atr_span,
+                                    last_trade_date=volatility["last_trade_date"],
+                                    source_ref=volatility["source_ref"])
     setup = build_setup_input(
         report_text=text,
         review=review,

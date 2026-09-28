@@ -8,12 +8,15 @@ from decimal import Decimal
 import json
 
 from prism_core.oneil_adaptive_policy import (
-    EVIDENCE_VERSION, _hash, _num, _ref, _time, _validate, evaluate_target,
+    VERSION, VERSIONS, _hash, _num, _ref, _time, _validate, evaluate_target, evidence_version,
 )
 from prism_core.scenario_shadow_policy import _validate_plan
 from prism_core.strategy_ledger import StrategyLedger, LedgerError, _time as ledger_time
 
-OWNER = "oneil-adaptive-v1"
+# New campaigns are owned by the current policy. Each campaign keeps the owner
+# of its frozen plan version, so existing v1 books stay readable and unchanged.
+OWNER = VERSION
+OWNERS = VERSIONS
 
 
 class OneilRuntime:
@@ -25,29 +28,33 @@ class OneilRuntime:
         with self.ledger._transaction() as db:
             for row in db.execute("SELECT data FROM books"):
                 cohort = json.loads(row[0]).get("cohort") or ""
-                if cohort.startswith(OWNER + ":"):
-                    is_fifty = cohort.startswith(OWNER + ":initial-policy-50-v1:")
-                    if is_fifty != (initial_arm == "INITIAL_POLICY_50"):
-                        raise LedgerError("existing initial arm cannot be adopted")
+                for owner in OWNERS:
+                    if cohort.startswith(owner + ":"):
+                        is_fifty = cohort.startswith(owner + ":initial-policy-50-v1:")
+                        if is_fifty != (initial_arm == "INITIAL_POLICY_50"):
+                            raise LedgerError("existing initial arm cannot be adopted")
             self.ledger._event(db, "oneil-runtime:configuration", dict(initial_arm=initial_arm))
 
-    def campaign_id_for_position(self, position_id):
-        identity = [OWNER, _ref(position_id)]
+    def campaign_id_for_position(self, position_id, policy_version=OWNER):
+        if policy_version not in OWNERS:
+            raise LedgerError("registered adaptive policy version required")
+        identity = [policy_version, _ref(position_id)]
         if self.initial_arm == "INITIAL_POLICY_50":
             identity.append("initial-policy-50-v1")
         return _hash(identity)
 
-    def _cohort(self, cid, arm):
+    def _cohort(self, cid, arm, owner):
         variant = "initial-policy-50-v1:" if self.initial_arm == "INITIAL_POLICY_50" else ""
-        return OWNER + ":" + variant + cid + ":" + arm
+        return owner + ":" + variant + cid + ":" + arm
 
     def _target(self, db, event, cid, arm, plan, target, price, at):
+        owner = plan["policy_version"]
         return self.ledger._apply_target_in_transaction(db, event, dict(
             kind="target", book_id=cid + ":" + arm, campaign_id=cid + ":" + arm,
             symbol=plan["symbol"], target_pct=str(target), price=str(price),
-            occurred_at=ledger_time(at), policy_version=OWNER, reason=arm,
+            occurred_at=ledger_time(at), policy_version=owner, reason=arm,
             regime="paired_shadow", source_hash=plan["plan_hash"],
-            fee_rate=plan["fee_rate"] if target else "0", slippage_rate="0"), owner=OWNER, notify=False)
+            fee_rate=plan["fee_rate"] if target else "0", slippage_rate="0"), owner=owner, notify=False)
 
     def open_capture(self, capture):
         capture = deepcopy(capture)
@@ -72,12 +79,13 @@ class OneilRuntime:
                 or _num(original["entry_price"]) != _num(plan["entry_reference"])
                 or _num(original["initial_stop"]) != _num(plan["initial_stop"])):
             raise LedgerError("capture identity mismatch")
-        cid = self.campaign_id_for_position(capture["position_id"])
+        owner = plan["policy_version"]
+        cid = self.campaign_id_for_position(capture["position_id"], owner)
         # Provisioning is idempotent; both positions and their ownership state
         # are opened together in the subsequent single accounting transaction.
         for arm in ("baseline", "adaptive"):
             self.ledger.create_book(cid + ":" + arm, "US", 1,
-                                    cohort=self._cohort(cid, arm), mode="SHADOW")
+                                    cohort=self._cohort(cid, arm, owner), mode="SHADOW")
         with self.ledger._transaction() as db:
             event = cid + ":open"
             if self.ledger._event(db, event, dict(kind="adaptive_open", capture=capture)):
@@ -94,9 +102,12 @@ class OneilRuntime:
 
     def _load(self, db, cid):
         campaign = self.ledger._get(db, "campaigns", cid + ":adaptive")
+        owner = campaign["oneil_runtime"]["plan"]["policy_version"]
+        if owner not in OWNERS:
+            raise LedgerError("registered adaptive policy version required")
         for arm in ("baseline", "adaptive"):
             book = self.ledger._get(db, "books", cid + ":" + arm)
-            if book["mode"] != "SHADOW" or book["cohort"] != self._cohort(cid, arm):
+            if book["mode"] != "SHADOW" or book["cohort"] != self._cohort(cid, arm, owner):
                 raise LedgerError("dedicated paired SHADOW books required")
         return campaign, campaign["oneil_runtime"]
 
@@ -170,7 +181,7 @@ class OneilRuntime:
                 # Preserve protection but do not size from a contradictory stop.
                 regressive_stop = _num(stop["current_stop"], True) < _num(state["current_stop"])
                 state["current_stop"] = str(max(_num(state["current_stop"]), _num(stop["current_stop"], True)))
-            facts = dict(contract_version=EVIDENCE_VERSION, symbol=plan["symbol"],
+            facts = dict(contract_version=evidence_version(plan), symbol=plan["symbol"],
                          price_basis_ref=plan["setup"]["price_basis_ref"], source_ref=event, quote=quote)
             tick = envelope.get("tick")
             valid = envelope.get("status") == "OK" and isinstance(tick, dict) and not regressive_stop
@@ -224,7 +235,7 @@ class OneilRuntime:
                     self.ledger._sell_in_transaction(db, event + ":exit:" + arm, dict(
                         kind="sell", campaign_id=cid + ":" + arm, price=exit_price,
                         occurred_at=ledger_time(exit_at.isoformat()), normalized_units=None,
-                        fee_rate=plan["fee_rate"], slippage_rate="0", source_hash=envelope["record_hash"]), owner=OWNER)
+                        fee_rate=plan["fee_rate"], slippage_rate="0", source_hash=envelope["record_hash"]), owner=plan["policy_version"])
                 state["closed"] = True
             elif decision["action"] == "ADD":
                 action_id = cid + ":add:" + _hash(decision["bar_end"])

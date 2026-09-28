@@ -4,10 +4,13 @@ Source binding verifies bytes/identity/time only. Reviewer authorization and the
 truth of financial/pattern judgments remain external responsibilities.
 """
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 import hashlib
 import json
+from zoneinfo import ZoneInfo
+
+NY = ZoneInfo("America/New_York")
 
 
 def text_hash(value):
@@ -115,6 +118,36 @@ def build_setup_input(
             or pivot != Decimal(str(declared))
         ):
             return result("INVALID", "PIVOT_VALUE_MISMATCH")
+        # ATR14 sizes the frozen plan. Missing volatility evidence never falls
+        # back to a default size; it makes the whole setup unavailable.
+        volatility = review.get("volatility")
+        if not isinstance(volatility, dict) or volatility.get("status") != "CONFIRMED":
+            return result("MISSING", "ATR_EVIDENCE_MISSING")
+        _ref(volatility["criteria_ref"])
+        _ref(volatility["source_ref"])
+        atr_as_of = _time(volatility["data_as_of"])
+        if atr_as_of > reviewed:
+            return result("INVALID", "FUTURE_CLAIM")
+        atr_spans = volatility["evidence_spans"]
+        if not isinstance(atr_spans, list) or not 1 <= len(atr_spans) <= 20:
+            return result("MISSING", "SOURCE_SPAN_MISSING")
+        for span in atr_spans:
+            _span(report_text, span)
+        atr_span = volatility["atr14_span"]
+        atr = Decimal(_span(report_text, atr_span))
+        declared_atr = volatility["atr14"]
+        if (not any(s["start"] <= atr_span["start"] < atr_span["end"] <= s["end"] for s in atr_spans)
+                or isinstance(declared_atr, bool) or not atr.is_finite() or atr <= 0
+                or atr != Decimal(str(declared_atr))):
+            return result("INVALID", "ATR_VALUE_MISMATCH")
+        if not isinstance(volatility["last_trade_date"], str):
+            return result("INVALID", "ATR_SESSION_INVALID")
+        last_trade_date = date.fromisoformat(volatility["last_trade_date"])
+        # Point in time: the 14 sessions end strictly before the plan's New York
+        # date, and the ATR was observed on that same date (no stale sessions).
+        if (last_trade_date >= atr_as_of.astimezone(NY).date()
+                or atr_as_of.astimezone(NY).date() != now.astimezone(NY).date()):
+            return result("MISSING", "ATR_NOT_POINT_IN_TIME")
         review_hash = text_hash(
             json.dumps(review, sort_keys=True, separators=(",", ":"), allow_nan=False)
         )
@@ -127,6 +160,10 @@ def build_setup_input(
             fundamental_leader=True,
             fundamental_source_ref="review:" + review_hash,
             fundamental_as_of=reviewed.isoformat(),
+            atr14=str(atr),
+            atr14_source_ref=volatility["source_ref"],
+            atr14_as_of=atr_as_of.isoformat(),
+            atr14_last_trade_date=last_trade_date.isoformat(),
         )
         # VERIFIED is an approved reviewer attestation, not machine proof of CAN SLIM.
         return result(

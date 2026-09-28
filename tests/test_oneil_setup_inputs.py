@@ -6,7 +6,9 @@ import pytest
 from prism_core.oneil_setup_inputs import build_setup_input, text_hash
 from prism_core.oneil_adaptive_policy import create_plan
 
-TEXT = "Base review: pivot 100, chart evidence reviewed. Growth leadership reviewed with earnings and sales evidence."
+CLAIMS = "Base review: pivot 100, chart evidence reviewed. Growth leadership reviewed with earnings and sales evidence."
+# ATR14 4.666667 on entry 100 gives stop proxy .07, so the v2 initial size is .5.
+TEXT = CLAIMS + " Volatility: ATR14 4.666667 through 2026-09-24."
 
 
 def span(a, b):
@@ -39,7 +41,17 @@ def review():
             status="CONFIRMED",
             criteria_ref="growth-review",
             data_as_of="2026-09-24T20:00:00Z",
-            evidence_spans=[span(48, len(TEXT))],
+            evidence_spans=[span(48, len(CLAIMS))],
+        ),
+        volatility=dict(
+            status="CONFIRMED",
+            criteria_ref="atr14-daily-v1",
+            data_as_of="2026-09-25T13:29:00Z",
+            atr14="4.666667",
+            atr14_span=span(len(CLAIMS) + 19, len(CLAIMS) + 27),
+            last_trade_date="2026-09-24",
+            source_ref="daily-prices",
+            evidence_spans=[span(len(CLAIMS) + 1, len(TEXT))],
         ),
     )
 
