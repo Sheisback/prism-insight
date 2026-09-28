@@ -16,8 +16,12 @@ def _bars(rows, start=date(2026, 1, 1)):
     return out
 
 
-def _series():
-    """Uptrend, base under a 110 pivot, a skip decision inside the base, breakout, then a run-up."""
+def _series(pullback=False):
+    """Uptrend, base under a 110 pivot, a skip decision inside the base, breakout, then a run-up.
+
+    pullback=True: after the breakout (index 73) four sessions sag back to the 110 support and
+    index 78 bounces over the prior high on volume, before the run-up.
+    """
     rows = [(80 + i * 0.5, 80.5 + i * 0.5, 79.5 + i * 0.5, 80 + i * 0.5, 1000) for i in range(55)]
     rows.append((108, 110, 107, 109, 1500))
     for j in range(15):
@@ -26,6 +30,9 @@ def _series():
     rows.append((106, 106.8, 105.5, 106.5, 900))                  # decision day (index 71)
     rows.append((106.5, 107.5, 106, 107, 900))
     rows.append((107.5, 112, 107, 111, 1500))                     # breakout: high > 110, volume >= avg
+    if pullback:
+        rows += [(110.5, 111, 109.8, 110.2, 900)] * 4             # pullback into the 110 support
+        rows.append((110.4, 112.5, 110.2, 112, 1500))             # bounce over yesterday's high
     rows += [(111 + k * 0.3, 112 + k * 0.3, 110.5 + k * 0.3, 111.5 + k * 0.3, 1000) for k in range(70)]
     return _bars(rows)
 
@@ -163,9 +170,9 @@ def test_archive_lookup_is_strictly_before_the_trigger_day(tmp_path):
     assert report.read_text() == "old" and "_20260701_" in report.name
 
 
-def _forward_setup(tmp_path, monkeypatch):
+def _forward_setup(tmp_path, monkeypatch, bars=None):
     """Shadow starts before the breakout, so the trigger is forward evidence."""
-    bars = _series()
+    bars = bars or _series()
     tmp_path.mkdir(parents=True, exist_ok=True)
     db = tmp_path / "t.sqlite"
     _db(db, bars)
@@ -203,7 +210,7 @@ def test_forward_trigger_is_rechecked_once_with_frozen_inputs(tmp_path, monkeypa
     assert system == "SYS" and "📏 트리거 시점 가격 수준" in user and "REPORT" in user and "게이트 차단" in user
     assert "1차 지지 104.00 / 2차 지지 102.00 / 1차 저항 110.00 / 2차 저항 115.00" in user
     frozen = json.loads((root / "reentry_v2_recheck_inputs_kr.jsonl").read_text())
-    assert frozen["contract"] == "reentry_v2_recheck_input_v3"
+    assert frozen["contract"] == "reentry_v2_recheck_input_v4"
     assert frozen["original"]["key_levels"]["secondary_resistance"] == 115.0
     result = json.loads((root / "reentry_v2_recheck_results_kr.jsonl").read_text())
     assert result["approved"] is True and result["buy_score"] == 8 and result["report_stale"] is False
@@ -281,3 +288,34 @@ def test_existing_watch_backfills_key_levels_from_todays_row(tmp_path):
               "secondary_resistance": 115.0}
     state, _ = V2.advance(state, [dict(row, key_levels=levels)], {}, bars[72]["date"], "KR", archive_db=None)
     assert state["watches"][0]["row"]["key_levels"] == levels and len(state["watches"]) == 1
+
+
+def test_declined_breakout_keeps_watching_and_rechecks_the_pullback_bounce(tmp_path, monkeypatch):
+    bars, root, sent, run = _forward_setup(tmp_path, monkeypatch, bars=_series(pullback=True))
+    calls = []
+    replies = iter(['{"decision": "미진입", "buy_score": 6, "rejection_reason": "추격, 110 눌림 대기", '
+                    '"trading_scenarios": {"key_levels": {"primary_support": 110}}}',
+                    '{"decision": "진입", "buy_score": 8}'])
+
+    async def llm(system, user):
+        calls.append(user)
+        return next(replies), {"model": "m", "reasoning_effort": "high", "latency_s": 1.0}
+
+    run(72, llm_recheck=True, llm=llm)
+    assert run(73, llm_recheck=True, llm=llm)["recheck_status"] == {"OK": 1}          # breakout declined
+    state = json.loads((root / "reentry_v2_state_kr.json").read_text())
+    watch = state["watches"][0]
+    assert watch["status"] == "WATCHING" and watch["declined"][0]["support"] == 110.0
+    assert "trigger_event_id" not in watch
+    assert run(76, llm_recheck=True, llm=llm)["llm_calls"] == 0                        # cooldown, no bounce yet
+    summary = run(78, llm_recheck=True, llm=llm)
+    assert summary["new_triggers"] == 1 and summary["recheck_status"] == {"OK": 1}
+    frozen = [json.loads(line) for line in (root / "reentry_v2_recheck_inputs_kr.jsonl").read_text().splitlines()]
+    assert [f["trigger"] for f in frozen] == ["INTRADAY_BREAKOUT", "PULLBACK_BOUNCE"]
+    assert frozen[1]["declined"][0]["reason"].startswith("추격") and frozen[1]["levels"]["support_pivot"] == 110.0
+    assert "이전 재점검 (미진입, 같은 감시)" in calls[1] and "눌림 반등: 지지선 110.00" in calls[1]
+    watch = json.loads((root / "reentry_v2_state_kr.json").read_text())["watches"][0]
+    assert watch["status"] == "TRIGGERED" and watch["trigger"] == "PULLBACK_BOUNCE"
+    assert watch["recheck"]["approved"] is True and "FIRST_TRIGGER" in watch["controls"]
+    rechecks = [kw["attributes"] for n, kw in sent if n == "reentry_v2.shadow_recheck"]
+    assert [a["declined_before"] for a in rechecks] == [0, 1]

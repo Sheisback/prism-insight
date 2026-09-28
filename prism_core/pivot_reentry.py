@@ -25,6 +25,12 @@ STOP_CAP = 0.07
 BREAKEVEN_AFTER = 0.10
 HOLD_BARS = 40
 WATCH_BARS = 30
+# Second chance after a declined recheck (pre-registered 2026-09-28, before any replay).
+REJECT_COOLDOWN = 3         # sessions after a declined trigger before the next one may fire
+PULLBACK_ZONE = 0.03        # a low within 3% above the support counts as the pullback
+PULLBACK_NEAR = 0.05        # yesterday's close still within 5% above the support
+PULLBACK_MAX_ENTRY = 0.08   # no bounce entry more than 8% above the support
+INVALIDATE_BELOW = 0.03     # a close 3% under the support ends the watch
 
 
 def _avg(values):
@@ -126,29 +132,72 @@ def simulate(bars, i, entry, *, intraday=True):
             "ret": round(held[-1]["close"] / entry - 1, 6), "bars": HOLD_BARS, "mfe": round(mfe, 6), "mae": round(mae, 6)}
 
 
-def run_watch(bars, start_index, market, *, market_ok=None, watch_bars=WATCH_BARS, exit_fn=None):
-    """Scan a watch from start_index for up to watch_bars sessions; first trigger wins.
+def pullback_bounce(bars, i, support, since):
+    """Second-chance entry after a declined breakout (pre-registered 2026-09-28).
+
+    Pullback: some low since the declined trigger came within PULLBACK_ZONE above the
+    support and yesterday still closed near it (<= PULLBACK_NEAR above). Bounce: today's
+    high clears yesterday's high on >= average volume. Entry = max(open, yesterday's high),
+    skipped when that is more than PULLBACK_MAX_ENTRY above the support (chasing).
+    """
+    prev, today = bars[i - 1], bars[i]
+    touched = any(b["low"] <= support * (1 + PULLBACK_ZONE) for b in bars[since + 1:i])
+    if not touched or prev["close"] > support * (1 + PULLBACK_NEAR):
+        return None
+    vol_avg = avg_volume(bars, i)
+    if not (today["high"] > prev["high"] and vol_avg and today["volume"] >= INTRADAY_VOLUME * vol_avg):
+        return None
+    entry = max(today["open"], prev["high"])
+    if entry > support * (1 + PULLBACK_MAX_ENTRY):
+        return None
+    return {"date": today["date"], "status": "TRIGGERED", "trigger": "PULLBACK_BOUNCE", "entry": entry,
+            "pivot": support, "support": support}
+
+
+def run_watch(bars, start_index, market, *, market_ok=None, watch_bars=WATCH_BARS, exit_fn=None, rejections=None):
+    """Scan a watch from start_index for up to watch_bars sessions; the first trigger not declined wins.
 
     market_ok(date) -> bool|None gates triggers on the previous session's market state.
+    rejections: [{"date", "support"}] triggers the recheck declined. The watch goes on past
+    them: after REJECT_COOLDOWN sessions a re-breakout or a pullback bounce off the support
+    (declined recheck's own support, else the broken pivot) triggers again; a close more
+    than INVALIDATE_BELOW under the support ends the watch as INVALIDATED. Without
+    rejections the result is the first trigger, as before.
     Also returns the READY_OPEN timing control (open of the first READY day).
     """
+    declined = {r["date"]: r for r in (rejections or [])}
     ready_control = None
-    events = {"chase_skipped": 0, "market_blocked": 0}
+    events = {"chase_skipped": 0, "market_blocked": 0, "declined": 0}
+    support = last_decline = None
     for i in range(start_index, min(len(bars), start_index + watch_bars)):
         if i < 56:
             continue
+        if support is not None and bars[i - 1]["close"] < support * (1 - INVALIDATE_BELOW):
+            return {"status": "INVALIDATED", "index": i - 1, "ready_control": ready_control, "events": events}
         day = evaluate_day(bars, i, market)
         if day["status"] == "CHASE_SKIPPED":
             events["chase_skipped"] += 1
         if day["status"] in {"READY", "TRIGGERED"} and ready_control is None:
             ready_control = {"index": i, "entry": bars[i]["open"]}
-        if day["status"] != "TRIGGERED":
+        cooling = last_decline is not None and i <= last_decline + REJECT_COOLDOWN
+        if day["status"] != "TRIGGERED" and support is not None and not cooling:
+            day = pullback_bounce(bars, i, support, last_decline) or day
+        if day["status"] != "TRIGGERED" or (cooling and bars[i]["date"] not in declined):
             continue
         gate = market_ok(bars[i - 1]["date"]) if market_ok else True
         if gate is False:
             events["market_blocked"] += 1
             continue
-        trade = (exit_fn or simulate)(bars, i, day["entry"], intraday=day["trigger"] == "INTRADAY_BREAKOUT")
+        if bars[i]["date"] in declined:
+            events["declined"] += 1
+            given = declined[bars[i]["date"]].get("support")
+            if given and given < day["entry"]:
+                support = given
+            elif support is None or day["trigger"] != "PULLBACK_BOUNCE":
+                support = day["pivot"]
+            last_decline = i
+            continue
+        trade = (exit_fn or simulate)(bars, i, day["entry"], intraday=day["trigger"] != "FOLLOW_THROUGH")
         return {"status": "TRIGGERED", "day": day, "index": i, "trade": trade, "ready_control": ready_control,
                 "events": events, "market_ok": gate}
     ended = min(len(bars), start_index + watch_bars) - 1
