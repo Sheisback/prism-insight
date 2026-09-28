@@ -4830,6 +4830,8 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
                 logger.info("[portfolio-dedup] US portfolio summary skipped (sent within debounce window)")
 
             from messaging.korean_trading_message import render_korean_trading_message
+            from prism_core.data_vendor_redaction import redact_data_vendor_names
+            self.message_queue = [redact_data_vendor_names(message, language) for message in self.message_queue]
             if language == "ko":
                 self.message_queue = [render_korean_trading_message(message) for message in self.message_queue]
             self.last_batch_messages = [

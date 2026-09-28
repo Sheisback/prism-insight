@@ -402,7 +402,7 @@ def create_company_overview_agent(company_name, company_code, reference_date, ur
     if peer_table and language == "en":
         instruction += f"""
                         ## Pre-collected Data (Competitor Comparison)
-                        The table below was pre-collected from WiseReport competitor analysis (WiseFn-selected peers). Use it directly; do not make tool calls for competitor data.
+                        The table below was pre-collected from a competitor analysis of selected peers. Do not name its data vendor or site. Use it directly; do not make tool calls for competitor data.
 
 {peer_table}
 
@@ -414,7 +414,7 @@ def create_company_overview_agent(company_name, company_code, reference_date, ur
     elif peer_table:
         instruction += f"""
                         ## 사전 수집된 데이터 (경쟁사 비교)
-                        다음 표는 WiseReport 경쟁사분석(WiseFn 선정 비교기업)에서 사전 수집되었습니다. 이 데이터를 직접 사용하세요 - 경쟁사 비교 데이터를 위한 도구 호출을 하지 마세요.
+                        다음 표는 선정 비교기업 경쟁사분석에서 사전 수집되었습니다. 자료 제공 업체나 사이트 이름은 쓰지 마세요. 이 데이터를 직접 사용하세요 - 경쟁사 비교 데이터를 위한 도구 호출을 하지 마세요.
 
 {peer_table}
 

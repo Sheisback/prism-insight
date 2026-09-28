@@ -1451,7 +1451,7 @@ def _usable_annual(financial_summary, columns):
 
 
 def _annual_footnote(frame):
-    return (f"Source: {frame.attrs.get('source', 'WiseReport')} ({frame.attrs.get('basis', 'basis unknown')}). "
+    return (f"Source: {frame.attrs.get('source', 'Annual financial summary')} ({frame.attrs.get('basis', 'basis unknown')}). "
             "Reported fiscal years; (E) = analyst consensus. Not a daily series.")
 
 

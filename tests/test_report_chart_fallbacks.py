@@ -104,7 +104,7 @@ def test_annual_charts_render_from_reported_years(summary, factory):
     fig = getattr(stock_chart, factory)("252990", company_name="샘씨엔에스", financial_summary=summary)
     assert fig is not None
     text = " ".join(t.get_text() for t in fig.texts)
-    assert "WiseReport" in text and "(E)" in text
+    assert "Annual financial summary" in text and "(E)" in text and "WiseReport" not in text
     stock_chart.plt.close(fig)
 
 

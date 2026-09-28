@@ -3,6 +3,7 @@
 import re
 
 from prism_core.competitive_evidence import plain_evidence_fields
+from prism_core.data_vendor_redaction import redact_data_vendor_names
 
 _EVIDENCE_LABELS = {
     "field": ("점검 항목", "Check"), "type": ("비교 주제", "Topic"),
@@ -147,6 +148,8 @@ def report_narrative_contract(language="ko"):
 최신 가격 자체가 없으면 최근 확인된 가격의 실제 날짜를 명시하세요. 과거 가격이나 장중 가격을
 오늘의 종가로 바꾸어 부르거나 누락된 값을 만들어 내면 안 됩니다. 출처·날짜·단위·회계 기준과
 판단에 중요한 불확실성은 유지하세요. 반복되는 자료 한계는 묶어서 설명하되 수집 실패를 숨기지 마세요.
+조회에 사용한 증권정보 사이트·데이터 제공 업체의 이름과 URL은 쓰지 말고 '기업 재무자료', '컨센서스 자료'처럼
+자료 종류로 표기하세요. 공시·언론 기사 출처는 기존대로 유지합니다.
 이 표현 규칙은 수치, 매매 조건, 위험 한도나 근거의 신뢰도를 변경하지 않습니다.
 """
     return """
@@ -158,6 +161,8 @@ as an observation at its actual time; if finality is unverified, say it may diff
 If the latest quote is missing, date the last available observation explicitly. Never relabel historical
 or intraday prices as today's close or invent missing values. Preserve sources, dates, units, accounting
 bases and material uncertainty. Group repetitive limitations without hiding collection failures.
+Do not name the market-data websites or vendors you queried or their URLs; describe the data type instead
+(e.g. company financial data, consensus data). Keep filing and news-article sources as before.
 These style rules do not change numbers, trading conditions, risk limits or evidence confidence.
 """
 
@@ -165,4 +170,5 @@ These style rules do not change numbers, trading conditions, risk limits or evid
 def humanize_report_status(text, language="ko"):
     """Present known diagnostics only at the final publication boundary."""
     phrase = "마감 확정 여부를 확인하지 못한" if language == "ko" else "final close not yet verified"
-    return _public_evidence_records(text.replace("BAR_FINALITY_UNKNOWN", phrase), language)
+    text = redact_data_vendor_names(text.replace("BAR_FINALITY_UNKNOWN", phrase), language)
+    return _public_evidence_records(text, language)
