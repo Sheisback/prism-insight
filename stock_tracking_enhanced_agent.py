@@ -29,6 +29,7 @@ from cores.llm.openai_responses_llm import OpenAIResponsesLLM as OpenAIAugmented
 # Import core agents
 from cores.agents.trading_agents import create_sell_decision_agent
 from cores.utils import parse_llm_json
+from prism_core.sell_regime_context import kr_live_regime_block
 from prism_core.execution_service import ExecutionService, OrderOutcomeUnknown
 from prism_core.order_intents import OrderIntent
 from observability.trading_context import emit_trading_context
@@ -1494,11 +1495,19 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
             # Dynamic trailing stop threshold: min 1.5%, max 5%, scales with price appreciation
             trailing_stop_threshold_pct = max(1.5, min(5.0, (highest_price - buy_price) / buy_price * 100 * 0.3)) if buy_price > 0 else 3.0
 
+            # LIVE regime computed once per cycle in update_holdings; the deterministic
+            # TIER2 loop trails on the same value, so the AI must not judge it separately.
+            live_regime = getattr(self, "_live_regime_cache", None)
+            live_regime_block = kr_live_regime_block(
+                live_regime, getattr(self, "_live_market_context", None), self.language)
+            logger.info(f"[sell] {ticker} AI sell regime input: {live_regime or 'unavailable'}")
+
             # Prepare prompt based on language (Korean text preserved for language == "ko" blocks)
             if self.language == "ko":
                 prompt_message = f"""
                 다음 보유 종목에 대한 매도 의사결정을 수행해주세요.
 
+                {live_regime_block}
                 ### 종목 기본 정보:
                 - 종목명: {company_name}({ticker})
                 - 매수가: {buy_price:,.0f}원
@@ -1529,6 +1538,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                 prompt_message = f"""
                 Please make a sell decision for the following holding.
 
+                {live_regime_block}
                 ### Stock Basic Information:
                 - Stock: {company_name}({ticker})
                 - Buy Price: {buy_price:,.0f} KRW
