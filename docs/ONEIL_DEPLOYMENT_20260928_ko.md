@@ -144,7 +144,7 @@ Ruff 새 위반0, 컴파일·diff 검사를 통과했다.
   계속 읽는다. 신규 위험(LIVE 매수·증액)만 v2 설정과 v2 승인을 요구한다.
 - LIVE 승인 구현 해시에 ATR·추세·소유권 모듈(`oneil_auto_review*`, `oneil_setup_inputs`,
   `oneil_intraday_inputs`, `oneil_runtime`, `strategy_ledger`, `oneil_input_bridge`)을 포함했다.
-- (L1) 배포는 US 배치 시간(crontab 00:15, 06:30 KST) 밖에서 한다. 배포 전에 작성된 보고서 sidecar는
+- (L1) 배포는 US 배치 시간 밖에서 한다. 운영 db-server crontab은 CRON_TZ=America/New_York 10:15·14:30 ET(서머타임 중 23:15·03:30 KST, 해제 후 00:15·04:30 KST)이며 배치는 약 1시간 걸린다. 배포 전에 작성된 보고서 sidecar는
   volatility 절이 없어 재계산 번들과 일치하지 않으므로, 같은 배치의 캡처에는 적응형 계획이 생기지 않는다.
 - (L7) 연구/레거시 보조 도구는 v2를 완전히 지원하지 않는다. paired replay는 적응형 arm을 10%에서
   시작하므로 v2 틱이 모두 증액이 되어 추세 증거가 필요하고, 만료 후 틱은 스키마 probe를 하지 않는다.
