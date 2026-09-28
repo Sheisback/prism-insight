@@ -106,12 +106,12 @@ def test_shortlist_keeps_names_near_the_floor_and_drops_the_rest(monkeypatch):
     batch = _batch()
     monkeypatch.delenv("US_SCREENING_KIS_SHORTLIST", raising=False)
     tickers = ["BIG", "NEAR", "LOW", "NOTKIS"]
-    frame, diag = _screen({"BIG": 900e6, "NEAR": 30e6, "LOW": 10e6})
+    frame, diag = _screen({"BIG": 900e6, "NEAR": 16e6, "LOW": 10e6})
     with patch.object(batch, "_kis_request", return_value=object()), \
-         patch("cores.kis_us_market_screen.fetch_market_screen", return_value=(frame, diag)), \
+         patch.object(batch, "fetch_market_screen", return_value=(frame, diag)), \
          patch.object(batch, "get_major_tickers", return_value=["BIG"]):
         shortlist, screen, diagnostic = batch._kis_price_shortlist(tickers, 1e9)
-    assert shortlist == ["BIG", "NEAR"]          # 30M >= 0.5 x 50M floor; 10M and non-KIS dropped
+    assert shortlist == ["BIG", "NEAR"]          # 16M >= 0.3 x 50M floor; 10M and non-KIS dropped
     assert diagnostic["status"] == "USED" and diagnostic["index_member_coverage"] == 1.0
     assert screen is frame
 
@@ -121,7 +121,7 @@ def test_screen_missing_index_members_is_rejected(monkeypatch):
     monkeypatch.delenv("US_SCREENING_KIS_SHORTLIST", raising=False)
     frame, diag = _screen({"AAA": 900e6})
     with patch.object(batch, "_kis_request", return_value=object()), \
-         patch("cores.kis_us_market_screen.fetch_market_screen", return_value=(frame, diag)), \
+         patch.object(batch, "fetch_market_screen", return_value=(frame, diag)), \
          patch.object(batch, "get_major_tickers", return_value=["AAA", "AFL", "AJG"]):
         shortlist, screen, diagnostic = batch._kis_price_shortlist(["AAA", "AFL", "AJG"], 1e9)
     assert shortlist is None and screen is None

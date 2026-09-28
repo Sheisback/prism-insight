@@ -47,6 +47,7 @@ from cores.us_surge_detector import (
     enhance_dataframe,
 )
 from cores.rs_rating import oneil_weighted_return, percentile_ratings
+from cores.kis_us_market_screen import fetch_market_screen
 from prism_core.screening_price_evidence import build_screening_price_evidence
 from prism_core.ohlcv_shape import normalize_single_ticker_ohlcv
 
@@ -86,10 +87,11 @@ MIN_TRADING_VALUE = 50_000_000
 MORNING_TARGET_CANDIDATES = 3
 MARKET_CAP_MIN_COVERAGE = 0.8
 # KIS market screen (#822): price only the names KIS already shows near the
-# trading-value floor. KIS quotes are real-time, yfinance's bar can lag, so a
-# half-floor margin keeps every name that can still pass the real floor. The
+# trading-value floor. Measured 2026-09-28 09:50 ET: KIS turnover was a median
+# 0.64x of yfinance's Close*Volume for the same names, so the shortlist keeps a
+# wide margin (30% of the floor); pricing a few more names costs seconds. The
 # screen is used only if it holds the index members it should hold.
-KIS_SHORTLIST_AMOUNT_FRACTION = 0.5
+KIS_SHORTLIST_AMOUNT_FRACTION = 0.3
 KIS_SCREEN_MIN_INDEX_COVERAGE = 0.97
 MARKET_CAP_MAX_WORKERS = 8
 
@@ -1464,7 +1466,6 @@ def _kis_price_shortlist(tickers, minimum):
     """
     if os.getenv('US_SCREENING_KIS_SHORTLIST', 'true').lower() != 'true':
         return None, None, {'status': 'DISABLED'}
-    from cores.kis_us_market_screen import fetch_market_screen
     try:
         screen, diagnostic = fetch_market_screen(_kis_request(), minimum)
     except Exception as exc:
