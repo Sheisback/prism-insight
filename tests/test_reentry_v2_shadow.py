@@ -319,3 +319,14 @@ def test_declined_breakout_keeps_watching_and_rechecks_the_pullback_bounce(tmp_p
     assert watch["recheck"]["approved"] is True and "FIRST_TRIGGER" in watch["controls"]
     rechecks = [kw["attributes"] for n, kw in sent if n == "reentry_v2.shadow_recheck"]
     assert [a["declined_before"] for a in rechecks] == [0, 1]
+
+
+def test_report_images_are_stripped_before_the_recheck():
+    from observability.reentry_recheck_inputs import strip_embedded_images
+    raw = "## 차트\n![가격](data:image/png;base64,iVBORw0KGgo+/AAA==) 본문 Text\n<img src=\"data:image/jpeg;base64,/9j/4AAQ\">"
+    assert strip_embedded_images(raw) == ("## 차트\n![가격]([차트 이미지 생략]) 본문 Text\n"
+                                          "<img src=\"[차트 이미지 생략]\">")
+    item = {"source": "LOCATION_SKIP", "original": {"decided_on": "2026-09-01"}, "facts_text": "F",
+            "report_ref": {"report_date": "2026-08-30", "age_days": 2}}
+    prompt = V2.RC.user_prompt(item, "앞 data:image/png;base64,QUJD 뒤")
+    assert "base64" not in prompt and "앞 [차트 이미지 생략] 뒤" in prompt
