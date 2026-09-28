@@ -51,6 +51,12 @@ def test_decision_rules_and_json_schema_are_byte_preserved(prompt):
     language, text = prompt
     # Reviewed 2026-09-27 decision_inputs appendix is peeled off before the original hashes.
     from prism_core.decision_input_features import prompt_contract, prompt_facts_enabled
+    from messaging.korean_trading_message import korean_rationale_style_contract
+    # Reviewed 2026-09-28 wording-only Korean rationale style appendix is peeled off first.
+    style = korean_rationale_style_contract(language)
+    if style:
+        assert text.count(style) == 1 and text.endswith(style)
+        text = text[:-len(style)]
     appendix = prompt_contract("en" if language == "en" else "ko", market="KR")
     if prompt_facts_enabled():
         assert text.count(appendix) == 1 and text.endswith(appendix)
@@ -70,6 +76,7 @@ def test_decision_rules_and_json_schema_are_byte_preserved(prompt):
 
 def test_sell_factory_matches_reviewed_volume_prompt():
     # Intentional ko/en volume interpretation and KR completed-session guidance update.
+    # 2026-09-28 reviewed: only appends the wording-only Korean rationale style rule.
     source = SOURCE.read_text(encoding="utf-8")
     node = next(n for n in ast.parse(source).body if isinstance(n, ast.FunctionDef) and n.name == "create_sell_decision_agent")
-    assert hashlib.sha256(ast.get_source_segment(source, node).encode()).hexdigest() == "70887f53a73aa2ced68f913e6dec8ca6df5bf707f61f4fd90dc2e21f62485544"
+    assert hashlib.sha256(ast.get_source_segment(source, node).encode()).hexdigest() == "3b07cc595f4066b4002c560bb7bb4bb4eb3625a07725c87084b7f38f0a990af2"

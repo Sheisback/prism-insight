@@ -65,3 +65,47 @@ async def test_real_delivery_boundary_renders_without_mutating_scenario(source_f
     else:
         assert 'NOT_REQUESTED' in agent.last_batch_messages[0][1]
     assert scenario == original
+
+
+def test_internal_terms_do_not_leak_and_particles_follow_the_label():
+    # 2026-09-28 한화솔루션 hold message (raw model rationale before rendering).
+    raw = ('분석 의견: 보고서 2-1·2-2 및 5장 대조 결과 F1·F2·F4는 통과하지만, 실제 ROE는 F3에 미달합니다.\n'
+           'KIS 확정 5세션 합계는 -428,847주입니다. 최신 MCP 장중 관측가격 33,500원을 사용했으며 '
+           'BAR_FINALITY_UNKNOWN입니다. 주입 팩트상 T1·T2는 해당하지 않고 OHLCV를 확인했습니다. '
+           'KR_FLOW_EVIDENCE_V1로 판단했고 MA20로 지지를 봅니다. F2와 T1가 핵심입니다.')
+    text = render_korean_trading_message(raw)
+    for code in ('F1', 'F2', 'F3', 'F4', 'T1', 'T2', 'KIS', 'MCP', 'BAR_FINALITY_UNKNOWN', 'OHLCV',
+                 'KR_FLOW_EVIDENCE_V1', 'MA20'):
+        assert code not in text
+    assert '사업 모델·경쟁력 기준은 통과' in text and '기준는' not in text
+    assert '하락 추세 차단 조건은 해당하지' in text and '조건는' not in text
+    assert '성장성 기준에 미달' in text
+    assert '증권사 확정 5세션' in text and '최신 시세 조회 장중 관측가격 33,500원' in text
+    assert '마감 확정 여부 미확인입니다' in text and '일봉 시세를 확인' in text
+    assert '수급 근거 자료로 판단' in text and '20일 이동평균선으로 지지' in text
+    assert '재무 건전성 기준과 ' in text and '이동평균선 이탈 조건이 핵심' in text
+    for fact in ('2-1·2-2', '-428,847주', '33,500원', 'ROE'):
+        assert fact in text
+    assert render_korean_trading_message(text) == text
+
+
+@pytest.mark.parametrize('raw,expected', [
+    ('수익성 기준는 충족', '수익성 기준은 충족'),       # consonant ending
+    ('필수 재무·사업 기준 4개은 모두', '필수 재무·사업 기준 4개는 모두'),  # vowel ending
+    ('20일 이동평균선로부터', '20일 이동평균선으로부터'),
+    ('시세 조회으로 확인', '시세 조회로 확인'),
+    ('조건은행', '조건은행'),                          # particle-like syllable inside a word
+])
+def test_particle_repair_is_narrow(raw, expected):
+    assert render_korean_trading_message(raw) == expected
+
+
+def test_rationale_style_rule_is_in_korean_trading_prompts():
+    from cores.agents.trading_agents import create_sell_decision_agent, create_trading_scenario_agent
+    from messaging.korean_trading_message import korean_rationale_style_contract
+
+    rule = korean_rationale_style_contract('ko')
+    assert '조사는 바로 앞 단어의 받침에 맞추십시오' in rule and korean_rationale_style_contract('en') == ''
+    assert rule in create_sell_decision_agent('ko').instruction
+    assert rule in create_trading_scenario_agent('ko').instruction
+    assert '판단 근거 문장 작성 규칙' not in create_sell_decision_agent('en').instruction
