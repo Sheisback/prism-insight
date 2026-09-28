@@ -110,3 +110,35 @@ def test_production_exit_ignores_entry_day_low_for_intraday_entries():
     # A close below the stop on day 0 still exits at that close.
     crash = _bars([(110, 111, 100, 101, 900)], start=date(2026, 6, 1))
     assert P.simulate_production(base + crash, i, 110.0, intraday=True)["exit_reason"] == "tier1_day0_close"
+
+
+def _breakout_then(after):
+    rows = _uptrend_then_base(last_close=106.0)
+    rows.append((107, 112, 106.5, 111, 1500))       # breakout over the 110 pivot
+    return _bars(rows + after), len(rows) - 1
+
+
+def test_declined_breakout_then_pullback_bounce_triggers():
+    bars, k = _breakout_then([(110.5, 111, 109.8, 110.2, 900)] * 4 + [(110.4, 112.5, 110.2, 112, 1500)] +
+                             [(112, 113, 111, 112, 1000)] * 5)
+    first = P.run_watch(bars, k, "KR")
+    assert first["status"] == "TRIGGERED" and first["index"] == k
+    again = P.run_watch(bars, k, "KR", rejections=[{"date": bars[k]["date"], "support": None}])
+    assert again["status"] == "TRIGGERED" and again["day"]["trigger"] == "PULLBACK_BOUNCE"
+    assert again["index"] == k + 5 and again["day"]["entry"] == 111 and again["events"]["declined"] == 1
+    # The declined recheck's own support replaces the pivot when it sits below the entry.
+    low = P.run_watch(bars, k, "KR", rejections=[{"date": bars[k]["date"], "support": 105.0}])
+    assert low["status"] == "PENDING"            # 109.8 lows never came within 3% of 105
+
+
+def test_declined_breakout_then_support_break_invalidates():
+    bars, k = _breakout_then([(109, 109.5, 105, 106, 900)] + [(106, 107, 105, 106, 900)] * 5)
+    result = P.run_watch(bars, k, "KR", rejections=[{"date": bars[k]["date"], "support": None}])
+    assert result["status"] == "INVALIDATED" and result["index"] == k + 1
+
+
+def test_bounce_inside_cooldown_waits():
+    bars, k = _breakout_then([(110.5, 111, 109.8, 110.2, 900), (110.4, 112.5, 110.2, 112, 1500)] +
+                             [(110.3, 110.8, 109.9, 110.1, 900)] * 3 + [(110.4, 112.5, 110.2, 112, 1500)])
+    result = P.run_watch(bars, k, "KR", rejections=[{"date": bars[k]["date"], "support": None}])
+    assert result["status"] == "TRIGGERED" and result["index"] == k + 6       # the k+2 bounce was in cooldown

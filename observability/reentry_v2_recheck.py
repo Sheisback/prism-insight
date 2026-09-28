@@ -57,6 +57,17 @@ def _levels_line(levels):
             f"2차 저항 {fmt(levels.get('secondary_resistance'))}\n")
 
 
+def _declined_block(declined):
+    if not declined:
+        return ""
+    lines = ["### 이전 재점검 (미진입, 같은 감시)"]
+    for d in declined:
+        support = "미제공" if d.get("support") is None else f"{d['support']:,.2f}"
+        lines.append(f"- {d['date']} {d['trigger']} 진입가 {d['entry']:,.2f}, 기다린 지지선 {support}: "
+                     f"{str(d.get('reason') or '')[:300]}")
+    return "\n".join(lines) + "\n\n"
+
+
 def user_prompt(item, report_text):
     original = item["original"]
     ref = item["report_ref"]
@@ -66,6 +77,7 @@ def user_prompt(item, report_text):
             f"- 원래 점수/최소점수: {original.get('buy_score')}/{original.get('min_score')}\n"
             f"- 원래 사유: {str(original.get('reason') or '')[:500]}\n"
             f"{_levels_line(original.get('key_levels'))}\n"
+            f"{_declined_block(item.get('declined'))}"
             f"### 시장 국면(결정론적 계산): {regime}\n\n{item['facts_text']}\n"
             f"### 보고서 작성일: {ref['report_date']} (트리거일까지 {ref['age_days']}일 경과)\n\n"
             f"### Report Content:\n{report_text}\n")

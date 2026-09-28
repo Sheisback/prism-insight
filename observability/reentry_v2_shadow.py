@@ -27,7 +27,7 @@ from pathlib import Path
 from observability.events import emit_event
 from observability.reentry_recheck_inputs import archived_report, latest_report, technical_block
 from observability import reentry_v2_recheck as RC
-from observability.reentry_shadow import _atomic, candidates
+from observability.reentry_shadow import _atomic, candidates, scenario_key_levels
 from prism_core import pivot_reentry as P
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,7 +39,7 @@ DB_PATH = ROOT / "stock_tracking_db.sqlite"
 ARCHIVE_DB = ROOT / "archive.db"
 LOOKBACK_DAYS = 70          # enrolment window; a watch lives up to 30 sessions (~45 calendar days)
 ARCHIVE_AFTER_DAYS = 150    # finished watches (incl. 60-bar exit horizon) move to the archive
-INPUT_CONTRACT = "reentry_v2_recheck_input_v3"
+INPUT_CONTRACT = "reentry_v2_recheck_input_v4"
 REPORT_MAX_AGE_DAYS = 30     # older reports are flagged stale, not regenerated (user decision 2026-09-27)
 
 
@@ -118,7 +118,8 @@ def kr_regime(bench_rows, day):
 def fresh_levels(entry, base):
     """Trigger-time levels that do not depend on a report written before the breakout."""
     pivot, low = base["pivot"], base["base_low"]
-    target = pivot + (pivot - low)          # measured move: base height added to the pivot
+    # Breakout: measured move (base height over the pivot). Pullback bounce: the post-breakout high.
+    target = base.get("target") or pivot + (pivot - low)
     stop = max(entry * (1 - P.PROD_STOP), low)
     return {"support_pivot": pivot, "support_base_low": low, "measured_move_target": round(target, 4),
             "stop_cap_7pct": round(entry * (1 - P.PROD_STOP), 4), "stop_used": round(stop, 4),
@@ -128,8 +129,9 @@ def fresh_levels(entry, base):
 
 def levels_text(levels):
     return ("\n### 📏 트리거 시점 가격 수준 (결정론적 계산, 보고서 이후 새로 산출)\n"
-            f"- 새 1차 지지: 돌파한 피벗 {levels['support_pivot']:,.2f} / 2차 지지: 베이스 저점 {levels['support_base_low']:,.2f}\n"
-            f"- 측정 이동 목표(베이스 높이만큼 피벗 위): {levels['measured_move_target']:,.2f} "
+            f"- 1차 지지: {levels['support_pivot']:,.2f} (돌파한 피벗 또는 눌림 지지선) / "
+            f"2차 지지: {levels['support_base_low']:,.2f} (베이스 저점 또는 눌림 저점)\n"
+            f"- 목표(돌파: 베이스 높이만큼 피벗 위, 눌림 반등: 돌파 후 고점): {levels['measured_move_target']:,.2f} "
             f"(진입 대비 {levels['reward_pct']:+.2f}%)\n"
             f"- 손절 후보: 7% 상한 {levels['stop_cap_7pct']:,.2f}, 적용 {levels['stop_used']:,.2f} "
             f"(진입 대비 -{levels['risk_pct']:.2f}%) → 손익비 {levels['rr']}\n"
@@ -138,11 +140,17 @@ def levels_text(levels):
 
 def freeze_inputs(market, watch, result, bars, bench_rows, reports_root, archive_db):
     """Everything the later LLM recheck needs, fixed at the trigger. Report text by reference+hash."""
-    i, entry = result["index"], result["day"]["entry"]
-    # A follow-through entry has no base as of today (yesterday made the new high): use yesterday's.
-    base = P.find_pivot(bars, i, market) or P.find_pivot(bars, i - 1, market) or {}
+    i, entry, day = result["index"], result["day"]["entry"], result["day"]
+    declined = watch.get("declined") or []
+    if day["trigger"] == "PULLBACK_BOUNCE":
+        since = next((k for k, b in enumerate(bars) if b["date"] == declined[-1]["date"]), i - 1)
+        base = {"pivot": day["support"], "base_low": min(b["low"] for b in bars[since + 1:i]),
+                "target": max(b["high"] for b in bars[since:i])}
+    else:
+        # A follow-through entry has no base as of today (yesterday made the new high): use yesterday's.
+        base = P.find_pivot(bars, i, market) or P.find_pivot(bars, i - 1, market) or {}
     if not base:
-        base = {"pivot": result["day"]["pivot"], "base_low": min(b["low"] for b in bars[max(0, i - 30):i])}
+        base = {"pivot": day["pivot"], "base_low": min(b["low"] for b in bars[max(0, i - 30):i])}
     trigger_date = bars[i]["date"]
     report = latest_report(reports_root, market, watch["ticker"], trigger_date)
     report_ref = None
@@ -165,7 +173,9 @@ def freeze_inputs(market, watch, result, bars, bench_rows, reports_root, archive
             "trigger_date": trigger_date, "trigger": result["day"]["trigger"], "entry": entry,
             "base": base, "levels": levels, "report_ref": report_ref,
             "deterministic_market_regime": kr_regime(bench_rows, trigger_date) if market == "KR" else None,
-            "facts_text": technical_block(bars, i, entry, base["pivot"], market, bench_rows) + levels_text(levels),
+            "facts_text": technical_block(bars, i, entry, base["pivot"], market, bench_rows,
+                                          trigger=day["trigger"]) + levels_text(levels),
+            "declined": [{k: d.get(k) for k in ("date", "trigger", "entry", "support", "reason")} for d in declined],
             "original": {"decided_on": row["exit_date"], "reason": (row.get("skip_reason") or
                                                                   (f"stopped out ({row.get('realized_pct')}%)"
                                                                    if watch["source"] == "STOP_EXIT" else None)),
@@ -217,7 +227,7 @@ def _refresh(watch, frames, completed, market, reports_root, archive_db):
     def exit_fn(b, i, entry, intraday=True):
         return P.simulate_production(b, i, entry, intraday=intraday, bull=bull)
 
-    result = P.run_watch(bars, start, market, market_ok=gate, exit_fn=exit_fn)
+    result = P.run_watch(bars, start, market, market_ok=gate, exit_fn=exit_fn, rejections=watch.get("declined"))
     watch["asof"] = completed
     watch["events_seen"] = result["events"]
     frozen = None
@@ -231,9 +241,10 @@ def _refresh(watch, frames, completed, market, reports_root, archive_db):
             frozen = freeze_inputs(market, watch, result, bars, bench, reports_root, archive_db)
             frozen["event_id"] = event_id
             watch["trigger_event_id"] = event_id
+            watch.pop("recheck", None)
     else:
-        watch["status"] = result["status"]          # WATCHING/PENDING or EXPIRED
-        if result["status"] == "EXPIRED":
+        watch["status"] = result["status"]          # WATCHING/PENDING, EXPIRED or INVALIDATED
+        if result["status"] in {"EXPIRED", "INVALIDATED"}:
             watch["watch_ended"] = bars[result["index"]]["date"]
     controls = {}
     if watch["source"] != "STOP_EXIT":
@@ -241,8 +252,15 @@ def _refresh(watch, frames, completed, market, reports_root, archive_db):
     if result.get("ready_control"):
         k = result["ready_control"]["index"]
         controls["READY_OPEN"] = exit_fn(bars, k, bars[k]["open"], intraday=False)
+    if watch.get("declined"):
+        # Mechanical entry at the first (declined) trigger, to compare with the rechecked path.
+        first = watch["declined"][0]
+        k = next((n for n, b in enumerate(bars) if b["date"] == first["date"]), None)
+        if k is not None:
+            controls["FIRST_TRIGGER"] = exit_fn(bars, k, first["entry"], intraday=first["trigger"] != "FOLLOW_THROUGH")
     watch["controls"] = controls
-    finished = watch["status"] == "EXPIRED" or (watch["status"] == "TRIGGERED" and _closed(watch.get("trade")))
+    finished = watch["status"] in {"EXPIRED", "INVALIDATED"} or \
+        (watch["status"] == "TRIGGERED" and _closed(watch.get("trade")))
     if finished and all(_closed(c) for c in controls.values()):
         watch["status_final"], watch["status"] = watch["status"], "CLOSED"
     return frozen
@@ -387,15 +405,29 @@ def _run_rechecks(state, market, completed, p, reports_root, archive_db, llm):
             handle.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")
         watch["recheck"] = {"status": record["status"], "attempts": attempts, "last": completed,
                             "approved": record.get("approved")}
+        if record["status"] == "OK" and not record.get("approved"):
+            _decline(watch, item, record)
         _atomic(p["state"], state)
         attrs = {"mode": "SHADOW", "trading_impact": "none", "policy_version": P.POLICY_VERSION,
                  "watch_ref": watch["watch_id"], "trigger_date": item["trigger_date"], "status": record["status"],
                  "approved": record.get("approved"), "decision": record.get("decision"),
                  "buy_score": record.get("buy_score"), "report_stale": record.get("report_stale"),
                  "model": record.get("model"), "reasoning_effort": record.get("reasoning_effort"),
-                 "latency_s": record.get("latency_s"), "attempt": attempts}
+                 "latency_s": record.get("latency_s"), "attempt": attempts, "trigger": item["trigger"],
+                 "declined_before": len(item.get("declined") or [])}
         emit_event("reentry_v2.shadow_recheck", service=f"prism-{market.lower()}-reentry-v2-shadow",
                    event_id=hashlib.sha256(f"{item['event_id']}|recheck|{attempts}".encode()).hexdigest()[:32],
                    market=market, ticker=watch["ticker"], attributes=attrs, event_time=datetime.now(timezone.utc))
         results.append(record)
     return results
+
+
+def _decline(watch, item, record):
+    """The recheck said no: keep watching for a pullback bounce or re-breakout (run_watch rejections)."""
+    support = (scenario_key_levels(record.get("scenario")) or {}).get("primary_support")
+    watch.setdefault("declined", []).append({
+        "date": item["trigger_date"], "trigger": item["trigger"], "entry": item["entry"], "support": support,
+        "event_id": item["event_id"], "reason": str(record.get("rejection_reason") or "")[:300]})
+    for key in ("trigger_date", "trigger", "entry", "trade", "watch_ended", "market_ok", "trigger_event_id"):
+        watch.pop(key, None)
+    watch["status"] = "WATCHING"

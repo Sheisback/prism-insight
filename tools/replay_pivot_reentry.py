@@ -114,7 +114,7 @@ def bull_fn(bench_bars):
     return lambda day: flags.get(day, True)
 
 
-def replay(db_path, market, bars_by_ticker, bench_bars, exit_mode="production", **exit_kwargs):
+def replay(db_path, market, bars_by_ticker, bench_bars, exit_mode="production", second_chance=False, **exit_kwargs):
     gate = pulse_gate(bench_bars)
     if exit_mode == "production":
         bull = bull_fn(bench_bars)
@@ -155,6 +155,19 @@ def replay(db_path, market, bars_by_ticker, bench_bars, exit_mode="production", 
             if trade.get("status") == "CLOSED":
                 bench = bench_return(bench_by_date, bars, watch["index"], trade["exit_index"])
                 row["excess"] = None if bench is None else trade["ret"] - bench
+            if second_chance:
+                # The recheck declined the first trigger: what did the watch offer next?
+                again = P.run_watch(bars, start, market, market_ok=gate, exit_fn=exit_fn,
+                                    rejections=[{"date": row["trigger_date"], "support": None}])
+                second = {"status": again["status"]}
+                if again["status"] == "TRIGGERED":
+                    t2 = again["trade"]
+                    second.update(trigger=again["day"]["trigger"], date=bars[again["index"]]["date"],
+                                  entry=again["day"]["entry"], trade=t2)
+                    if t2.get("status") == "CLOSED":
+                        b2 = bench_return(bench_by_date, bars, again["index"], t2["exit_index"])
+                        second["excess"] = None if b2 is None else t2["ret"] - b2
+                row["second"] = second
         controls = {}
         if source != "STOP_EXIT" and start + 1 < len(bars):
             controls["ORIGINAL"] = (start, exit_fn(bars, start, bars[start]["open"], intraday=False))
@@ -211,11 +224,13 @@ def main(argv=None):
     parser.add_argument("--bench-code", default=None)
     parser.add_argument("--out")
     parser.add_argument("--exit", choices=["production", "v1"], default="production")
+    parser.add_argument("--second-chance", action="store_true",
+                        help="also replay the watch as if the recheck declined its first trigger")
     args = parser.parse_args(argv)
     bars = {t: load_bars(v) for t, v in json.loads(Path(args.bars).read_text()).items()}
     bench_raw = json.loads(Path(args.bench).read_text())["bars"]
     bench = load_bars(bench_raw[args.bench_code or next(iter(bench_raw))])
-    results = replay(args.db, args.market, bars, bench, exit_mode=args.exit)
+    results = replay(args.db, args.market, bars, bench, exit_mode=args.exit, second_chance=args.second_chance)
     if args.out:
         Path(args.out).write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in results) + "\n")
     print(json.dumps(summarize(results), ensure_ascii=False, indent=1))

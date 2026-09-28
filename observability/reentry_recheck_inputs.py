@@ -17,13 +17,16 @@ RECHECK_KO = """
 ## 재진입 재점검 모드 (이번 요청에만 적용)
 
 이 종목은 과거에 분석되어 보류·차단되었거나 손절된 종목입니다. 오늘 장중에 베이스의 피벗(저항선)을
-거래량을 동반해 돌파했습니다. 입력의 보고서는 트리거 전날까지 작성된 가장 최근 보고서이며 작성일을 확인하십시오.
+거래량을 동반해 돌파했거나, 앞선 돌파를 재점검에서 미진입한 뒤 지지선까지 눌렸다가 반등했습니다(입력의
+트리거 종류와 이전 재점검 기록 참조). 입력의 보고서는 트리거 전날까지 작성된 가장 최근 보고서이며 작성일을 확인하십시오.
 - 원래 보류·차단·손절 사유가 현재 기술적 사실(추세, 위치, 거래량)과 시장 상태로 해소됐는지 재점검하십시오.
 - 원래 시나리오 가격 수준(1·2차 지지·저항)과 이번 돌파 가격을 비교해, 당시 막혔던 저항을 넘었는지와
   지지 구조가 유지되는지를 판단 근거로 쓰십시오. 이미 넘어선 과거 저항은 새 지지 후보입니다.
 - 재무 F1~F4는 보고서 기준 판단을 유지합니다. 보고서 이후의 새 정보는 없으므로 추정하지 마십시오.
-- 진입 가격은 입력의 돌파 가격 기준입니다. 추격(피벗 +5% 초과)은 이미 배제됐습니다.
-- 돌파 직후 되돌림을 기다려야 한다고 판단하면 미진입으로 하고 rejection_reason에 구체적으로 적으십시오.
+- 진입 가격은 입력의 트리거 가격 기준입니다. 추격(돌파는 피벗 +5%, 눌림 반등은 지지선 +8% 초과)은 이미 배제됐습니다.
+- 되돌림을 기다려야 한다고 판단하면 미진입으로 하고 rejection_reason에 구체적으로 적으십시오. 기다릴 지지선은
+  trading_scenarios.key_levels.primary_support에 적으십시오. 시스템은 그 지지선까지 눌렸다가 반등하는지와
+  재돌파를 계속 감시하고, 그때 다시 재점검을 요청합니다.
 - 출력 JSON 형식과 채점 규칙은 기존과 동일합니다.
 """
 
@@ -94,7 +97,7 @@ def market_facts(bench_bars, day):
     return {"state": state, "distribution_days": int(getattr(pulse, "distribution_days", 0) or 0)}
 
 
-def technical_block(bars, i, entry, pivot, market, bench_bars):
+def technical_block(bars, i, entry, pivot, market, bench_bars, trigger="INTRADAY_BREAKOUT"):
     """Facts as of the trigger: completed bars before day i plus the breakout price."""
     closes = [b["close"] for b in bars[:i]]
 
@@ -126,7 +129,9 @@ def technical_block(bars, i, entry, pivot, market, bench_bars):
         f"- Market Pulse(지수 재생): {mkt['state']} | 분산일 {mkt['distribution_days']}",
         "",
         "### 🚀 재진입 트리거",
-        f"- 피벗(베이스 저항선) {pivot:,.2f} 돌파, 진입 기준가 {entry:,.2f} (피벗 대비 {fmt(pct(entry, pivot))})",
+        (f"- 눌림 반등: 지지선 {pivot:,.2f} 부근까지 되돌린 뒤 전일 고가 {bars[i - 1]['high']:,.2f} 돌파, "
+         f"진입 기준가 {entry:,.2f} (지지선 대비 {fmt(pct(entry, pivot))})" if trigger == "PULLBACK_BOUNCE" else
+         f"- 피벗(베이스 저항선) {pivot:,.2f} 돌파({trigger}), 진입 기준가 {entry:,.2f} (피벗 대비 {fmt(pct(entry, pivot))})"),
         f"- 돌파일 거래량: 20일 평균의 {bars[i]['volume'] / (sum(b['volume'] for b in bars[i - 20:i]) / 20):.2f}배",
     ]
     result = compute(bars[:i], market=market, observed_at=_as_dt(bars[i - 1]["date"]), current_price=entry)
