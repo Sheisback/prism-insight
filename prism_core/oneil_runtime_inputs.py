@@ -229,9 +229,11 @@ def market_snapshot_from_frames(frames, *, now, pilot_flag=None):
     policy = _root_module("_oneil_regime_policy", "cores/regime_policy.py")
     pulse_module = _root_module("_oneil_market_pulse", "cores/market_pulse.py")
     regime = prefetch._compute_us_regime(cleaned["^GSPC"], cleaned["^IXIC"], cleaned["^VIX"])
-    pulse = pulse_module.MarketPulse()
     bars = policy._df_to_bars(cleaned["^GSPC"], "close", "volume", pulse_module.DailyBar)
-    states = [pulse.feed(bar) for bar in bars]
+    # Same US pulse contract as cores.regime_policy: both indexes, S&P 500 DD reported.
+    nasdaq = (policy._df_to_bars(cleaned["^IXIC"], "close", "volume", pulse_module.DailyBar)
+              if policy.us_pulse_index_mode() == "dual" else None)
+    states, pulse = policy.combined_us_states(bars, nasdaq, pulse_module.MarketPulse)
     snapshot = dict(observed_at=now, source_asof=source_asof, alignment=alignment,
                     regime=regime["market_regime"], market_pulse=states[-1],
                     distribution_days=int(pulse.distribution_days),

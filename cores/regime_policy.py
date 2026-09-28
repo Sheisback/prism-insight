@@ -430,6 +430,90 @@ def _fetch_us_bars(DailyBar):
     return _df_to_bars(df.sort_index(), "Close", vol_col, DailyBar)
 
 
+def _fetch_us_nasdaq_bars(DailyBar):
+    """NASDAQ Composite (^IXIC) daily via yfinance, same window as ^GSPC."""
+    import pandas as pd
+    import yfinance as yf
+
+    df = yf.download("^IXIC", period="2y", interval="1d",
+                     auto_adjust=True, progress=False)
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    df = df.dropna(how="all")
+    if df is None or len(df) == 0:
+        raise RuntimeError("^IXIC fetch returned empty")
+    vol_col = "Volume" if "Volume" in df.columns else None
+    return _df_to_bars(df.sort_index(), "Close", vol_col, DailyBar)
+
+
+_PULSE_RANK = {UPTREND: 0, UNDER_PRESSURE: 1, CORRECTION: 2}
+
+
+def combine_us_pulse(spx_state: str, nasdaq_state: Optional[str]) -> str:
+    """US market direction from both leading indexes (O'Neil watches both).
+
+    CORRECTION only when the S&P 500 and the NASDAQ Composite are both in
+    CORRECTION; exactly one in CORRECTION reads as UNDER_PRESSURE; otherwise
+    the weaker of the two. A missing NASDAQ state keeps the S&P 500 state.
+    Pre-registered replay 2019-07..2026-06 (issue #822 follow-up): released
+    171 of 419 S&P-only CORRECTION days, whose picks averaged +3.03% vs -0.53%
+    on the days both indexes stayed in CORRECTION, in both halves.
+    """
+    if nasdaq_state is None:
+        return spx_state
+    if spx_state == CORRECTION and nasdaq_state == CORRECTION:
+        return CORRECTION
+    if CORRECTION in (spx_state, nasdaq_state):
+        return UNDER_PRESSURE
+    return spx_state if _PULSE_RANK[spx_state] >= _PULSE_RANK[nasdaq_state] else nasdaq_state
+
+
+def us_pulse_index_mode() -> str:
+    """``dual`` (default) or ``spx`` (single-index rollback) via US_MARKET_PULSE_INDEX_MODE."""
+    mode = os.getenv("US_MARKET_PULSE_INDEX_MODE", "dual").strip().lower()
+    return mode if mode in ("dual", "spx") else "dual"
+
+
+def combined_us_states(spx_bars, nasdaq_bars, MarketPulse):
+    """Replay both indexes and combine per S&P 500 session.
+
+    Returns ``(combined_states, spx_pulse)``; ``spx_pulse`` is the replayed S&P 500
+    machine (its distribution-day count stays the reported DD). The NASDAQ state
+    for a session is its latest state on or before that date.
+    """
+    spx = MarketPulse()
+    spx_states = [spx.feed(bar) for bar in spx_bars]
+    if nasdaq_bars is None:
+        return spx_states, spx
+    nasdaq = MarketPulse()
+    by_date = {bar.date: nasdaq.feed(bar) for bar in nasdaq_bars}
+    dates = sorted(by_date)
+    combined, j, latest = [], 0, None
+    for bar, state in zip(spx_bars, spx_states):
+        while j < len(dates) and dates[j] <= bar.date:
+            latest = by_date[dates[j]]
+            j += 1
+        combined.append(combine_us_pulse(state, latest))
+    return combined, spx
+
+
+def _us_pulse_replay(DailyBar, MarketPulse):
+    """US pulse series per :func:`us_pulse_index_mode`; NASDAQ failure keeps S&P only."""
+    spx_bars = _fetch_us_bars(DailyBar)
+    if not spx_bars or len(spx_bars) < 30:
+        raise RuntimeError(f"insufficient index bars: {len(spx_bars) if spx_bars else 0}")
+    nasdaq_bars = None
+    if us_pulse_index_mode() == "dual":
+        try:
+            nasdaq_bars = _fetch_us_nasdaq_bars(DailyBar)
+            if not nasdaq_bars or len(nasdaq_bars) < 30:
+                raise RuntimeError("insufficient NASDAQ bars")
+        except Exception as exc:  # noqa: BLE001 - degrade to the S&P 500 alone
+            logger.warning("[MARKET_PULSE] NASDAQ unavailable, S&P 500 only: %s", exc)
+            nasdaq_bars = None
+    return combined_us_states(spx_bars, nasdaq_bars, MarketPulse)
+
+
 def get_market_pulse_state(market: str, use_cache: bool = True) -> Optional[str]:
     """Compute the current Market Pulse state for ``market`` ("kr" | "us").
 
@@ -454,10 +538,12 @@ def get_market_pulse_state(market: str, use_cache: bool = True) -> Optional[str]
         MarketPulse = mp_mod.MarketPulse
         DailyBar = mp_mod.DailyBar
 
+        if m == "us":
+            states, _spx = _us_pulse_replay(DailyBar, MarketPulse)
+            _STATE_CACHE[m] = states[-1]
+            return states[-1]
         if m == "kr":
             bars = _fetch_kr_bars(DailyBar)
-        elif m == "us":
-            bars = _fetch_us_bars(DailyBar)
         else:
             logger.warning("[MARKET_PULSE] unknown market %r -> None", market)
             _STATE_CACHE[m] = None
@@ -507,22 +593,22 @@ def get_market_pulse_detail(market: str, use_cache: bool = True) -> Optional[Mar
         DailyBar = mp_mod.DailyBar
         dd_window = getattr(mp_mod, "DISTRIBUTION_WINDOW", 25)
 
-        if m == "kr":
+        if m == "us":
+            # State from both indexes; the reported DD stays the S&P 500 count.
+            states, mp = _us_pulse_replay(DailyBar, MarketPulse)
+            state: Optional[str] = states[-1]
+        elif m == "kr":
             bars = _fetch_kr_bars(DailyBar)
-        elif m == "us":
-            bars = _fetch_us_bars(DailyBar)
+            if not bars or len(bars) < 30:
+                raise RuntimeError(f"insufficient index bars: {len(bars) if bars else 0}")
+            mp = MarketPulse()
+            state = None
+            for bar in bars:
+                state = mp.feed(bar)
         else:
             logger.warning("[MARKET_PULSE_DETAIL] unknown market %r -> None", market)
             _DETAIL_CACHE[m] = None
             return None
-
-        if not bars or len(bars) < 30:
-            raise RuntimeError(f"insufficient index bars: {len(bars) if bars else 0}")
-
-        mp = MarketPulse()
-        state: Optional[str] = None
-        for bar in bars:
-            state = mp.feed(bar)
 
         if state is None:
             _DETAIL_CACHE[m] = None
@@ -617,20 +703,18 @@ def pilot_reexposure_active(market: str, use_cache: bool = True) -> bool:
         MarketPulse = mp_mod.MarketPulse
         DailyBar = mp_mod.DailyBar
 
-        if m == "kr":
+        if m == "us":
+            states, _spx = _us_pulse_replay(DailyBar, MarketPulse)
+        elif m == "kr":
             bars = _fetch_kr_bars(DailyBar)
-        elif m == "us":
-            bars = _fetch_us_bars(DailyBar)
+            if not bars or len(bars) < 30:
+                raise RuntimeError(f"insufficient index bars: {len(bars) if bars else 0}")
+            mp = MarketPulse()
+            states = [mp.feed(bar) for bar in bars]
         else:
             logger.warning("[PULSE_PILOT] unknown market %r -> full size", market)
             _PILOT_CACHE[m] = False
             return False
-
-        if not bars or len(bars) < 30:
-            raise RuntimeError(f"insufficient index bars: {len(bars) if bars else 0}")
-
-        mp = MarketPulse()
-        states = [mp.feed(bar) for bar in bars]
         ago = _sessions_since_correction_exit(states)
         active = is_pilot_window(ago, flag_on=True)
         _PILOT_CACHE[m] = active
