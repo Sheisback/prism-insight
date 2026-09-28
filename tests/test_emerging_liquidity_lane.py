@@ -1,4 +1,4 @@
-"""Emerging-liquidity lane regression tests for KR and US afternoon rise triggers."""
+"""Liquidity-floor regression tests: KR emerging lane and the single US $50M floor."""
 
 from __future__ import annotations
 
@@ -80,7 +80,8 @@ def test_kr_daily_rise_adds_only_top_emerging_candidate(monkeypatch):
     assert result.loc["EMERGING_TOP", "composite_score"] == 1.0
 
 
-def test_us_daily_rise_adds_only_top_emerging_candidate():
+def test_us_daily_rise_uses_single_50m_floor():
+    """Issue #822: US has one $50M floor for every trigger, no separate lane."""
     script = r'''
 import os
 import sys
@@ -90,12 +91,12 @@ sys.path.insert(0, os.path.join(os.getcwd(), "prism-us"))
 import us_trigger_batch as u
 
 rows = {
-    "STANDARD": {"Open": 101.0, "High": 109.0, "Low": 100.0, "Close": 108.0,
-                 "Volume": 1_000_000, "Amount": 200_000_000.0},
-    "EMERGING_TOP": {"Open": 101.0, "High": 110.0, "Low": 100.0, "Close": 109.0,
-                     "Volume": 1_000_000, "Amount": 90_000_000.0},
-    "EMERGING_LOW": {"Open": 101.0, "High": 107.0, "Low": 100.0, "Close": 106.0,
-                     "Volume": 1_000_000, "Amount": 60_000_000.0},
+    "LARGE": {"Open": 101.0, "High": 109.0, "Low": 100.0, "Close": 108.0,
+              "Volume": 1_000_000, "Amount": 200_000_000.0},
+    "MID_HIGH": {"Open": 101.0, "High": 110.0, "Low": 100.0, "Close": 109.0,
+                 "Volume": 1_000_000, "Amount": 90_000_000.0},
+    "MID_LOW": {"Open": 101.0, "High": 107.0, "Low": 100.0, "Close": 106.0,
+                "Volume": 1_000_000, "Amount": 60_000_000.0},
     "BELOW_FLOOR": {"Open": 101.0, "High": 111.0, "Low": 100.0, "Close": 110.0,
                     "Volume": 1_000_000, "Amount": 49_000_000.0},
 }
@@ -108,14 +109,10 @@ previous["Close"] = 100.0
 u.enhance_dataframe = lambda frame: frame
 
 result = u.trigger_afternoon_daily_rise_top("20260812", snapshot, previous, None)
-assert "STANDARD" in result.index
-assert "EMERGING_TOP" in result.index
-assert "EMERGING_LOW" not in result.index
+assert set(result.index) == {"LARGE", "MID_HIGH", "MID_LOW"}
 assert "BELOW_FLOOR" not in result.index
-assert result.loc["STANDARD", "LiquidityLane"] == "standard"
-assert result.loc["EMERGING_TOP", "LiquidityLane"] == "emerging"
-assert result.loc["EMERGING_TOP", "LiquidityLaneRank"] == 1
-assert result.loc["EMERGING_TOP", "CompositeScore"] == 1.0
+assert "LiquidityLane" not in result.columns
+assert list(result.index) == list(result.sort_values("CompositeScore", ascending=False).index)
 '''
     completed = subprocess.run(
         [sys.executable, "-c", script],

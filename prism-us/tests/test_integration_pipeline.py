@@ -99,13 +99,11 @@ class TestDataToTriggerFlow:
         us_trigger_batch in favor of trigger-scoring quality filtering; the
         active liquidity gate is MIN_TRADING_VALUE.
         """
-        from us_trigger_batch import (
-            MIN_TRADING_VALUE,
-            EMERGING_LIQUIDITY_MIN_TRADING_VALUE,
-        )
+        import us_trigger_batch
+        from us_trigger_batch import MIN_TRADING_VALUE
 
-        assert MIN_TRADING_VALUE == 100_000_000
-        assert EMERGING_LIQUIDITY_MIN_TRADING_VALUE == 50_000_000
+        assert MIN_TRADING_VALUE == 50_000_000
+        assert not hasattr(us_trigger_batch, "EMERGING_LIQUIDITY_MIN_TRADING_VALUE")
 
 
 # =============================================================================

@@ -42,7 +42,7 @@ import trigger_batch  # noqa: E402
 
 KR_CAP_FLOOR = 500_000_000_000
 KR_AMOUNT = 50_000_000_000  # SCREENING_MIN_TRADE_VALUE(100억) 위
-US_AMOUNT = 500_000_000  # MIN_TRADING_VALUE($100M) 위
+US_AMOUNT = 500_000_000  # MIN_TRADING_VALUE($50M) 위
 
 
 def _run_us_scenario(script_body: str) -> str:

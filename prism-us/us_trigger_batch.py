@@ -9,7 +9,7 @@ Adapted from Korean trigger_batch.py for US market characteristics.
 Key Differences from Korean Version:
 - Data source: yfinance (vs pykrx)
 - Market cap: disabled for legacy indices; explicit threshold for opt-in listed stocks
-- Trading value filter: $100M USD (vs 100억 KRW)
+- Trading value filter: $50M USD (vs 100억 KRW)
 - Change rate filter: 20% max (same)
 - Market hours: 09:30-16:00 EST (vs 09:00-15:30 KST)
 
@@ -78,10 +78,11 @@ TRIGGER_CRITERIA = {
 DEFAULT_US_SCREENING_UNIVERSE = "listed_common"
 DEFAULT_US_MIN_MARKET_CAP_USD = 1_000_000_000
 
-# Trading value filter: $100M USD
-MIN_TRADING_VALUE = 100_000_000
-EMERGING_LIQUIDITY_MIN_TRADING_VALUE = 50_000_000
-EMERGING_LIQUIDITY_MAX_CANDIDATES = 1
+# Trading value floor: $50M USD for every trigger and the universe pre-filter.
+# Issue #822 replay (298 sessions): at $50M the names that entered each
+# trigger's top-3 matched the names they displaced (30-session +3.5% vs +3.5%),
+# while $20M/$30M floors added $30M-$50M names that lagged in both halves.
+MIN_TRADING_VALUE = 50_000_000
 MORNING_TARGET_CANDIDATES = 3
 MARKET_CAP_MIN_COVERAGE = 0.8
 MARKET_CAP_MAX_WORKERS = 8
@@ -365,7 +366,7 @@ def trigger_morning_volume_surge(trade_date: str, snapshot: pd.DataFrame,
                                  top_n: int = 10) -> pd.DataFrame:
     """
     [Morning Trigger 1] Volume Surge Top
-    - Absolute criteria: Min trading value $100M + 20% of market average volume
+    - Absolute criteria: Min trading value $50M + 20% of market average volume
     - Additional filter: Volume increase >= 30%
     - Composite score: Volume increase rate (60%) + Absolute volume (40%)
     - Secondary filter: Only rising stocks (current > open)
@@ -425,7 +426,7 @@ def trigger_morning_gap_up_momentum(trade_date: str, snapshot: pd.DataFrame,
                                     top_n: int = 15) -> pd.DataFrame:
     """
     [Morning Trigger 2] Gap Up Momentum Top
-    - Absolute criteria: Min trading value $100M
+    - Absolute criteria: Min trading value $50M
     - Composite score: Gap up rate (50%) + Intraday change (30%) + Trading value (20%)
     - Secondary filter: Only stocks maintaining momentum (close > open)
     - Market cap filter: >= $20B USD
@@ -494,7 +495,7 @@ def trigger_morning_value_to_cap_ratio(trade_date: str, snapshot: pd.DataFrame,
                                        exclude_tickers: set[str] | None = None) -> pd.DataFrame:
     """
     [Morning Trigger 3] Value-to-Cap Ratio Top (Concentrated Capital Inflow)
-    - Absolute criteria: Min trading value $100M
+    - Absolute criteria: Min trading value $50M
     - Composite score: Trading value ratio (50%) + Absolute value (30%) + Intraday change (20%)
     - Secondary filter: Only rising stocks
     """
@@ -596,7 +597,7 @@ def trigger_afternoon_daily_rise_top(trade_date: str, snapshot: pd.DataFrame,
                                      top_n: int = 15) -> pd.DataFrame:
     """
     [Afternoon Trigger 1] Intraday Rise Top
-    - Absolute criteria: Min trading value $100M
+    - Absolute criteria: Min trading value $50M
     - Composite score: Intraday change (60%) + Trading value (40%)
     - Additional filter: Change rate >= 3%
     - Market cap filter: >= $20B USD
@@ -611,12 +612,8 @@ def trigger_afternoon_daily_rise_top(trade_date: str, snapshot: pd.DataFrame,
     if cap_df is not None and not cap_df.empty:
         snap = snap.merge(cap_df[["MarketCap"]], left_index=True, right_index=True, how="inner")
 
-    # Preserve the existing >=$100M lane and separately rank one $50M~$100M
-    # candidate. Lowering the shared floor alone leaves this cohort outside
-    # the top-N because Amount is normalized against mega-cap turnover.
-    snap = apply_absolute_filters(
-        snap.copy(), min_value=EMERGING_LIQUIDITY_MIN_TRADING_VALUE
-    )
+    # Absolute filters
+    snap = apply_absolute_filters(snap, min_value=MIN_TRADING_VALUE)
 
     # Change rate calculations
     snap["IntradayChange"] = (snap["Close"] / snap["Open"] - 1) * 100
@@ -634,50 +631,14 @@ def trigger_afternoon_daily_rise_top(trade_date: str, snapshot: pd.DataFrame,
         logger.debug("trigger_afternoon_daily_rise_top: No qualifying stocks")
         return pd.DataFrame()
 
-    standard = snap[snap["Amount"] >= MIN_TRADING_VALUE].copy()
-    emerging = snap[
-        (snap["Amount"] >= EMERGING_LIQUIDITY_MIN_TRADING_VALUE)
-        & (snap["Amount"] < MIN_TRADING_VALUE)
-    ].copy()
-    emerging_eligible = len(emerging)
+    # Composite score calculation
+    scored = normalize_and_score(snap, "IntradayChange", "Amount", 0.6, 0.4)
 
-    if not standard.empty:
-        standard = normalize_and_score(
-            standard, "IntradayChange", "Amount", 0.6, 0.4
-        ).head(top_n).head(10).copy()
-        standard["LiquidityLane"] = "standard"
-        standard["LiquidityLaneRank"] = range(1, len(standard) + 1)
+    # Select top N
+    result = scored.head(top_n).copy()
 
-    if not emerging.empty:
-        emerging = normalize_and_score(
-            emerging, "IntradayChange", "Amount", 0.6, 0.4
-        ).head(EMERGING_LIQUIDITY_MAX_CANDIDATES).copy()
-        emerging["CompositeScore"] = 1.0
-        emerging["LiquidityLane"] = "emerging"
-        emerging["LiquidityLaneRank"] = range(1, len(emerging) + 1)
-
-    result = pd.concat([standard, emerging])
-    if result.empty:
-        logger.debug("trigger_afternoon_daily_rise_top: No stocks in either liquidity lane")
-        return pd.DataFrame()
-
-    result["LiquidityFloor"] = result["LiquidityLane"].map(
-        {
-            "standard": MIN_TRADING_VALUE,
-            "emerging": EMERGING_LIQUIDITY_MIN_TRADING_VALUE,
-        }
-    )
-    result["LiquidityCeiling"] = result["LiquidityLane"].map(
-        {"standard": None, "emerging": MIN_TRADING_VALUE}
-    )
-    logger.info(
-        "[LIQUIDITY-LANE] market=US trigger=afternoon_daily_rise "
-        "standard=%d emerging_eligible=%d emerging_added=%d",
-        len(standard),
-        emerging_eligible,
-        len(emerging),
-    )
-    return enhance_dataframe(result)
+    logger.debug(f"Daily rise top detected: {len(result)} stocks")
+    return enhance_dataframe(result.head(10))
 
 
 def trigger_afternoon_closing_strength(trade_date: str, snapshot: pd.DataFrame,
@@ -685,7 +646,7 @@ def trigger_afternoon_closing_strength(trade_date: str, snapshot: pd.DataFrame,
                                        top_n: int = 15) -> pd.DataFrame:
     """
     [Afternoon Trigger 2] Closing Strength Top
-    - Absolute criteria: Min trading value $100M + Volume increase from previous day
+    - Absolute criteria: Min trading value $50M + Volume increase from previous day
     - Composite score: Closing strength (50%) + Volume increase (30%) + Trading value (20%)
     - Secondary filter: Only rising stocks (close > open)
     - Market cap filter: >= $20B USD
@@ -781,7 +742,7 @@ def trigger_afternoon_volume_surge_flat(trade_date: str, snapshot: pd.DataFrame,
                                         top_n: int = 20) -> pd.DataFrame:
     """
     [Afternoon Trigger 3] Volume Surge Sideways (Consolidation Stocks)
-    - Absolute criteria: Min trading value $100M + Market average volume
+    - Absolute criteria: Min trading value $50M + Market average volume
     - Composite score: Volume increase rate (60%) + Trading value (40%)
     - Secondary filter: Sideways stocks only (change within +-5%)
     - Market cap filter: >= $20B USD
@@ -1509,12 +1470,11 @@ def _load_screening_inputs(trade_date):
     started = time.monotonic()
     paired = [ticker for ticker in tickers
               if ticker in current.index and ticker in previous.index]
-    # Every existing trigger already requires at least this dollar turnover.
-    # Applying the same absolute floor before metadata avoids thousands of
-    # unnecessary free-provider profile requests without introducing a new
-    # volume-surge rule or changing relative-volume scoring.
+    # Every trigger requires at least this dollar turnover. Applying the same
+    # absolute floor before metadata avoids thousands of unnecessary
+    # free-provider profile requests without changing any trigger rule.
     liquidity_eligible = [ticker for ticker in paired
-                          if float(current.at[ticker, 'Amount']) >= EMERGING_LIQUIDITY_MIN_TRADING_VALUE]
+                          if float(current.at[ticker, 'Amount']) >= MIN_TRADING_VALUE]
     reasons['missing_snapshot_pair'] += len(tickers) - len(paired)
     reasons['below_liquidity_floor'] += len(paired) - len(liquidity_eligible)
     for ticker in liquidity_eligible:
@@ -1539,7 +1499,7 @@ def _load_screening_inputs(trade_date):
         'directory_counts': universe.counts,
         'price_coverage': raw_coverage, 'collection': collection,
         'market_participation': raw_participation,
-        'liquidity_floor_usd': EMERGING_LIQUIDITY_MIN_TRADING_VALUE,
+        'liquidity_floor_usd': MIN_TRADING_VALUE,
         'liquidity_eligible_count': len(liquidity_eligible),
         'metadata_checked_count': checked, 'eligible_count': len(kept),
         'exclusion_reasons': dict(reasons),
@@ -1837,13 +1797,6 @@ def run_batch(trigger_time: str, log_level: str = "INFO", output_file: str = Non
                     if "SelectionChannel" in stocks_df.columns:
                         stock_info["selection_channel"] = str(stocks_df.loc[ticker, "SelectionChannel"])
 
-                    if "LiquidityLane" in stocks_df.columns:
-                        stock_info["liquidity_lane"] = str(stocks_df.loc[ticker, "LiquidityLane"])
-                        stock_info["liquidity_lane_rank"] = int(stocks_df.loc[ticker, "LiquidityLaneRank"])
-                        stock_info["liquidity_floor"] = float(stocks_df.loc[ticker, "LiquidityFloor"])
-                        _ceiling = stocks_df.loc[ticker, "LiquidityCeiling"]
-                        stock_info["liquidity_ceiling"] = None if pd.isna(_ceiling) else float(_ceiling)
-
                     if "CapacityFill" in stocks_df.columns:
                         stock_info["capacity_fill"] = bool(stocks_df.loc[ticker, "CapacityFill"])
                         stock_info["capacity_fill_reason"] = str(stocks_df.loc[ticker, "CapacityFillReason"])
@@ -1891,8 +1844,6 @@ def run_batch(trigger_time: str, log_level: str = "INFO", output_file: str = Non
             "bottomup_slots": _bottomup_slots,
             "topdown_count": _topdown_count,
             "bottomup_count": _bottomup_count,
-            "emerging_liquidity_min_trading_value_usd": EMERGING_LIQUIDITY_MIN_TRADING_VALUE,
-            "emerging_liquidity_max_candidates": EMERGING_LIQUIDITY_MAX_CANDIDATES,
             "morning_target_candidates": MORNING_TARGET_CANDIDATES,
             "primary_candidate_count": primary_candidate_count,
             "capacity_fill_candidate_count": capacity_fill_candidate_count,
