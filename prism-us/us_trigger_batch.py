@@ -47,6 +47,7 @@ from cores.us_surge_detector import (
     enhance_dataframe,
 )
 from cores.rs_rating import oneil_weighted_return, percentile_ratings
+from cores.kis_us_market_screen import fetch_market_screen
 from prism_core.screening_price_evidence import build_screening_price_evidence
 from prism_core.ohlcv_shape import normalize_single_ticker_ohlcv
 
@@ -85,6 +86,13 @@ DEFAULT_US_MIN_MARKET_CAP_USD = 1_000_000_000
 MIN_TRADING_VALUE = 50_000_000
 MORNING_TARGET_CANDIDATES = 3
 MARKET_CAP_MIN_COVERAGE = 0.8
+# KIS market screen (#822): price only the names KIS already shows near the
+# trading-value floor. Measured 2026-09-28 09:50 ET: KIS turnover was a median
+# 0.64x of yfinance's Close*Volume for the same names, so the shortlist keeps a
+# wide margin (30% of the floor); pricing a few more names costs seconds. The
+# screen is used only if it holds the index members it should hold.
+KIS_SHORTLIST_AMOUNT_FRACTION = 0.3
+KIS_SCREEN_MIN_INDEX_COVERAGE = 0.97
 MARKET_CAP_MAX_WORKERS = 8
 
 _SNAPSHOT_NUMERIC_COLUMNS = ("Open", "High", "Low", "Close", "Volume", "Amount")
@@ -1433,6 +1441,58 @@ def _prioritized_universe(directory_symbols):
             + [s for s in symbols if s not in majors])
 
 
+def _kis_request():
+    """Quotation-only KIS request function for the primary US account."""
+    try:
+        from trading.us_stock_trading import USStockTrading
+    except ModuleNotFoundError as exc:
+        # The root ``trading`` package may already be cached in this process.
+        if exc.name != 'trading.us_stock_trading':
+            raise
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'trading')
+        if path not in sys.path:
+            sys.path.insert(0, path)
+        from us_stock_trading import USStockTrading
+    trader = USStockTrading()
+    return lambda url, tr_id, params: trader._request(url, tr_id, params)
+
+
+def _kis_price_shortlist(tickers, minimum):
+    """Narrow the directory to names KIS shows with enough cap and turnover.
+
+    Returns ``(shortlist, screen, diagnostic)``; ``shortlist`` is None when the
+    caller must keep the full-directory collection (disabled, KIS failure, or
+    a screen missing index members it should contain).
+    """
+    if os.getenv('US_SCREENING_KIS_SHORTLIST', 'true').lower() != 'true':
+        return None, None, {'status': 'DISABLED'}
+    try:
+        screen, diagnostic = fetch_market_screen(_kis_request(), minimum)
+    except Exception as exc:
+        logger.warning('KIS market screen unavailable, keeping full collection: %s',
+                       type(exc).__name__)
+        return None, None, {'status': 'UNAVAILABLE', 'error_type': type(exc).__name__}
+    try:
+        majors = set(get_major_tickers()).intersection(tickers)
+    except Exception as exc:
+        logger.warning('Index members unavailable for KIS screen check: %s', type(exc).__name__)
+        majors = set()
+    coverage = len(majors.intersection(screen.index)) / len(majors) if majors else 0.0
+    diagnostic['index_member_count'] = len(majors)
+    diagnostic['index_member_coverage'] = round(coverage, 4)
+    if diagnostic.get('status') != 'COMPLETE' or coverage < KIS_SCREEN_MIN_INDEX_COVERAGE:
+        diagnostic['status'] = 'REJECTED'
+        logger.warning('KIS market screen rejected, keeping full collection: %s', diagnostic)
+        return None, None, diagnostic
+    floor = MIN_TRADING_VALUE * KIS_SHORTLIST_AMOUNT_FRACTION
+    shortlist = [ticker for ticker in tickers
+                 if ticker in screen.index and screen.at[ticker, 'Amount'] >= floor]
+    diagnostic.update({'status': 'USED', 'shortlist_amount_floor_usd': floor,
+                       'directory_in_screen': int(screen.index.isin(tickers).sum()),
+                       'shortlist_count': len(shortlist)})
+    return shortlist, screen, diagnostic
+
+
 def _load_screening_inputs(trade_date):
     """Apply one common-stock/cap/liquidity boundary before every US trigger."""
     mode = os.getenv('US_SCREENING_UNIVERSE', DEFAULT_US_SCREENING_UNIVERSE)
@@ -1459,11 +1519,20 @@ def _load_screening_inputs(trade_date):
         raise ValueError('Invalid expanded-universe market-cap threshold')
     universe = fetch_universe()
     tickers = _prioritized_universe(record.symbol for record in universe.records)
+    shortlist, screen, screen_diagnostic = _kis_price_shortlist(tickers, minimum)
+    if shortlist is not None:
+        tickers = shortlist
     current, previous, date, collection = get_batched_snapshot_pair(trade_date, tickers)
     from prism_core.batch_run_status import snapshot_coverage
     raw_coverage = snapshot_coverage(current, previous, tickers, trade_date, date)
     from prism_core.market_intelligence import optional_participation
-    raw_participation = optional_participation(current, previous, 'US', trade_date, len(tickers))
+    if screen is not None:
+        # Advance/decline over every directory name KIS lists above the cap floor,
+        # not only the priced shortlist.
+        listed = screen.loc[screen.index.isin([r.symbol for r in universe.records]), ['ChangeRate']]
+        raw_participation = optional_participation(listed, None, 'US', trade_date, len(listed))
+    else:
+        raw_participation = optional_participation(current, previous, 'US', trade_date, len(tickers))
     kept = []
     reasons = Counter()
     checked = 0
@@ -1497,6 +1566,7 @@ def _load_screening_inputs(trade_date):
     diagnostic = {
         'mode': mode, 'min_market_cap_usd': minimum,
         'directory_counts': universe.counts,
+        'kis_market_screen': screen_diagnostic,
         'price_coverage': raw_coverage, 'collection': collection,
         'market_participation': raw_participation,
         'liquidity_floor_usd': MIN_TRADING_VALUE,
