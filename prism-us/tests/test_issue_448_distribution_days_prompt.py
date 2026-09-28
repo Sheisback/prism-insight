@@ -217,7 +217,8 @@ def test_get_market_pulse_detail_returns_state_and_dd_us():
     rp._reset_state_cache()
     bars = _make_bars(n_flat=60, n_dd=2)
 
-    with patch.object(rp, "_fetch_us_bars", return_value=bars):
+    with patch.object(rp, "_fetch_us_bars", return_value=bars), \
+            patch.object(rp, "_fetch_us_nasdaq_bars", return_value=bars):
         detail = rp.get_market_pulse_detail("us", use_cache=False)
 
     assert detail is not None, "get_market_pulse_detail returned None for valid US bars"

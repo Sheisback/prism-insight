@@ -267,3 +267,21 @@ def test_provider_vix_holiday_extras_are_audited_not_used_as_equity_sessions():
     assert result["regime"] == baseline["regime"]
     assert result["alignment"]["^VIX"]["excluded_dates"] == ["2026-05-25", "2026-09-07"]
     assert result["source_ref"] != baseline["source_ref"]
+
+
+def test_market_pulse_uses_both_us_indexes(monkeypatch):
+    """S&P 500 >=10% drawdown alone reads UNDER_PRESSURE; both indexes -> CORRECTION."""
+    frames = market_frames()
+    spx = frames["^GSPC"].copy()
+    spx.iloc[-5:, 0] = spx["Close"].iloc[-6] * .88
+    frames["^GSPC"] = spx
+    monkeypatch.delenv("US_MARKET_PULSE_INDEX_MODE", raising=False)
+    one = market_snapshot_from_frames(frames, now="2026-09-25T14:00:00Z", pilot_flag=False)
+    assert one["market_pulse"] == "UNDER_PRESSURE"
+    frames["^IXIC"] = spx.copy()
+    both = market_snapshot_from_frames(frames, now="2026-09-25T14:00:00Z", pilot_flag=False)
+    assert both["market_pulse"] == "CORRECTION"
+    frames["^IXIC"] = market_frames()["^IXIC"]
+    monkeypatch.setenv("US_MARKET_PULSE_INDEX_MODE", "spx")
+    rollback = market_snapshot_from_frames(frames, now="2026-09-25T14:00:00Z", pilot_flag=False)
+    assert rollback["market_pulse"] == "CORRECTION"
