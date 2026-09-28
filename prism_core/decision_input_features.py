@@ -197,12 +197,12 @@ def render_facts_block(result, peer=None, earnings=None, *, market, language="ko
         f"({_num(f.get('move_atr_multiple'), 'x')} ATR20) → >5% above 20-day high or >=2 ATR: {_yn(flags['chase_zone'], language)}")
     if peer.get("status") == "OK":
         lines.append(
-            f"- 동종업계 밸류에이션(WiseFn 선정 비교군 {peer.get('peer_count')}개, 재무 {peer.get('period')}, "
+            f"- 동종업계 밸류에이션(선정 비교기업 {peer.get('peer_count')}개, 재무 {peer.get('period')}, "
             f"{peer.get('price_basis')} 기준): PER 중앙값 {_num(peer.get('peer_median_per'))}(본 종목 "
             f"{_num(peer.get('target_per'))}, 할인 {_num(peer.get('per_discount_vs_median_pct'), '%')}), PBR 중앙값 "
             f"{_num(peer.get('peer_median_pbr'))}(본 종목 {_num(peer.get('target_pbr'))}) → 업종 평균 대용 가능(비교군 3개 이상): "
             f"{_yn(flags['peer_usable'], language)}" if ko else
-            f"- Peer valuation (WiseFn-selected {peer.get('peer_count')} peers, financials {peer.get('period')}): PER median "
+            f"- Peer valuation (selected {peer.get('peer_count')} peers, financials {peer.get('period')}): PER median "
             f"{_num(peer.get('peer_median_per'))} (this {_num(peer.get('target_per'))}, discount "
             f"{_num(peer.get('per_discount_vs_median_pct'), '%')}), PBR median {_num(peer.get('peer_median_pbr'))} "
             f"→ usable as industry average (>=3 peers): {_yn(flags['peer_usable'], language)}")
@@ -231,7 +231,7 @@ def prompt_contract(language="ko", market="KR"):
 - 3단계 1번(최근 3거래일 내 거래량 200%): 확정 세션 기준 '충족: 예'이면 충족입니다. '아니오'이면 확정 세션 기준 미충족이며,
   진행 중인 당일 봉은 기존 기준대로 미확정으로 둡니다.
 - 4단계 'PER 30% 이상 저평가'와 미진입 단독 사유 2번(PER ≥ 업종 평균 2.5배): 보고서 2-1에 업종 평균이 없으면 블록의
-  동종업계 중앙값을 업종 평균으로 씁니다. 비교군은 WiseFn 선정 기업이며 업종 전체가 아님을 rationale에 밝히십시오.
+  동종업계 중앙값을 업종 평균으로 씁니다. 비교군은 선정된 비교기업이며 업종 전체가 아님을 rationale에 밝히되, 자료 제공 업체명은 쓰지 마십시오.
   '업종 평균 대용 가능: 아니오'면 참고만 하십시오.
 - 위치 수치는 기존 '추격 위험 검토'와 손절·목표 설정의 근거 수치입니다. 20일 고가는 오닐 피벗의 근사치이며,
   '예'만으로 미진입하지 말고 돌파 실패·가격 밀림 등 기존 추격 위험 조건과 함께 판단하십시오."""
@@ -248,7 +248,7 @@ If an item is 'missing', judge from the report as before and never count the sam
 - Step 3 item 1 (volume 200% within the last 3 sessions): 'met: yes' on completed sessions counts as satisfied. 'no' means not met
   on completed sessions; the unfinished current bar stays unconfirmed as before.
 - Step 4 'PE discount >= 30%' and standalone No-Entry 2 (PE >= 2.5x industry average): when report 2-1 lacks an industry average,
-  use the block's peer median and state in the rationale that it is a WiseFn-selected peer set, not the whole industry.
+  use the block's peer median and state in the rationale that it is a selected peer set, not the whole industry, without naming the data vendor.
   If 'usable as industry average: no', use it for reference only.
 - Location figures support the existing chasing-risk assessment and stop/target placement. The 20-day high is only a proxy for
   the O'Neil pivot; do not reject on 'yes' alone, judge it together with the existing failed-breakout/price-retreat conditions."""

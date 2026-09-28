@@ -237,7 +237,7 @@ def render_peer_markdown(peers, excluded=()):
         lines.append("| 재무 연월 | " + " | ".join(p["period"] for p in peers) + " | - |")
     lines += ["", " ".join(_comparison_sentences(peers, values)), ""]
     period_text = periods[0] if len(periods) == 1 else "기업별 상이(표 참고)"
-    lines.append(f"출처: WiseReport 경쟁사분석(WiseFn 선정 비교기업) · 재무 기준 {period_text} 연간 실적 · "
+    lines.append(f"비교기업: 증권정보 제공사 선정 · 재무 기준 {period_text} 연간 실적 · "
                  "가격 기준 전일종가(시가총액·PER·PBR)")
     if excluded:
         names = "·".join(p["name"] for p in excluded)

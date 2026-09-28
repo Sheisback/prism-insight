@@ -114,7 +114,8 @@ def test_render_table_median_and_sentences():
     assert "| ROE(%) | 9.7 | 22.5 | 9.4 | 12.5 | -5.1 | 11.0 |" in out
     assert "PER은 26.09배로 비교기업 중앙값(22.21배) 대비 약 17% 할증된 수준입니다." in out
     assert "매출액 기준으로는 비교 대상 5개사 중 5위입니다." in out
-    assert "재무 기준 2025/12 연간 실적" in out and "전일종가" in out and "WiseFn 선정 비교기업" in out
+    assert "재무 기준 2025/12 연간 실적" in out and "전일종가" in out and "증권정보 제공사 선정" in out
+    assert "WiseFn" not in out and "WiseReport" not in out
     assert "연결과 별도 재무기준이 섞여" in out
 
 

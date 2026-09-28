@@ -124,7 +124,7 @@ def parse_financial_summary(html):
     if actual[list(_REQUIRED)].notna().any(axis=1).sum() < _MIN_ACTUAL_YEARS:
         raise ValueError("summary_too_few_actual_years")
     frame.attrs.update({
-        "source": "WiseReport Financial Summary (annual)",
+        "source": "Annual financial summary",
         "basis": ", ".join(sorted(bases)) or "unknown",
         "unit_money": "100M KRW",
         "note": "(A) fiscal year-end price basis; (E) consensus estimate",
