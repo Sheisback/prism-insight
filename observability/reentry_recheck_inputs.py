@@ -12,6 +12,14 @@ from prism_core.decision_input_features import compute, render_facts_block
 
 REPORT_DIRS = {"KR": "reports", "US": "prism-us/reports"}
 TRANSLATED = re.compile(r"_(en|ja|zh|es)\.md$")
+# Report .md files embed their charts as base64 (~90% of the characters). The production BUY
+# reads text extracted from the PDF, so the recheck drops the image payloads the same way.
+EMBEDDED_IMAGE = re.compile(r"data:image/[A-Za-z0-9.+-]+;base64,[A-Za-z0-9+/=]+")
+
+
+def strip_embedded_images(text):
+    """Report text without base64 image payloads (the hash of the raw report is kept separately)."""
+    return EMBEDDED_IMAGE.sub("[차트 이미지 생략]", text)
 RECHECK_KO = """
 
 ## 재진입 재점검 모드 (이번 요청에만 적용)

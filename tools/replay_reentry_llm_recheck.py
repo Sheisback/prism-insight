@@ -27,7 +27,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from observability.reentry_recheck_inputs import (  # noqa: E402
-    _as_dt, archived_report, latest_report, recheck_instruction, technical_block,
+    _as_dt, archived_report, latest_report, recheck_instruction, strip_embedded_images, technical_block,
 )
 from tools.replay_pivot_reentry import load_bars  # noqa: E402
 
@@ -68,7 +68,7 @@ async def run(records, market, bars_by_ticker, bench, reports_root, out, concurr
                             f"- 원래 점수/최소점수: {rec.get('score')}/{rec.get('min_score')}\n"
                             f"- 원래 사유: {str(rec.get('reason') or '')[:500]}\n")
                 user = (f"재진입 재점검 요청입니다.\n\n{original}\n{facts}\n### Report Content:\n"
-                        f"{report.read_text(encoding='utf-8')}\n")
+                        f"{strip_embedded_images(report.read_text(encoding='utf-8'))}\n")
                 result = await generate_codex_fast_async(system_prompt=system, user_prompt=user, model=settings.model,
                                                          reasoning_effort=settings.reasoning_effort,
                                                          timeout=settings.timeout, mcp_profile=None,

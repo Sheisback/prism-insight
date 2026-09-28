@@ -16,7 +16,9 @@ import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 
-from observability.reentry_recheck_inputs import archived_report, latest_report, recheck_instruction
+from observability.reentry_recheck_inputs import (
+    archived_report, latest_report, recheck_instruction, strip_embedded_images,
+)
 
 RESULT_CONTRACT = "reentry_v2_recheck_result_v1"
 MAX_ATTEMPTS = 2            # a failed call is retried once, on the next run
@@ -80,7 +82,7 @@ def user_prompt(item, report_text):
             f"{_declined_block(item.get('declined'))}"
             f"### 시장 국면(결정론적 계산): {regime}\n\n{item['facts_text']}\n"
             f"### 보고서 작성일: {ref['report_date']} (트리거일까지 {ref['age_days']}일 경과)\n\n"
-            f"### Report Content:\n{report_text}\n")
+            f"### Report Content:\n{strip_embedded_images(report_text)}\n")
 
 
 async def _codex(system, user):
