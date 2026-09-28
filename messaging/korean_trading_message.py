@@ -35,9 +35,36 @@ _LABELS = {
     'F4': '사업 모델·경쟁력 기준',
     'T1': '중기 이동평균선 이탈 조건',
     'T2': '하락 중인 단기 이동평균선 이탈 조건',
+    'BAR_FINALITY_UNKNOWN': '마감 확정 여부 미확인',
+    'KR_FLOW_EVIDENCE_V1': '수급 근거 자료',
+    'OHLCV': '일봉 시세',
+    'MCP': '시세 조회',
+    'KIS': '증권사',
 }
 _CODES = re.compile(r'(?<![A-Za-z0-9_])(' + '|'.join(map(re.escape, sorted(_LABELS, key=len, reverse=True))) + r')(?![A-Za-z0-9_])')
 _PROTECTED = re.compile(r'(https?://[^\s<>]+|```[\s\S]*?```|\[exit-event: [^\]]+\])')
+# Korean particle pairs (after final consonant, after vowel). 로/으로 is special-cased
+# because a final ㄹ takes 로.
+_PARTICLES = {'은': ('은', '는'), '는': ('은', '는'), '이': ('이', '가'), '가': ('이', '가'),
+              '을': ('을', '를'), '를': ('을', '를'), '과': ('과', '와'), '와': ('과', '와'),
+              '으로': ('으로', '로'), '로': ('으로', '로')}
+_RENDERED = sorted(set(_LABELS.values()) | {'필수 재무·사업 기준 4개', '하락 추세 차단 조건', '이동평균선'},
+                   key=len, reverse=True)
+_LABEL_PARTICLE = re.compile(
+    '(' + '|'.join(map(re.escape, _RENDERED)) + ')(으로|은|는|이|가|을|를|과|와|로)'
+    r'(?=(?:부터|서|써|의)?(?![가-힣]))')
+
+
+def _fix_particle(match):
+    word, particle = match[1], match[2]
+    last = word[-1]
+    if not '가' <= last <= '힣':
+        return match[0]
+    final = (ord(last) - 0xAC00) % 28
+    with_final, without_final = _PARTICLES[particle]
+    if particle in ('로', '으로'):
+        return word + ('로' if final in (0, 8) else '으로')
+    return word + (with_final if final else without_final)
 
 
 def _render_prose(text: str) -> str:
@@ -54,14 +81,28 @@ def _render_prose(text: str) -> str:
     text = re.sub(r'(?<![A-Za-z0-9_])MA(\d+)((?:·MA\d+)+)(?![A-Za-z0-9_])',
                   lambda m: m[1] + m[2].replace('MA', '') + '일 이동평균선', text)
     text = re.sub(r'(?<![A-Za-z0-9_])MA(\d+)(?![A-Za-z0-9_])', r'\1일 이동평균선', text)
-    # Numeric identifiers use vowel particles in model prose; Korean labels end
-    # in "기준", so repair these two particles at the same presentation boundary.
-    text = re.sub(r'(?<![A-Za-z0-9_])(F[1-4])를', lambda m: _LABELS[m[1]] + '을', text)
-    text = re.sub(r'(?<![A-Za-z0-9_])(F[1-4])가', lambda m: _LABELS[m[1]] + '이', text)
-    return _CODES.sub(lambda m: _LABELS[m[0]], text)
+    text = _CODES.sub(lambda m: _LABELS[m[0]], text)
+    # Codes read with a vowel ending (F4는, T1·T2가, MCP를) keep the model's particle;
+    # re-pick it for the Korean label that replaced the code.
+    return _LABEL_PARTICLE.sub(_fix_particle, text)
 
 
 def render_korean_trading_message(text: str) -> str:
     """Translate known display codes while preserving URLs, IDs and numbers."""
     return ''.join(part if index % 2 else _render_prose(part)
                    for index, part in enumerate(_PROTECTED.split(text)))
+
+
+def korean_rationale_style_contract(language="ko"):
+    """Prompt rule for text that is sent to Korean readers as-is; wording only."""
+    if language != "ko":
+        return ""
+    return """
+
+## 판단 근거 문장 작성 규칙 (한국어 메시지로 그대로 발송됩니다)
+- rationale·sell_reason·조정 reason은 사람이 읽는 한국어 합쇼체 문장으로 쓰십시오.
+- 입력의 내부 코드·변수명·상태값(예: F1~F4, T1·T2, BAR_FINALITY_UNKNOWN, NOT_IN_INPUT, MCP, KIS, OHLCV)을
+  그대로 옮기지 말고 '수익성 기준', '하락 추세 차단 조건', '마감 확정 전 가격', '시세 조회'처럼 풀어 쓰십시오.
+- 조사는 바로 앞 단어의 받침에 맞추십시오(예: 기준은·조건이·이동평균선을·비율로).
+- 이 규칙은 표현만 정하며 수치·점수·매매 판단을 바꾸지 않습니다.
+"""

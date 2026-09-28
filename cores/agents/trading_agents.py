@@ -812,6 +812,8 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
     from prism_core.decision_input_features import prompt_contract, prompt_facts_enabled
     if prompt_facts_enabled():
         instruction += prompt_contract("en" if language == "en" else "ko", market="KR")
+    from messaging.korean_trading_message import korean_rationale_style_contract
+    instruction += korean_rationale_style_contract(language)
 
     return Agent(
         name="trading_scenario_agent",
@@ -833,6 +835,7 @@ def create_sell_decision_agent(language: str = "ko"):
     Returns:
         Agent: Sell decision agent
     """
+    from messaging.korean_trading_message import korean_rationale_style_contract
 
     if language == "en":
         instruction = """## 🎯 Your Identity
@@ -1286,7 +1289,8 @@ def create_sell_decision_agent(language: str = "ko"):
 
     return Agent(
         name="sell_decision_agent",
-        instruction=instruction + sell_scenario_authority_contract(language),
+        instruction=(instruction + sell_scenario_authority_contract(language)
+                     + korean_rationale_style_contract(language)),
         # perplexity: 핵심-0 법인 이벤트(상폐/공개매수 등) 뉴스 자율 점검에 필요
         server_names=["kospi_kosdaq", "sqlite", "time", "perplexity"]
     )
