@@ -8,7 +8,7 @@ from statistics import median
 from tempfile import TemporaryDirectory
 
 from prism_core.oneil_adaptive_policy import (
-    _num, _ref, _time, _validate, create_plan, evaluate_target,
+    V1_VERSION, _num, _ref, _time, _validate, create_plan, evaluate_target,
 )
 from prism_core.strategy_ledger import StrategyLedger
 
@@ -70,8 +70,9 @@ def _validate_campaign(campaign):
         for name in ("quote", "gates", "volume", "market_window", "bars"):
             if name not in facts:
                 raise ValueError("MISSING_TICK_EVIDENCE")
-        for timestamp in (facts["quote"]["observed_at"], facts["gates"]["observed_at"],
-                          facts["volume"]["as_of"]):
+        # v2 evidence may carry volume=None (best-effort, never a gate).
+        volume_as_of = [] if facts["volume"] is None else [facts["volume"]["as_of"]]
+        for timestamp in (facts["quote"]["observed_at"], facts["gates"]["observed_at"], *volume_as_of):
             if _time(timestamp) > at:
                 raise ValueError("FUTURE_EVIDENCE")
         if any(_time(bar["end_at"]) > at for bar in facts["bars"]):
@@ -81,11 +82,13 @@ def _validate_campaign(campaign):
             raise ValueError("EVIDENCE_IDENTITY_MISMATCH")
         # Validate the whole add-evidence schema even when the economic policy
         # would exit early (expiry, protection, or a negative gate).
-        probe_plan = create_plan(symbol=plan["symbol"], entry_reference=plan["entry_reference"],
-                                 initial_stop=plan["initial_stop"],
-                                 source_decision_ref=plan["source_decision_ref"],
-                                 created_at=tick["occurred_at"], setup=plan["setup"],
-                                 entry_eligible=True, policy_version=plan["policy_version"])
+        # A v2 plan cannot be re-dated (its frozen ATR has a bounded age), so the
+        # probe uses the frozen plan; ticks after its expiry are not schema-probed.
+        probe_plan = plan if plan["policy_version"] != V1_VERSION else create_plan(
+            symbol=plan["symbol"], entry_reference=plan["entry_reference"],
+            initial_stop=plan["initial_stop"], source_decision_ref=plan["source_decision_ref"],
+            created_at=tick["occurred_at"], setup=plan["setup"], entry_eligible=True,
+            policy_version=V1_VERSION)
         probe = evaluate_target(probe_plan, facts, now=tick["occurred_at"],
                                 cumulative_allocation=0, remaining_allocation=0,
                                 normalized_units=0, remaining_entry_cost=0,

@@ -37,12 +37,18 @@ def _number(value, positive=False):
 
 
 def build_intraday_inputs(*, symbol, bars, calendar, as_of, retrieved_at,
-                          price_basis_ref, source_ref, kind, retrieval_started_at=None):
+                          price_basis_ref, source_ref, kind, retrieval_started_at=None,
+                          volume_required=True):
     """Require all 21 exact regular-session prefixes, never fill missing bars.
 
     ``calendar`` has ``calendar_ref`` and exactly 21 chronological ``sessions``
     with trade_date/open_at/close_at. Bars use raw provider_timestamp/OHLCV plus
     dividends and stock_splits. Timestamps identify five-minute bucket starts.
+
+    ``volume_required=False`` (adaptive v2, where volume never gates) keeps the
+    current-session prefix strict but makes the matched-volume block best-effort:
+    an unmatched comparison (short/half-day prior session, prior prefix gap or a
+    zero prior denominator) yields ``volume=None`` instead of a non-OK status.
     """
     result = {"contract_version": VERSION, "symbol": symbol, "kind": kind,
               "source_ref": source_ref, "price_basis_ref": price_basis_ref,
@@ -96,10 +102,12 @@ def build_intraday_inputs(*, symbol, bars, calendar, as_of, retrieved_at,
         if not opened < now <= closed or (now - opened) % STEP:
             return fail("AS_OF_NOT_COMPLETED_REGULAR_BOUNDARY")
         elapsed = now - opened
-        if any(end - start < elapsed for _, start, end in periods):
+        short_prior = any(end - start < elapsed for _, start, end in periods)
+        if short_prior and volume_required:
             return fail("PRIOR_SESSION_TOO_SHORT", "MISSING")
+        current_expected = {opened + STEP * index for index in range(int(elapsed / STEP))}
         expected = {start + STEP * index
-                    for _, start, _ in periods
+                    for _, start, end in periods if end - start >= elapsed
                     for index in range(int(elapsed / STEP))}
         period_by_date = {day: (start, end) for day, start, end in periods}
         normalized = {}
@@ -146,23 +154,30 @@ def build_intraday_inputs(*, symbol, bars, calendar, as_of, retrieved_at,
             return fail("CORPORATE_ACTION_BASIS_UNVERIFIED", "MISSING")
         if action_unknown:
             return fail("CORPORATE_ACTION_EVIDENCE_MISSING", "MISSING")
-        if set(normalized) != expected:
+        if not current_expected <= set(normalized) or (
+                volume_required and set(normalized) != expected):
             return fail("REGULAR_PREFIX_GAP", "MISSING")
         minutes = int(elapsed.total_seconds() / 60)
         samples = []
-        for day, start, _ in periods:
-            total = sum((Decimal(normalized[start + STEP * index]["volume"])
-                         for index in range(int(elapsed / STEP))), Decimal(0))
-            samples.append({"trade_date": day, "elapsed_minutes": minutes,
-                            "cumulative_volume": str(total), "complete": True,
-                            "regular": True, "source_ref": source_ref})
-        if not sum(Decimal(sample["cumulative_volume"]) for sample in samples[:-1]):
-            return fail("MISSING_VOLUME_DENOMINATOR", "MISSING")
+        matched = not short_prior and set(normalized) == expected
+        if matched:
+            for day, start, _ in periods:
+                total = sum((Decimal(normalized[start + STEP * index]["volume"])
+                             for index in range(int(elapsed / STEP))), Decimal(0))
+                samples.append({"trade_date": day, "elapsed_minutes": minutes,
+                                "cumulative_volume": str(total), "complete": True,
+                                "regular": True, "source_ref": source_ref})
+            matched = bool(sum(Decimal(sample["cumulative_volume"]) for sample in samples[:-1]))
+            if not matched and volume_required:
+                return fail("MISSING_VOLUME_DENOMINATOR", "MISSING")
         result["bars"] = [{"start_at": stamp.isoformat(), "end_at": (stamp + STEP).isoformat(),
                            "close": normalized[stamp]["close"], "complete": True,
                            "regular": True, "source_ref": source_ref}
-                          for stamp in sorted(expected) if opened <= stamp < now][-2:]
-        result["volume"] = {"as_of": now.isoformat(), "elapsed_minutes": minutes,
+                          for stamp in sorted(current_expected) if opened <= stamp < now][-2:]
+        if not matched:
+            # Best-effort only: never a negative signal and never a gate for v2.
+            result["reason_codes"] = ["MATCHED_VOLUME_UNAVAILABLE"]
+        result["volume"] = None if not matched else {"as_of": now.isoformat(), "elapsed_minutes": minutes,
                             "basis": "MATCHED_REGULAR_CUMULATIVE", "complete": True,
                             "regular": True, "calendar_ref": calendar_ref,
                             "source_ref": source_ref,

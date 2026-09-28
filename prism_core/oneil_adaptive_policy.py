@@ -103,6 +103,11 @@ def create_plan(*, symbol, entry_reference, initial_stop, source_decision_ref,
     if (atr_as_of > created or last_trade_date >= created.astimezone(NY).date()
             or last_trade_date >= atr_as_of.astimezone(NY).date()):
         raise ValueError("future or same-session ATR")
+    # Bound staleness independently of the setup builder: observed within a day
+    # of the plan, ending no more than 5 calendar days before the plan's NY date.
+    if (created - atr_as_of > timedelta(days=1)
+            or (created.astimezone(NY).date() - last_trade_date).days > 5):
+        raise ValueError("stale ATR")
     stop_proxy, initial = initial_sizing(entry, setup["atr14"])
     plan = {"policy_version": VERSION, "mode": "RESEARCH_ONLY", "market": "US",
             "symbol": symbol, "entry_reference": str(entry), "initial_stop": str(stop),

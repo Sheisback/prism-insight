@@ -45,6 +45,9 @@ def assemble_evidence(
             or intraday_input["price_basis_ref"] != plan["setup"]["price_basis_ref"]
         ):
             return fail("INTRADAY_IDENTITY_MISMATCH")
+        if plan["policy_version"] != VERSION and intraday_input.get("volume") is None:
+            # Frozen v1 plans keep the strict matched-volume input contract.
+            return fail("MATCHED_VOLUME_REQUIRED_FOR_V1")
         as_of = _time(intraday_input["as_of"])
         if (
             not as_of <= _time(intraday_input["retrieved_at"]) <= current

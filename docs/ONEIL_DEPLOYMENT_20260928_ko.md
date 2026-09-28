@@ -129,3 +129,28 @@ Ruff 새 위반0, 컴파일·diff 검사를 통과했다.
 두 버전 모두 SHADOW 소유자 외 직접 target/sell/mark를 거부한다. 기존 설정 파일의
 `policy=oneil-adaptive-v1`은 OFF/SHADOW에서 그대로 유효하지만, LIVE는 설정과 승인 모두
 `oneil-adaptive-v2`와 현재 구현 해시를 요구한다.
+
+### v2 리뷰 반영 및 알려진 제약
+
+- 실효 최초 비중 범위는 **0.35~0.80**이다. stop_proxy 상한이 10%이므로
+  0.5×0.07/0.10 = 0.35가 최솟값이며, 공식의 0.30 하한은 실제로 적용되지 않는다(공식은 변경하지 않음).
+- 5분봉 입력 생성기의 매칭 거래량 블록은 v2에서 best-effort다. 반일장 등으로 이전 세션이
+  짧거나, 이전 구간 거래량 합이 0이거나, 이전 구간 봉이 빠지면 `volume=None`
+  (`MATCHED_VOLUME_UNAVAILABLE`)이고 상태는 OK로 유지된다. 당일 구간 봉은 여전히 엄격하다.
+  v1 계획은 입력 브리지에서 매칭 거래량을 계속 요구한다(`MATCHED_VOLUME_REQUIRED_FOR_V1`).
+- `create_plan`(v2)은 ATR 관측이 계획 생성보다 1일 넘게 오래되었거나, ATR 마지막 거래일이
+  계획의 뉴욕 날짜보다 5 달력일 넘게 앞서면 거부한다.
+- 보호 전용 설정 로드(`protection_only`)는 `mode=LIVE`이면서 `policy=oneil-adaptive-v1`인 파일도
+  계속 읽는다. 신규 위험(LIVE 매수·증액)만 v2 설정과 v2 승인을 요구한다.
+- LIVE 승인 구현 해시에 ATR·추세·소유권 모듈(`oneil_auto_review*`, `oneil_setup_inputs`,
+  `oneil_intraday_inputs`, `oneil_runtime`, `strategy_ledger`, `oneil_input_bridge`)을 포함했다.
+- (L1) 배포는 US 배치 시간(crontab 00:15, 06:30 KST) 밖에서 한다. 배포 전에 작성된 보고서 sidecar는
+  volatility 절이 없어 재계산 번들과 일치하지 않으므로, 같은 배치의 캡처에는 적응형 계획이 생기지 않는다.
+- (L7) 연구/레거시 보조 도구는 v2를 완전히 지원하지 않는다. paired replay는 적응형 arm을 10%에서
+  시작하므로 v2 틱이 모두 증액이 되어 추세 증거가 필요하고, 만료 후 틱은 스키마 probe를 하지 않는다.
+  `oneil_live_boundary.project_live_candidate`(운영 미사용)는 최초 50% 초과 v2 진입을 차단(fail-closed)한다.
+  `INITIAL_POLICY_50` 이름은 v2의 0.35~0.80 최초 비중과 맞지 않지만 식별자로 유지한다.
+- (L8) `run_oneil_execution --check`와 health 출력은 운용자 설정 파일의 `policy`를 그대로 보여 주므로,
+  배포 후 설정을 다시 쓰기 전까지 v1로 표시된다. 새 캠페인은 설정과 무관하게 v2 계획을 고정한다.
+  배포 후 `python tools/configure_oneil_execution.py --mode SHADOW --from-configured-us`를 다시 실행하면
+  `policy=oneil-adaptive-v2`로 기록된다.

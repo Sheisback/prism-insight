@@ -92,6 +92,7 @@ def build_packet(
     report_text=None,
     review=None,
     decision_ref=None,
+    volume_required=True,
 ):
     reasons = []
     symbol, as_of, calendar = source["symbol"], source["as_of"], source["calendar"]
@@ -154,6 +155,7 @@ def build_packet(
             price_basis_ref=BASIS,
             source_ref=digest(source),
             kind=kind,
+            volume_required=volume_required,
         )
     setup = build_setup_input(
         report_text=report_text,
@@ -169,7 +171,7 @@ def build_packet(
     if not intraday.get("usable_for_prospective"):
         missing.append("NO_PROSPECTIVE_INTRADAY_INPUT")
     relative = None
-    if intraday["status"] == "OK":
+    if intraday["status"] == "OK" and intraday["volume"] is not None:
         volume = intraday["volume"]
         mean = sum(Decimal(x["cumulative_volume"]) for x in volume["samples"]) / 20
         relative = str(Decimal(volume["cumulative_volume"]) / mean)
