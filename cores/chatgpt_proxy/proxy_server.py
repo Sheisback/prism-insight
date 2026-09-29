@@ -4,6 +4,7 @@ Lightweight aiohttp web server that translates Chat Completions API
 requests to ChatGPT Responses API format and back.
 """
 
+import asyncio
 import json
 import logging
 
@@ -232,6 +233,7 @@ async def handle_codex_responses(request: web.Request) -> web.StreamResponse:
     this route leaves one login and one refresh owner. Unlike ``/v1/responses``
     the SSE stream is returned byte for byte: the CLI parses the events itself,
     and the model name (e.g. gpt-6-astra) and ``service_tier`` are not mapped.
+    Only ``store=False`` and ``stream=True`` are forced, as the backend requires.
     """
     try:
         body = await request.json()
@@ -248,7 +250,7 @@ async def handle_codex_responses(request: web.Request) -> web.StreamResponse:
         token = await _token_manager.get_token()
         account_id = await _token_manager.get_account_id()
     except Exception as e:  # noqa: BLE001 - surfaced to the CLI as an auth failure
-        logger.error("Codex passthrough token retrieval failed: %s", type(e).__name__)
+        logger.error("Codex passthrough authentication unavailable (%s)", type(e).__name__)
         return web.json_response(
             {"error": {"message": "OAuth authentication unavailable", "type": "authentication_error"}}, status=401)
 
@@ -281,9 +283,14 @@ async def handle_codex_responses(request: web.Request) -> web.StreamResponse:
                 response = web.StreamResponse(status=200, headers={
                     **relayed, "Content-Type": "text/event-stream", "Cache-Control": "no-cache"})
                 await response.prepare(request)
-                async for chunk in upstream.content.iter_any():
-                    await response.write(chunk)
-                await response.write_eof()
+                try:
+                    async for chunk in upstream.content.iter_any():
+                        await response.write(chunk)
+                    await response.write_eof()
+                except (ConnectionResetError, asyncio.CancelledError):
+                    # The CLI went away mid-stream (timeout/cancel); both sessions close here.
+                    logger.debug("Codex passthrough client disconnected mid-stream")
+                    raise
                 return response
     except aiohttp.ClientError as e:
         logger.error("Codex passthrough connection failed: %s", type(e).__name__)
