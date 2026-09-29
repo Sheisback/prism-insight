@@ -159,7 +159,17 @@ class TokenManager:
                 self._auth_data = self._load_from_disk()
 
             if self._is_expired(self._auth_data):
-                self._auth_data = await self._refresh_token(self._auth_data)
+                # Another process (healthcheck cron, batch proxy) may already have
+                # rotated the file. Refreshing with a stale cached refresh token
+                # would fail and could invalidate the newer session.
+                try:
+                    on_disk = self._load_from_disk()
+                except (OSError, ValueError, ChatGPTAuthExpiredError):
+                    on_disk = None
+                if on_disk and on_disk.get("access_token") and not self._is_expired(on_disk):
+                    self._auth_data = on_disk
+                else:
+                    self._auth_data = await self._refresh_token(on_disk or self._auth_data)
 
             return self._auth_data["access_token"]
 

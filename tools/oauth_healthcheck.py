@@ -143,6 +143,9 @@ def _alert(title: str, body: str) -> None:
     print(f"[oauth-health] ALERT sent={ok}: {title}")
 
 
+PROACTIVE_REFRESH_HOURS = 2.0  # > the 30-minute cron interval, with margin
+
+
 async def _check_token() -> tuple[bool, str]:
     """Return (healthy, detail). Attempts a real refresh via TokenManager."""
     from cores.chatgpt_proxy.constants import AUTH_FILE
@@ -157,6 +160,14 @@ async def _check_token() -> tuple[bool, str]:
         data = tm._auth_data or {}
         expires_at = data.get("expires_at", 0)
         hours_left = (expires_at - time.time()) / 3600.0
+        # The persistent 18742 proxy (reports and, since 2026-09-29, the BUY/SELL
+        # Codex CLI) never refreshes. With a 5-minute refresh buffer and this
+        # 30-minute cron, the token could sit expired for up to ~25 minutes, so
+        # rotate it ahead of time while this run is the refresh owner.
+        if hours_left < PROACTIVE_REFRESH_HOURS:
+            data = await tm._refresh_token(dict(data))
+            tm._auth_data = data
+            hours_left = (data.get("expires_at", 0) - time.time()) / 3600.0
         detail = f"access_token expires in {hours_left:.1f}h"
         # Access tokens auto-refresh; only warn if a refresh somehow left it short.
         if hours_left < 0:
