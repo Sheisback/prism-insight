@@ -75,3 +75,18 @@
 
 LIVE 수정(사용자 승인). 배포 전 테스트·PR CI·운영 스모크·첫 정규 배치는 아래에
 구분해 기록한다.
+
+## 배포·관측 기록
+
+- 배포 전: 신규 15 + 관련 211 + KR full batch 11 + US full batch 21 passed(로컬 py3.12),
+  PR #835 head `802f46c6` 필수 CI 전부 통과, 독립 리뷰 APPROVE(blocker 없음).
+- 배포: 2026-09-29 09:4x KST, db-server·app-server `9277093` ff-only, 양쪽 clean. cron hash 불변.
+  app-server의 상주 봇은 변경 파일을 import하지 않아 재시작하지 않음.
+- 운영 스모크(db-server 운영 Python 3.11.11): py_compile OK, 관련 35 passed. 읽기 전용 실데이터
+  팩트 생성 — KR 005930/030530 장중(09:39) 미완성봉 `pending` 정상, US MDB(마감 후) 9/28 8.77배
+  확정 세션 `met` 정상. 주문·발송 없음.
+- **첫 정규 배치(KR 9/29 오전) 관측:** 배포 시점에 배치가 보고서 단계였고 매매 단계에서 새 코드
+  로드. `[VolumeFacts] 009150 signal1=undetermined partial=0.34`, `001820 ... partial=0.46`.
+  BUY 근거가 결정론 팩트를 인용하고 "200% 충족에 가산하지 않으며 거래량 부진 근거로도 사용하지
+  않습니다"라고 기술. 두 종목 미진입은 R/R floor 미달(거래량 무관).
+- 미관측: 하한 충족(`met_lower_bound`) 실사례, US 정규 배치(9/29 10:15 ET 이후).
