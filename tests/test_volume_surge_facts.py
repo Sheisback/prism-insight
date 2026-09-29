@@ -214,6 +214,8 @@ with ExitStack() as stack:
     assert "2026-09-25 0.71배" in facts, facts
     assert "신호 1 판정: 충족" in facts, facts
     assert "T1_hit" in facts and "T2_hit" in facts, facts
+    # 52-week high from completed sessions only: today's 95.0 bar is excluded.
+    assert "52주 확정 최고가(당일 봉 제외, 확정 250거래일)" in facts, facts
     print(market + " producer volume facts ok")
 '''
 
