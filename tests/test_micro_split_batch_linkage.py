@@ -174,3 +174,60 @@ def test_real_pipeline_completion_boundary(monkeypatch, tmp_path, tracking_ok, r
     else:
         tracker.run.assert_awaited_once()
         instance.send_trigger_alert.assert_not_awaited()
+
+
+def test_translated_pdfs_start_only_after_tracking(monkeypatch, tmp_path):
+    """2026-09-29: 12 report translations ran beside BUY/SELL on one OAuth quota,
+    hit the 5-hour limit first and every buy decision failed with 429."""
+    source = Path(__file__).resolve().parents[1] / "prism-us/us_stock_analysis_orchestrator.py"
+    text = source.read_text()
+    assert "create_task(self._send_translated_pdfs" not in text  # queued, never started early
+    tree = ast.parse(text)
+    method = next(node for node in ast.walk(tree) if isinstance(node, ast.AsyncFunctionDef) and node.name == "run_full_pipeline")
+    ns = {
+        "logger": MagicMock(), "resolve_us_trade_date": lambda _: "20260911",
+        "PRISM_US_DIR": tmp_path, "os": SimpleNamespace(path=SimpleNamespace(exists=lambda _: False)),
+        "asyncio": asyncio, "nullcontext": nullcontext, "COLLECTING": "COLLECTING",
+        "datetime": datetime, "ZoneInfo": ZoneInfo, "SKIPPED": "SKIPPED",
+        "result_fingerprint": result_fingerprint, "fresh_result_metadata": fresh_result_metadata,
+        "batch_status_message": batch_status_message,
+        "_import_main_archive_ingest": lambda: SimpleNamespace(ingest_reports_async=AsyncMock()),
+    }
+    for name in ("publish_batch_campaign_best_effort", "publish_batch_reports_best_effort", "publish_batch_tracking_story_best_effort"):
+        ns[name] = AsyncMock()
+    exec(compile(ast.Module(body=[method], type_ignores=[]), str(source), "exec"), ns)  # noqa: S102 - repository method
+    order = []
+
+    async def track(*args, **kwargs):
+        order.append("tracking")
+        return True
+
+    async def translate():
+        order.append("translation")
+
+    tracker = SimpleNamespace(run=track, last_batch_messages=[])
+    monkeypatch.setitem(__import__("sys").modules, "us_stock_tracking_agent", SimpleNamespace(
+        USStockTrackingAgent=lambda **_: tracker, _us_codex_runtime_enabled=lambda: True, app=None,
+    ))
+    monkeypatch.setitem(__import__("sys").modules, "telegram_config", SimpleNamespace(
+        is_openai_quota_error=lambda _: False, send_openai_quota_alert=AsyncMock(),
+    ))
+    instance = SimpleNamespace(
+        run_macro_intelligence=AsyncMock(return_value={}),
+        run_trigger_batch=AsyncMock(return_value=["HPE"]),
+        generate_reports=AsyncMock(return_value=["r"]),
+        convert_to_pdf=AsyncMock(return_value=["p"]),
+        generate_telegram_messages=AsyncMock(return_value=[]),
+        send_trigger_alert=AsyncMock(return_value=True),
+        _campaign_messages={}, _broadcast_tasks=[], _deferred_broadcasts=[],
+        telegram_config=SimpleNamespace(use_telegram=True, log_status=lambda: None, validate_or_raise=lambda: None,
+                                        bot_token="t", channel_id="c"),
+    )
+
+    async def send_messages(*args):
+        instance._deferred_broadcasts.append(translate)  # what the real method now does
+
+    instance.send_telegram_messages = send_messages
+    asyncio.run(ns["run_full_pipeline"](instance, "afternoon"))
+    assert order == ["tracking", "translation"]
+    assert instance._deferred_broadcasts == [] and instance._broadcast_tasks == []

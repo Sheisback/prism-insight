@@ -271,6 +271,8 @@ class USStockAnalysisOrchestrator:
         self.selected_tickers = {}
         self.telegram_config = telegram_config or TelegramConfig(use_telegram=True)
         self._broadcast_tasks = []  # Collect fire-and-forget broadcast tasks
+        # Started after the BUY/SELL tracking step (see run_full_pipeline's finally).
+        self._deferred_broadcasts = []
         self._campaign_messages = {}  # Reuse the subscriber briefing on Kakao
 
     @staticmethod
@@ -835,11 +837,14 @@ class USStockAnalysisOrchestrator:
             except Exception as e:
                 logger.warning(f"[INSIGHT_IMAGE] US broadcast skipped: {e}")
 
-            # Send translated PDFs to broadcast channels asynchronously (non-blocking)
+            # Full-report translations are the heaviest model load of the batch.
+            # Queue them until the BUY/SELL tracking step has run: on 2026-09-29
+            # they shared one OAuth quota with it, hit the 5-hour limit first,
+            # and every buy decision failed with 429.
             if self.telegram_config.broadcast_languages and report_paths:
-                self._broadcast_tasks.append(
-                        asyncio.create_task(self._send_translated_pdfs(bot_agent, report_paths))
-                    )
+                self._deferred_broadcasts.append(
+                    lambda: self._send_translated_pdfs(bot_agent, report_paths)
+                )
 
         except Exception as e:
             logger.error(f"Error during telegram message transmission: {str(e)}")
@@ -1587,6 +1592,11 @@ class USStockAnalysisOrchestrator:
         finally:
             if shadow_batch_token is not None:
                 end_shadow_batch(shadow_batch_token)
+            # Tracking is done (or skipped); now start the deferred translations.
+            deferred = getattr(self, "_deferred_broadcasts", None) or []
+            for start in deferred:
+                self._broadcast_tasks.append(asyncio.create_task(start()))
+            deferred.clear()
             # Always wait for background broadcast tasks, even on error/early return
             if self._broadcast_tasks:
                 logger.info(f"Waiting for {len(self._broadcast_tasks)} broadcast translation task(s) to complete...")
