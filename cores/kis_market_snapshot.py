@@ -211,7 +211,16 @@ def fetch_kis_intraday_snapshot(
         chunk = codes[offset : offset + _CHUNK_SIZE]
         last_reason = "no response"
         for attempt in range(1, max_attempts + 1):
-            response = trading._request(_URL, _TR_ID, _params(chunk))
+            try:
+                response = trading._request(_URL, _TR_ID, _params(chunk))
+            except (requests.exceptions.RequestException, OSError) as error:
+                # A dropped connection or read timeout is as transient as a
+                # rejected chunk; one blip must not abort the whole batch.
+                response = None
+                last_reason = type(error).__name__
+                if attempt < max_attempts and retry_wait_sec:
+                    time.sleep(retry_wait_sec * attempt)
+                continue
             if response and response.isOK():
                 for row in list(getattr(response.getBody(), "output", None) or []):
                     code = str(row.get("inter_shrn_iscd", "")).strip().zfill(6)
