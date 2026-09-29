@@ -31,6 +31,7 @@ def create_app(token_manager: TokenManager) -> web.Application:
     app = web.Application(client_max_size=MAX_REQUEST_BYTES)
     app.router.add_post("/v1/chat/completions", handle_chat_completions)
     app.router.add_post("/v1/responses", handle_responses)
+    app.router.add_post("/v1/codex/responses", handle_codex_responses)
     app.router.add_get("/health", handle_health)
     return app
 
@@ -217,3 +218,75 @@ async def handle_responses(request: web.Request) -> web.Response:
         return err
 
     return web.json_response(api_response)
+
+
+# Upstream rate-limit headers the Codex CLI reads; everything else stays local.
+_CODEX_PASSTHROUGH_HEADERS = ("x-codex-", "x-request-id", "openai-")
+
+
+async def handle_codex_responses(request: web.Request) -> web.StreamResponse:
+    """Stream a Codex CLI Responses request through this proxy's OAuth login.
+
+    The Codex CLI (BUY/SELL) used to keep its own login, a second session whose
+    refresh rotation could log out this proxy's. Pointing its model provider at
+    this route leaves one login and one refresh owner. Unlike ``/v1/responses``
+    the SSE stream is returned byte for byte: the CLI parses the events itself,
+    and the model name (e.g. gpt-6-astra) and ``service_tier`` are not mapped.
+    """
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        return web.json_response(
+            {"error": {"message": "Invalid JSON body", "type": "invalid_request_error"}}, status=400)
+    if not isinstance(body, dict) or not body.get("model"):
+        return web.json_response(
+            {"error": {"message": "model is required", "type": "invalid_request_error"}}, status=400)
+    if not _token_manager:
+        return web.json_response(
+            {"error": {"message": "Token manager not initialized", "type": "server_error"}}, status=500)
+    try:
+        token = await _token_manager.get_token()
+        account_id = await _token_manager.get_account_id()
+    except Exception as e:  # noqa: BLE001 - surfaced to the CLI as an auth failure
+        logger.error("Codex passthrough token retrieval failed: %s", type(e).__name__)
+        return web.json_response(
+            {"error": {"message": "OAuth authentication unavailable", "type": "authentication_error"}}, status=401)
+
+    body = {**body, "store": False, "stream": True}  # mandatory for the ChatGPT Codex backend
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "OpenAI-Beta": "responses=experimental",
+        "accept": "text/event-stream",
+    }
+    if account_id:
+        headers["chatgpt-account-id"] = account_id
+    for name in ("originator", "session_id", "version", "user-agent"):
+        if request.headers.get(name):
+            headers[name] = request.headers[name]
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                CHATGPT_RESPONSES_URL, json=body, headers=headers,
+                timeout=aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=300),
+            ) as upstream:
+                relayed = {k: v for k, v in upstream.headers.items()
+                           if k.lower().startswith(_CODEX_PASSTHROUGH_HEADERS)}
+                if upstream.status != 200:
+                    data = await upstream.read()
+                    logger.warning("Codex passthrough upstream error (%d)", upstream.status)
+                    return web.Response(status=upstream.status, body=data, headers=relayed,
+                                        content_type=upstream.content_type or "application/json")
+                response = web.StreamResponse(status=200, headers={
+                    **relayed, "Content-Type": "text/event-stream", "Cache-Control": "no-cache"})
+                await response.prepare(request)
+                async for chunk in upstream.content.iter_any():
+                    await response.write(chunk)
+                await response.write_eof()
+                return response
+    except aiohttp.ClientError as e:
+        logger.error("Codex passthrough connection failed: %s", type(e).__name__)
+        return web.json_response(
+            {"error": {"message": "Upstream connection error", "type": "server_error"}}, status=502)
+
