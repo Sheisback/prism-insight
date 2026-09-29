@@ -1027,6 +1027,27 @@ class StockTrackingAgent:
                 f"- T1_hit(종가<{ma_mid_label}, 오닐 10주선 이탈): {t1_hit} / "
                 f"T2_hit(MA20 하락 and 종가 MA20 대비 -5%↓): {t2_hit}",
             ]
+            # Momentum signal 1 volume facts. Today's bar is always open during
+            # KR batches; a partial bar that already reaches 200% proves it.
+            try:
+                from datetime import time as dt_time
+                from zoneinfo import ZoneInfo
+                from prism_core.volume_surge_facts import (
+                    compute_volume_surge_facts, render_volume_surge_facts,
+                )
+                _vf = compute_volume_surge_facts(
+                    [ts.date() for ts in df.index], list(df['Volume']),
+                    now_local=datetime.now(ZoneInfo("Asia/Seoul")).replace(tzinfo=None),
+                    session_close=dt_time(15, 30),
+                )
+                lines.append(render_volume_surge_facts(_vf))
+                logger.info(
+                    f"[VolumeFacts] {ticker} signal1={_vf['signal1']} "
+                    f"partial={(_vf['partial_session'] or {}).get('ratio')}"
+                )
+            except Exception as _vfe:
+                logger.warning(f"[VolumeFacts] {ticker} failed, fail-open: {_vfe}")
+                lines.append("- 거래량(모멘텀 신호 1 판정용): 계산 불가 → 미확정")
             # Market Pulse (O'Neil M) 상태 + 분산일 카운트를 프롬프트 정보로 주입.
             # 프로세스당 1회 계산(regime_policy 모듈 캐시); fail-open.
             try:
