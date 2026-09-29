@@ -1331,6 +1331,23 @@ class USStockTrackingAgent:
             except Exception as _vfe:
                 logger.warning(f"[VolumeFacts] {ticker} failed, fail-open: {_vfe}")
                 lines.append("- 거래량(모멘텀 신호 1 판정용): 계산 불가 → 미확정")
+            try:
+                import pandas as pd
+                from datetime import time as dt_time
+                from zoneinfo import ZoneInfo
+                from prism_core.breakout_facts import compute_high52_facts, render_high52_facts
+                _ny = "America/New_York"
+                _hf = compute_high52_facts(
+                    [(pd.Timestamp(ts).tz_convert(_ny) if pd.Timestamp(ts).tzinfo else pd.Timestamp(ts)).date()
+                     for ts in df.index],
+                    list(df['high']), price=close,
+                    now_local=datetime.now(ZoneInfo(_ny)).replace(tzinfo=None),
+                    session_close=dt_time(16, 0),
+                )
+                lines.append(render_high52_facts(_hf, decimals=2))
+            except Exception as _hfe:
+                logger.warning(f"[BreakoutFacts] {ticker} failed, fail-open: {_hfe}")
+                lines.append("- 52주 확정 최고가: 계산 불가 → 2a (a)·(c) 미확정")
             # Market Pulse (O'Neil M) 상태 + 분산일 카운트를 프롬프트 정보로 주입.
             # prism-us/cores 섀도잉을 피해 root cores/ 파일경로로 로드; 프로세스당 1회 캐시; fail-open.
             try:

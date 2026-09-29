@@ -301,6 +301,7 @@ risk_reward_ratio  = expected_return_pct / expected_loss_pct
 - target_price: 손익비 계산 전에 근거와 보유 기간·청산 방식에 맞춰 독립적으로 결정합니다.
   1. 보고서 목표는 출처·기준일·산정 방식과 보유 기간이 적합할 때만 사용합니다. 12개월 컨센서스는 단기 목표로 자동 전용하지 않습니다.
   2. 구조적 목표는 보고서 1-1의 가장 가까운 주요 저항까지 거리의 80%를 기본으로 평가합니다. 다음 저항은 기존 보유 기간·청산 방식에 맞는 별도 근거가 있을 때만 사용하고 그 이유를 명시합니다.
+     판단 시점에 진행 중인 당일 봉의 장중 고가는 주요 저항이 아닙니다. 보고서가 당일 고가를 저항으로 적었다면 그 위의 확정된 과거 고점을 쓰고, 확정 저항이 없으면 2a 조건과 개별 추세 팩트의 '52주 확정 최고가' 줄을 확인합니다.
   2a. 상단 매물 없는 돌파(오닐 규칙 목표): 다음을 모두 충족하면 2번 대신 target_price = entry_price × 1.20으로 둡니다.
      (a) 현재가가 52주 최고가의 95% 이상입니다(3단계 모멘텀 신호 3과 같은 기준).
      (b) 보고서 1-1에서 현재가 위의 주요 저항이 없거나 그 52주 최고가(돌파 대상 고점) 하나뿐이고, entry_price × 1.20 이내에 그 밖의 주요 저항이 없습니다.
@@ -684,6 +685,7 @@ If the resulting R/R is below the matrix floor for the current regime → No Ent
 - target_price: establish independently from evidence, holding horizon and exit model BEFORE R/R.
   1. Use a report target only when source, asof, derivation and horizon fit this trade. A 12-month analyst consensus is not automatically a short-term target.
   2. For a structural target, evaluate 80% of the distance to the nearest major resistance in report 1-1. Use the next resistance only with separate evidence consistent with the existing holding horizon/exit model; explain why.
+     The intraday high of today's still-open session is not a major resistance. If the report lists today's high as resistance, use the next confirmed past high above it; if there is none, check the 2a conditions and the '52주 확정 최고가' line in the individual trend facts.
   2a. Overhead-free breakout (O'Neil rule target): if ALL of the following hold, use target_price = entry_price × 1.20 instead of step 2.
      (a) Current price is at least 95% of the 52-week high (same basis as Step 3 momentum signal 3).
      (b) Report 1-1 shows no major resistance above the current price other than that 52-week high (the breakout pivot), and no other major resistance within entry_price × 1.20.

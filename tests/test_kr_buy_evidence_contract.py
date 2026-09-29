@@ -66,9 +66,10 @@ def test_decision_rules_and_json_schema_are_byte_preserved(prompt):
     json_heading = "## JSON 응답 형식" if language == "ko" else "## JSON Response Format"
     # Refreshed stale hashes against 9203306b; volume changes preserve these bytes.
     # 2026-09-27 reviewed O'Neil overhead-free breakout target (2a); JSON schema hash unchanged.
+    # 2026-09-29 reviewed: +1 line only (today's open-bar high is not a major resistance); JSON unchanged.
     expected = {
-        "ko": ("414307fbb290660a50ee3ea1f2ff17483ea798eb768c1d23ef3a2018fb4b0981", "01eb2c841a0495724b364e5a96418b1d67f1f38c4190729dce467d6308c57125"),
-        "en": ("4a7ab1a81efdcd96e3f3a05b84c0de7d4881881005a54b6112216b202902b452", "b458120e713c714f2f29d308d1205d8fbd6ab56e6b7c8735d92e5d23ec93a771"),
+        "ko": ("9f17746b3d5907eeae5f8b7e390060cf587dc5721b95da47af291c6fd3aad2ed", "01eb2c841a0495724b364e5a96418b1d67f1f38c4190729dce467d6308c57125"),
+        "en": ("6ff36200374211b6091826b708bbb2e00355310e009589fb8ffb9a96fea921e0", "b458120e713c714f2f29d308d1205d8fbd6ab56e6b7c8735d92e5d23ec93a771"),
     }
     assert hashlib.sha256(text.split(heading)[0].encode()).hexdigest() == expected[language][0]
     assert hashlib.sha256(text[text.index(json_heading):].encode()).hexdigest() == expected[language][1]
