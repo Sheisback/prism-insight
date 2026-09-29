@@ -35,9 +35,22 @@ if str(ROOT) not in sys.path:
 KST = ZoneInfo("Asia/Seoul")
 NY = ZoneInfo("America/New_York")
 
-TABLES = {
-    "KR": {"reject": "watchlist_history", "entries": ("trading_history", "stock_holdings")},
-    "US": {"reject": "us_watchlist_history", "entries": ("us_trading_history", "us_stock_holdings")},
+# Fixed read-only queries per table (no string-built SQL).
+_REJECT_SQL = {
+    "KR": "SELECT id, ticker, analyzed_date, current_price, decision, scenario FROM watchlist_history "
+          "WHERE analyzed_date BETWEEN ? AND ? ORDER BY id",
+    "US": "SELECT id, ticker, analyzed_date, current_price, decision, scenario FROM us_watchlist_history "
+          "WHERE analyzed_date BETWEEN ? AND ? ORDER BY id",
+}
+_ENTRY_SQL = {
+    "KR": (("trading_history", "SELECT id, ticker, buy_date, buy_price, scenario FROM trading_history "
+                               "WHERE buy_date BETWEEN ? AND ? ORDER BY id"),
+           ("stock_holdings", "SELECT id, ticker, buy_date, buy_price, scenario FROM stock_holdings "
+                              "WHERE buy_date BETWEEN ? AND ? ORDER BY id")),
+    "US": (("us_trading_history", "SELECT id, ticker, buy_date, buy_price, scenario FROM us_trading_history "
+                                  "WHERE buy_date BETWEEN ? AND ? ORDER BY id"),
+           ("us_stock_holdings", "SELECT id, ticker, buy_date, buy_price, scenario FROM us_stock_holdings "
+                                 "WHERE buy_date BETWEEN ? AND ? ORDER BY id")),
 }
 
 
@@ -45,18 +58,12 @@ TABLES = {
 
 def _decisions(conn, market):
     rows = []
-    t = TABLES[market]
-    cur = conn.execute(
-        f"SELECT id, ticker, analyzed_date, current_price, decision, scenario FROM {t['reject']} "
-        "WHERE analyzed_date BETWEEN ? AND ? ORDER BY id", WINDOW)
-    for rid, ticker, at, price, decision, scenario in cur:
-        rows.append({"market": market, "kind": "rejected", "source": f"{t['reject']}#{rid}", "ticker": ticker,
+    reject_table = "watchlist_history" if market == "KR" else "us_watchlist_history"
+    for rid, ticker, at, price, decision, scenario in conn.execute(_REJECT_SQL[market], WINDOW):
+        rows.append({"market": market, "kind": "rejected", "source": f"{reject_table}#{rid}", "ticker": ticker,
                      "recorded_at": at, "price": price, "decision": decision, "scenario": scenario})
-    for table in t["entries"]:
-        cur = conn.execute(
-            f"SELECT id, ticker, buy_date, buy_price, scenario FROM {table} "
-            "WHERE buy_date BETWEEN ? AND ? ORDER BY id", WINDOW)
-        for rid, ticker, at, price, scenario in cur:
+    for table, sql in _ENTRY_SQL[market]:
+        for rid, ticker, at, price, scenario in conn.execute(sql, WINDOW):
             rows.append({"market": market, "kind": "entered", "source": f"{table}#{rid}", "ticker": ticker,
                          "recorded_at": at, "price": price, "decision": "entry", "scenario": scenario})
     return rows
