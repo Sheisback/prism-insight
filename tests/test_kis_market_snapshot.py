@@ -109,6 +109,53 @@ def test_rejected_chunk_retries_then_raises_with_kis_reason():
     assert len(client.calls) == 2
 
 
+class _FlakyClient(_Client):
+    """Raises transport errors first, like the 2026-09-29 14:49 KR afternoon run."""
+
+    def __init__(self, errors):
+        super().__init__()
+        self.errors = list(errors)
+
+    def _request(self, api_url, tr_id, params):
+        if self.errors:
+            self.calls.append((api_url, tr_id, params))
+            raise self.errors.pop(0)
+        return super()._request(api_url, tr_id, params)
+
+
+def test_transport_timeout_is_retried_like_a_rejected_chunk():
+    import requests
+
+    client = _FlakyClient([requests.exceptions.ReadTimeout("Read timed out. (read timeout=30)"),
+                           ConnectionResetError(104, "Connection reset by peer")])
+    frame = fetch_kis_intraday_snapshot(
+        ["005930"], client=client, min_stock_count=1, retry_wait_sec=0, request_interval_sec=0,
+    )
+    assert len(client.calls) == 3
+    assert frame.loc["005930", "Close"] == 1000
+
+
+def test_persistent_transport_failure_fails_closed_as_snapshot_error():
+    import requests
+
+    client = _FlakyClient([requests.exceptions.ConnectTimeout("handshake timed out")] * 3)
+    with pytest.raises(KisSnapshotError, match="ConnectTimeout"):
+        fetch_kis_intraday_snapshot(
+            ["005930"], client=client, min_stock_count=1,
+            max_attempts=3, retry_wait_sec=0, request_interval_sec=0,
+        )
+    assert len(client.calls) == 3
+
+
+def test_programming_errors_are_not_swallowed_as_transport_retries():
+    client = _FlakyClient([KeyError("bug")])
+    with pytest.raises(KeyError):
+        fetch_kis_intraday_snapshot(
+            ["005930"], client=client, min_stock_count=1, retry_wait_sec=0, request_interval_sec=0,
+        )
+    assert len(client.calls) == 1
+
+
 def test_small_requested_universe_is_refused_by_default():
     with pytest.raises(KisSnapshotError, match="universe too small"):
         fetch_kis_intraday_snapshot(["005930"], client=_Client(), request_interval_sec=0)
