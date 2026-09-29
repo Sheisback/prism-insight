@@ -29,6 +29,9 @@ LOOKBACK = 250
 ABOVE = 1.005
 NEAR = 0.01
 OUTCOME_SESSIONS = 10
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 KST = ZoneInfo("Asia/Seoul")
 NY = ZoneInfo("America/New_York")
 
@@ -157,7 +160,10 @@ def outcome(entry, target, stop, after):
 def _gate(scenario, entry, target, stop):
     from cores.buy_gate import evaluate_production_buy_gate
     rr = (target - entry) / (entry - stop) if target and stop and entry > stop else None
-    data = {**scenario, "decision": "entry", "target_price": target, "risk_reward_ratio": rr}
+    data = {**scenario, "decision": "entry", "target_price": target, "risk_reward_ratio": rr,
+            # Keep the scenario's own arithmetic consistent with the replaced target.
+            "expected_return_pct": (target / entry - 1) * 100 if target else None,
+            "expected_loss_pct": (1 - stop / entry) * 100 if stop else None}
     policy = scenario.get("regime_entry_policy") or {}
     pilot = isinstance(policy, dict) and policy.get("mode") == "rebound_pilot" and policy.get("position_fraction") == 0.5
     result = evaluate_production_buy_gate(
