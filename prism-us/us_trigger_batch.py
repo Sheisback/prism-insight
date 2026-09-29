@@ -1633,8 +1633,10 @@ def _load_screening_inputs(trade_date):
             for ticker, future in futures.items():
                 try:
                     info = future.result()
-                except Exception:
-                    continue
+                except Exception as exc:
+                    # Counted as metadata_unavailable below; never cached.
+                    logger.debug('Eligibility profile unavailable for %s: %s', ticker, type(exc).__name__)
+                    info = None
                 if isinstance(info, dict):
                     infos[ticker] = info
                     if info.get('quoteType') and info.get('exchange'):
