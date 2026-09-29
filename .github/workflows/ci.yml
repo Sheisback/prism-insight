@@ -55,7 +55,7 @@ jobs:
           python -m pytest tests/test_us_daily_cache.py tests/test_us_daily_cache_provider.py tests/test_us_daily_cache_batch.py -q
           python -m pytest tests/test_kr_full_batch_integration.py -q
           python -m pytest tests/test_us_full_batch_integration.py -q
-          python -m pytest tests/test_macro_mcp_app.py tests/test_chatgpt_proxy_body_limit.py tests/test_chatgpt_proxy_codex_passthrough.py \
+          python -m pytest tests/test_macro_mcp_app.py tests/test_chatgpt_proxy_body_limit.py tests/test_chatgpt_proxy_codex_passthrough.py tests/test_oauth_single_login_refresh.py \
             tests/test_validate_us_full_pipeline.py tests/test_market_report_singleflight.py \
             tests/test_macro_public_sources.py tests/test_runtime_cleanup.py \
             tests/test_nasdaq100_constituents.py tests/test_chatgpt_oauth/ \
