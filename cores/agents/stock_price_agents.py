@@ -56,6 +56,7 @@ def create_price_volume_analysis_agent(company_name, company_code, reference_dat
                         - Emphasize important information in **bold**
                         - Present major data summaries in table format
                         - Present key support/resistance levels, trading points, and other important price levels as specific figures
+                        - Do not present the intraday high or low of today's still-open session as a major resistance or support level; it has not been tested yet. If today's price has cleared an earlier high, present the next confirmed past high above it (looking beyond the last 20 sessions if needed) as resistance, or state 'no confirmed overhead resistance' when the confirmed data has none.
 
                         ## Precautions
                         - You must make a tool call
@@ -117,6 +118,7 @@ def create_price_volume_analysis_agent(company_name, company_code, reference_dat
                         - 중요 정보는 **굵은 글씨**로 강조
                         - 표 형식으로 주요 데이터 요약 제시
                         - 주요 지지선/저항선, 매매 포인트 등 중요 가격대는 구체적 수치로 제시
+                        - 조회 시점에 진행 중인 당일 봉의 장중 고가·저가는 아직 검증되지 않은 가격이므로 주요 저항선·지지선으로 제시하지 마십시오. 당일 가격이 기존 고점을 넘었다면 그 위의 확정된 과거 고점(최근 20관측일보다 긴 기간 포함)을 다음 저항으로 제시하고, 확정 자료에서 찾을 수 없으면 '확정된 상단 저항 없음'이라고 쓰십시오.
 
                         ## 주의사항
                         - 반드시 tool call을 해야 합니다
