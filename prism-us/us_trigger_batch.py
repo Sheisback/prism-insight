@@ -93,6 +93,16 @@ MARKET_CAP_MIN_COVERAGE = 0.8
 # screen is used only if it holds the index members it should hold.
 KIS_SHORTLIST_AMOUNT_FRACTION = 0.3
 KIS_SCREEN_MIN_INDEX_COVERAGE = 0.97
+# Eligibility metadata (#822): with the whole market priced, ~900 names clear the
+# floor and a sequential 300 s .info pass could not finish (2026-09-29: 145 names
+# excluded, alphabetically late). Classification fields rarely change, so they
+# are reused for 7 days; market cap comes from the KIS screen when present.
+METADATA_BUDGET_SECONDS = 300
+METADATA_WORKERS = 4
+ELIGIBILITY_CACHE_TTL = datetime.timedelta(days=7)
+ELIGIBILITY_CAP_TTL = datetime.timedelta(days=1)
+ELIGIBILITY_METADATA_FIELDS = ('quoteType', 'exchange', 'currency', 'longName', 'shortName', 'sector',
+                               'industry', 'fundFamily', 'legalType', 'category', 'marketCap')
 MARKET_CAP_MAX_WORKERS = 8
 
 _SNAPSHOT_NUMERIC_COLUMNS = ("Open", "High", "Low", "Close", "Volume", "Amount")
@@ -1441,6 +1451,41 @@ def _prioritized_universe(directory_symbols):
             + [s for s in symbols if s not in majors])
 
 
+def _eligibility_cache_path():
+    """Runtime cache path; US_ELIGIBILITY_CACHE_PATH overrides, empty disables."""
+    raw = os.getenv('US_ELIGIBILITY_CACHE_PATH')
+    if raw is None:
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        return os.path.join(root, 'runtime', 'us_eligibility_metadata.json')
+    return raw.strip() or None
+
+
+def _load_eligibility_cache(path):
+    if not path:
+        return {}
+    try:
+        with open(path, encoding='utf-8') as handle:
+            data = json.load(handle)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_eligibility_cache(path, cache):
+    """Atomic best-effort write; a failure only costs the next run a refetch."""
+    if not path:
+        return
+    import tempfile
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        fd, temporary = tempfile.mkstemp(prefix='.us-eligibility-', dir=os.path.dirname(path))
+        with os.fdopen(fd, 'w', encoding='utf-8') as handle:
+            json.dump(cache, handle, sort_keys=True)
+        os.replace(temporary, path)
+    except OSError as exc:
+        logger.warning('Eligibility metadata cache not saved: %s', type(exc).__name__)
+
+
 def _kis_request():
     """Quotation-only KIS request function for the primary US account."""
     try:
@@ -1546,23 +1591,74 @@ def _load_screening_inputs(trade_date):
                           if float(current.at[ticker, 'Amount']) >= MIN_TRADING_VALUE]
     reasons['missing_snapshot_pair'] += len(tickers) - len(paired)
     reasons['below_liquidity_floor'] += len(paired) - len(liquidity_eligible)
-    for ticker in liquidity_eligible:
-        if time.monotonic() - started >= 300:
+    # Most liquid names first, so a budget stop can only drop the thinnest ones.
+    ordered = sorted(liquidity_eligible, key=lambda t: -float(current.at[t, 'Amount']))
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cache_path = _eligibility_cache_path()
+    cache = _load_eligibility_cache(cache_path)
+    kis_caps = screen['MarketCap'] if screen is not None and 'MarketCap' in screen else None
+
+    def cached_info(ticker):
+        entry = cache.get(ticker)
+        try:
+            age = now - datetime.datetime.fromisoformat(entry['fetched_at'])
+        except (KeyError, TypeError, ValueError):
+            return None
+        if not datetime.timedelta(0) <= age <= ELIGIBILITY_CACHE_TTL:
+            return None
+        info = {key: entry.get(key) for key in ELIGIBILITY_METADATA_FIELDS}
+        kis_cap = kis_caps.get(ticker) if kis_caps is not None else None
+        if kis_cap is not None and math.isfinite(float(kis_cap)) and float(kis_cap) > 0:
+            info['marketCap'] = float(kis_cap)      # same-session cap from KIS
+        elif age > ELIGIBILITY_CAP_TTL:
+            return None                             # no fresh cap source
+        return info
+
+    infos, to_fetch, exhausted = {}, [], set()
+    for ticker in ordered:
+        info = cached_info(ticker)
+        if info is None:
+            to_fetch.append(ticker)
+        else:
+            infos[ticker] = info
+    cache_hits = len(infos)
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=METADATA_WORKERS) as pool:
+        for offset in range(0, len(to_fetch), METADATA_WORKERS):
+            batch = to_fetch[offset:offset + METADATA_WORKERS]
+            if time.monotonic() - started >= METADATA_BUDGET_SECONDS:
+                exhausted.update(to_fetch[offset:])
+                break
+            futures = {ticker: pool.submit(lambda t: yf.Ticker(t).info, ticker) for ticker in batch}
+            for ticker, future in futures.items():
+                try:
+                    info = future.result()
+                except Exception as exc:
+                    # Counted as metadata_unavailable below; never cached.
+                    logger.debug('Eligibility profile unavailable for %s: %s', ticker, type(exc).__name__)
+                    info = None
+                if isinstance(info, dict):
+                    infos[ticker] = info
+                    if info.get('quoteType') and info.get('exchange'):
+                        cache[ticker] = {**{key: info.get(key) for key in ELIGIBILITY_METADATA_FIELDS},
+                                         'fetched_at': now.isoformat()}
+    for ticker in ordered:
+        if ticker in exhausted:
             reasons['metadata_budget_exhausted'] += 1
             continue
         checked += 1
-        try:
-            info = yf.Ticker(ticker).info
-            reason = eligibility_reason(info, minimum)
-            if isinstance(info, dict) and any(info.get(key) is None for key in (
-                    'quoteType', 'exchange', 'currency', 'marketCap')):
-                reason = 'missing_metadata'
-        except Exception:
+        info = infos.get(ticker)
+        if info is None:
             reason = 'metadata_unavailable'
+        else:
+            reason = eligibility_reason(info, minimum)
+            if any(info.get(key) is None for key in ('quoteType', 'exchange', 'currency', 'marketCap')):
+                reason = 'missing_metadata'
         if reason:
             reasons[reason] += 1
         else:
             kept.append(ticker)
+    _save_eligibility_cache(cache_path, cache)
     diagnostic = {
         'mode': mode, 'min_market_cap_usd': minimum,
         'directory_counts': universe.counts,
@@ -1572,6 +1668,7 @@ def _load_screening_inputs(trade_date):
         'liquidity_floor_usd': MIN_TRADING_VALUE,
         'liquidity_eligible_count': len(liquidity_eligible),
         'metadata_checked_count': checked, 'eligible_count': len(kept),
+        'metadata_cache_hits': cache_hits, 'metadata_fetched': len(to_fetch) - len(exhausted),
         'exclusion_reasons': dict(reasons),
         'metadata_status': ('PARTIAL' if any(reasons[key] for key in (
             'metadata_unavailable', 'metadata_budget_exhausted', 'missing_metadata',

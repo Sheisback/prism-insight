@@ -30,6 +30,10 @@ from messaging.publish_guard import DISABLE_ENV_VAR
 # Set at import time — before pytest imports a single test module, and before
 # any of them can import a trading agent and trigger load_dotenv().
 os.environ[DISABLE_ENV_VAR] = "1"
+# Never write the runtime eligibility cache or reach KIS from the default test run;
+# tests that exercise either opt in explicitly.
+os.environ.setdefault("US_ELIGIBILITY_CACHE_PATH", "")
+os.environ.setdefault("US_SCREENING_KIS_SHORTLIST", "false")
 
 
 # ---------------------------------------------------------------------------
