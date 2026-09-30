@@ -3,27 +3,26 @@ import json
 
 import pytest
 
-from cores.llm import codex_oauth_fast_backend as backend
 from cores.llm.codex_oauth_fast_backend import _command, codex_service_tier
 
 
-def _write_session(home, email):
-    claims = {"https://api.openai.com/profile": {"email": email}}
-    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
-    auth = home / ".config" / "prism-insight" / "chatgpt_auth.json"
-    auth.parent.mkdir(parents=True)
-    auth.write_text(json.dumps({"access_token": f"h.{payload}.s"}))
-
-
 @pytest.fixture
-def home(tmp_path, monkeypatch):
-    monkeypatch.setattr(backend.Path, "home", classmethod(lambda cls: tmp_path))
-    monkeypatch.delenv("PRISM_CODEX_SERVICE_TIER", raising=False)
-    monkeypatch.delenv("PRISM_CODEX_STANDARD_TIER_ACCOUNTS", raising=False)
-    return tmp_path
+def session(tmp_path, monkeypatch):
+    """Point the active-account lookup at a temp OAuth file for ``email``."""
+    for key in ("PRISM_CODEX_SERVICE_TIER", "PRISM_CODEX_TIER_BY_ACCOUNT"):
+        monkeypatch.delenv(key, raising=False)
+    auth = tmp_path / "chatgpt_auth.json"
+    monkeypatch.setenv("PRISM_CODEX_AUTH_FILE", str(auth))
+
+    def login(email):
+        claims = {"https://api.openai.com/profile": {"email": email}}
+        payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+        auth.write_text(json.dumps({"access_token": f"h.{payload}.s"}))
+
+    return login
 
 
-def test_fast_command_is_unchanged(home):
+def test_fast_command_is_unchanged(session):
     cmd = _command("codex", "gpt-6-astra", "kr_trading", "medium")
     assert 'service_tier="fast"' in cmd and "features.fast_mode=true" in cmd
     assert "features.fast_mode=false" not in cmd
@@ -36,39 +35,38 @@ def test_standard_command_disables_fast_mode():
     assert cmd[-2:] == ["--json", "-"]
 
 
-def test_auto_defaults_to_fast(home):
-    _write_session(home, "a@example.com")
+def test_default_is_fast(session):
+    session("a@example.com")
     assert codex_service_tier() == "fast"
 
 
-def test_auto_listed_account_runs_standard(home, monkeypatch):
-    _write_session(home, "Slow@Example.com")
-    monkeypatch.setenv("PRISM_CODEX_STANDARD_TIER_ACCOUNTS", "other@example.com, slow@example.com")
+@pytest.mark.parametrize("value", ["standard", " STANDARD ", "fast"])
+def test_global_setting(session, monkeypatch, value):
+    monkeypatch.setenv("PRISM_CODEX_SERVICE_TIER", value)
+    assert codex_service_tier() == value.strip().lower()
+
+
+def test_account_mapping_overrides_default(session, monkeypatch):
+    session("Plus@Example.com")
+    monkeypatch.setenv("PRISM_CODEX_TIER_BY_ACCOUNT", "pro@example.com=fast,plus@example.com=standard")
     assert codex_service_tier() == "standard"
+    monkeypatch.setenv("PRISM_CODEX_SERVICE_TIER", "standard")
+    session("pro@example.com")
+    assert codex_service_tier() == "fast"
 
 
-def test_auto_unlisted_or_unreadable_account_stays_fast(home, monkeypatch):
-    monkeypatch.setenv("PRISM_CODEX_STANDARD_TIER_ACCOUNTS", "slow@example.com")
+def test_unmapped_or_unknown_account_keeps_default(session, monkeypatch):
+    monkeypatch.setenv("PRISM_CODEX_TIER_BY_ACCOUNT", "plus@example.com=standard")
     assert codex_service_tier() == "fast"  # no session file
-    _write_session(home, "fast@example.com")
+    session("other@example.com")
     assert codex_service_tier() == "fast"
 
 
-@pytest.mark.parametrize("forced", ["fast", "standard", " STANDARD "])
-def test_forced_tier_overrides_account(home, monkeypatch, forced):
-    _write_session(home, "slow@example.com")
-    monkeypatch.setenv("PRISM_CODEX_STANDARD_TIER_ACCOUNTS", "slow@example.com")
-    monkeypatch.setenv("PRISM_CODEX_SERVICE_TIER", forced)
-    assert codex_service_tier() == forced.strip().lower()
-
-
-def test_invalid_forced_value_falls_back_to_auto(home, monkeypatch):
-    _write_session(home, "slow@example.com")
-    monkeypatch.setenv("PRISM_CODEX_STANDARD_TIER_ACCOUNTS", "slow@example.com")
+def test_invalid_value_falls_back_to_fast(session, monkeypatch):
     monkeypatch.setenv("PRISM_CODEX_SERVICE_TIER", "turbo")
-    assert codex_service_tier() == "standard"
+    assert codex_service_tier() == "fast"
 
 
-def test_command_resolves_tier_from_env_when_not_given(home, monkeypatch):
+def test_command_resolves_tier_when_not_given(session, monkeypatch):
     monkeypatch.setenv("PRISM_CODEX_SERVICE_TIER", "standard")
     assert "features.fast_mode=false" in _command("codex", "gpt-6-astra", "kr_trading", "medium")

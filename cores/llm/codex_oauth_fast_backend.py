@@ -7,7 +7,6 @@ rules.  Trading callers must retain an existing backend as fallback.
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import logging
 import os
@@ -31,6 +30,8 @@ from prism_core.codex_config import (
     CodexFastError as CodexFastError,
     SUPPORTED_MODELS as SUPPORTED_MODELS,
     SUPPORTED_REASONING_EFFORTS as SUPPORTED_REASONING_EFFORTS,
+    active_oauth_email,
+    effort_for_account,
     validate_timeout as validate_timeout,
 )
 
@@ -231,43 +232,24 @@ def _resolve_codex_executable(candidate: str) -> str:
     return str(executable)
 
 
-def _active_oauth_email() -> str | None:
-    """Email claim of the shared OAuth session the Codex CLI uses via the proxy."""
-    # Same path as cores.chatgpt_proxy.constants.AUTH_FILE; not imported because
-    # prism-us loads this module where `cores` resolves to prism-us/cores.
-    auth_file = Path.home() / ".config" / "prism-insight" / "chatgpt_auth.json"
-    try:
-        token = json.loads(auth_file.read_text())["access_token"]
-        payload = token.split(".")[1]
-        payload += "=" * (-len(payload) % 4)
-        claims = json.loads(base64.urlsafe_b64decode(payload))
-        email = claims.get("https://api.openai.com/profile", {}).get("email")
-    except Exception:  # noqa: BLE001 - unknown account keeps the fast tier
-        return None
-    return email.strip().lower() if isinstance(email, str) else None
-
-
 def codex_service_tier() -> Literal["fast", "standard"]:
     """Service tier for Codex trading calls, read per call so ops can flip it live.
 
-    PRISM_CODEX_SERVICE_TIER=fast|standard forces the tier. Unset or ``auto``
-    runs fast unless the active OAuth account is listed in
-    PRISM_CODEX_STANDARD_TIER_ACCOUNTS (comma-separated emails): fast (sent
-    upstream as service_tier "priority") drains a small plan's 5-hour window.
+    PRISM_CODEX_SERVICE_TIER (fast|standard, default fast) is the default;
+    PRISM_CODEX_TIER_BY_ACCOUNT (``a@x=standard,b@y=fast``) overrides it for the
+    active OAuth login, like PRISM_CODEX_EFFORT_BY_ACCOUNT. Fast is sent upstream
+    as service_tier "priority" and drains a small plan's 5-hour window quickly.
     """
-    forced = os.getenv("PRISM_CODEX_SERVICE_TIER", "auto").strip().lower()
-    if forced in ("fast", "standard"):
-        return forced
-    if forced != "auto":
-        logger.warning("[CODEX_FAST] ignoring invalid PRISM_CODEX_SERVICE_TIER; using auto")
-    listed = {
-        e.strip().lower()
-        for e in os.getenv("PRISM_CODEX_STANDARD_TIER_ACCOUNTS", "").split(",")
-        if e.strip()
-    }
-    if listed and _active_oauth_email() in listed:
-        return "standard"
-    return "fast"
+    tier = os.getenv("PRISM_CODEX_SERVICE_TIER", "fast")
+    mapping = os.getenv("PRISM_CODEX_TIER_BY_ACCOUNT")
+    by_account = effort_for_account(
+        mapping, active_oauth_email(os.getenv("PRISM_CODEX_AUTH_FILE")) if mapping else None
+    )
+    tier = (by_account if by_account is not None else tier).strip().lower()
+    if tier not in ("fast", "standard"):
+        logger.warning("[CODEX_FAST] invalid Codex service tier setting; using fast")
+        return "fast"
+    return tier
 
 
 def _command(
