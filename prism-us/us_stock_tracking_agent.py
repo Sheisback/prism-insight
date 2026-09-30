@@ -134,6 +134,7 @@ sys.modules[_codex_spec.name] = _codex_mod
 _codex_spec.loader.exec_module(_codex_mod)  # type: ignore[union-attr]
 generate_codex_fast = _codex_mod.generate_codex_fast
 generate_codex_fast_async = _codex_mod.generate_codex_fast_async
+codex_service_tier = _codex_mod.codex_service_tier
 del _ilu, _spec, _mod, _codex_spec, _codex_mod
 
 # Import US-specific modules
@@ -2534,8 +2535,9 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
                     settings = resolve_sell_codex_settings()
                     logger.info(
                         "[CODEX_FAST] US sell requested_model=%s requested_effort=%s "
-                        "requested_tier=fast timeout_s=%s ticker=%s",
-                        settings.model, settings.reasoning_effort, settings.timeout, ticker or "?",
+                        "requested_tier=%s timeout_s=%s ticker=%s",
+                        settings.model, settings.reasoning_effort, codex_service_tier(),
+                        settings.timeout, ticker or "?",
                     )
                     codex_result = await generate_codex_fast_async(
                         system_prompt=instruction,
