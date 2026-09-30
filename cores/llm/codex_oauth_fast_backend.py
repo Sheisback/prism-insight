@@ -275,7 +275,7 @@ def _command(
     model: str,
     mcp_profile: McpProfile | None,
     reasoning_effort: str | None = None,
-    fast_tier: bool = True,
+    fast_tier: bool | None = None,
 ) -> list[str]:
     if model not in SUPPORTED_MODELS:
         raise CodexFastError("Unsupported Codex model")
@@ -283,6 +283,8 @@ def _command(
         raise CodexFastError("Unsupported Codex MCP profile")
     if reasoning_effort is not None and reasoning_effort not in SUPPORTED_REASONING_EFFORTS:
         raise CodexFastError("Unsupported Codex reasoning effort")
+    if fast_tier is None:
+        fast_tier = codex_service_tier() == "fast"
     command = [
         codex_bin,
         "exec",
@@ -431,7 +433,6 @@ def generate_codex_fast(
         raise CodexFastError("Codex timeout must be a finite number in (0, 600]") from None
     telemetry_started = time.monotonic()
     request_id = uuid.uuid4().hex
-    service_tier = codex_service_tier()
     pump = None
 
     def log_event(category: str, returncode: int | None = None, *,
@@ -440,7 +441,7 @@ def generate_codex_fast(
         # include exception text, prompts, streams, paths, or MCP payloads.
         logger.log(
             logging.WARNING if category in {"timeout", "cancelled", "launch_error", "process_io_error", "nonzero_exit", "missing_final", "missing_successful_mcp", "output_limit", "cleanup_unconfirmed", "unsupported_platform", "incomplete_stdin"} else logging.INFO,
-            "[CODEX_FAST] category=%s model=%s effort=%s tier=%s profile=%s "
+            "[CODEX_FAST] category=%s model=%s effort=%s profile=%s "
             "timeout_s=%g elapsed_s=%.3f rc=%s request_id=%s last_stage=%s "
             "mcp_started=%d mcp_completed=%d mcp_errors=%d mcp_pending=%d "
             "server=%s tool=%s tool_s=%.3f stdin_total_bytes=%d stdin_sent_bytes=%d stdin_closed=%d",
@@ -449,7 +450,6 @@ def generate_codex_fast(
             reasoning_effort if reasoning_effort in SUPPORTED_REASONING_EFFORTS else (
                 "default" if reasoning_effort is None else "invalid"
             ),
-            service_tier,
             mcp_profile if mcp_profile in SUPPORTED_MCP_PROFILES else (
                 "none" if mcp_profile is None else "invalid"
             ),
@@ -505,8 +505,7 @@ def generate_codex_fast(
             if _diagnostic_state is not None:
                 _diagnostic_state.phase = "LAUNCH_ATTEMPTED_UNKNOWN"
             process = subprocess.Popen(  # nosec B603
-                _command(executable, model, mcp_profile, reasoning_effort,
-                         fast_tier=service_tier == "fast"),  # nosemgrep
+                _command(executable, model, mcp_profile, reasoning_effort),  # nosemgrep
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

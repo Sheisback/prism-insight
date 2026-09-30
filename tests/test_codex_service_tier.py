@@ -23,7 +23,7 @@ def home(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_fast_command_is_unchanged():
+def test_fast_command_is_unchanged(home):
     cmd = _command("codex", "gpt-6-astra", "kr_trading", "medium")
     assert 'service_tier="fast"' in cmd and "features.fast_mode=true" in cmd
     assert "features.fast_mode=false" not in cmd
@@ -67,3 +67,8 @@ def test_invalid_forced_value_falls_back_to_auto(home, monkeypatch):
     monkeypatch.setenv("PRISM_CODEX_STANDARD_TIER_ACCOUNTS", "slow@example.com")
     monkeypatch.setenv("PRISM_CODEX_SERVICE_TIER", "turbo")
     assert codex_service_tier() == "standard"
+
+
+def test_command_resolves_tier_from_env_when_not_given(home, monkeypatch):
+    monkeypatch.setenv("PRISM_CODEX_SERVICE_TIER", "standard")
+    assert "features.fast_mode=false" in _command("codex", "gpt-6-astra", "kr_trading", "medium")
