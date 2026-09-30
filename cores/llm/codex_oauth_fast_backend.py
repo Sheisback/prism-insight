@@ -7,6 +7,7 @@ rules.  Trading callers must retain an existing backend as fallback.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -230,11 +231,51 @@ def _resolve_codex_executable(candidate: str) -> str:
     return str(executable)
 
 
+def _active_oauth_email() -> str | None:
+    """Email claim of the shared OAuth session the Codex CLI uses via the proxy."""
+    # Same path as cores.chatgpt_proxy.constants.AUTH_FILE; not imported because
+    # prism-us loads this module where `cores` resolves to prism-us/cores.
+    auth_file = Path.home() / ".config" / "prism-insight" / "chatgpt_auth.json"
+    try:
+        token = json.loads(auth_file.read_text())["access_token"]
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(payload))
+        email = claims.get("https://api.openai.com/profile", {}).get("email")
+    except Exception:  # noqa: BLE001 - unknown account keeps the fast tier
+        return None
+    return email.strip().lower() if isinstance(email, str) else None
+
+
+def codex_service_tier() -> Literal["fast", "standard"]:
+    """Service tier for Codex trading calls, read per call so ops can flip it live.
+
+    PRISM_CODEX_SERVICE_TIER=fast|standard forces the tier. Unset or ``auto``
+    runs fast unless the active OAuth account is listed in
+    PRISM_CODEX_STANDARD_TIER_ACCOUNTS (comma-separated emails): fast (sent
+    upstream as service_tier "priority") drains a small plan's 5-hour window.
+    """
+    forced = os.getenv("PRISM_CODEX_SERVICE_TIER", "auto").strip().lower()
+    if forced in ("fast", "standard"):
+        return forced
+    if forced != "auto":
+        logger.warning("[CODEX_FAST] ignoring invalid PRISM_CODEX_SERVICE_TIER; using auto")
+    listed = {
+        e.strip().lower()
+        for e in os.getenv("PRISM_CODEX_STANDARD_TIER_ACCOUNTS", "").split(",")
+        if e.strip()
+    }
+    if listed and _active_oauth_email() in listed:
+        return "standard"
+    return "fast"
+
+
 def _command(
     codex_bin: str,
     model: str,
     mcp_profile: McpProfile | None,
     reasoning_effort: str | None = None,
+    fast_tier: bool = True,
 ) -> list[str]:
     if model not in SUPPORTED_MODELS:
         raise CodexFastError("Unsupported Codex model")
@@ -250,8 +291,10 @@ def _command(
         "--skip-git-repo-check",
         "--ignore-rules",
         "--model", model,
-        "-c", 'service_tier="fast"',
-        "-c", "features.fast_mode=true",
+        # config.toml enables fast; disabling the feature drops service_tier
+        # from the request entirely (standard processing).
+        *(("-c", 'service_tier="fast"', "-c", "features.fast_mode=true")
+          if fast_tier else ("-c", "features.fast_mode=false")),
         "--json",
         "-",
     ]
@@ -388,6 +431,7 @@ def generate_codex_fast(
         raise CodexFastError("Codex timeout must be a finite number in (0, 600]") from None
     telemetry_started = time.monotonic()
     request_id = uuid.uuid4().hex
+    service_tier = codex_service_tier()
     pump = None
 
     def log_event(category: str, returncode: int | None = None, *,
@@ -396,7 +440,7 @@ def generate_codex_fast(
         # include exception text, prompts, streams, paths, or MCP payloads.
         logger.log(
             logging.WARNING if category in {"timeout", "cancelled", "launch_error", "process_io_error", "nonzero_exit", "missing_final", "missing_successful_mcp", "output_limit", "cleanup_unconfirmed", "unsupported_platform", "incomplete_stdin"} else logging.INFO,
-            "[CODEX_FAST] category=%s model=%s effort=%s profile=%s "
+            "[CODEX_FAST] category=%s model=%s effort=%s tier=%s profile=%s "
             "timeout_s=%g elapsed_s=%.3f rc=%s request_id=%s last_stage=%s "
             "mcp_started=%d mcp_completed=%d mcp_errors=%d mcp_pending=%d "
             "server=%s tool=%s tool_s=%.3f stdin_total_bytes=%d stdin_sent_bytes=%d stdin_closed=%d",
@@ -405,6 +449,7 @@ def generate_codex_fast(
             reasoning_effort if reasoning_effort in SUPPORTED_REASONING_EFFORTS else (
                 "default" if reasoning_effort is None else "invalid"
             ),
+            service_tier,
             mcp_profile if mcp_profile in SUPPORTED_MCP_PROFILES else (
                 "none" if mcp_profile is None else "invalid"
             ),
@@ -460,7 +505,8 @@ def generate_codex_fast(
             if _diagnostic_state is not None:
                 _diagnostic_state.phase = "LAUNCH_ATTEMPTED_UNKNOWN"
             process = subprocess.Popen(  # nosec B603
-                _command(executable, model, mcp_profile, reasoning_effort),  # nosemgrep
+                _command(executable, model, mcp_profile, reasoning_effort,
+                         fast_tier=service_tier == "fast"),  # nosemgrep
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

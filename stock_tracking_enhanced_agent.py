@@ -22,7 +22,7 @@ import os
 import traceback
 
 from mcp_agent.workflows.llm.augmented_llm import RequestParams
-from cores.llm.codex_oauth_fast_backend import generate_codex_fast_async
+from cores.llm.codex_oauth_fast_backend import codex_service_tier, generate_codex_fast_async
 from prism_core.codex_config import resolve_sell_codex_settings
 from cores.llm.openai_responses_llm import OpenAIResponsesLLM as OpenAIAugmentedLLM
 
@@ -1580,8 +1580,9 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                     settings = resolve_sell_codex_settings()
                     logger.info(
                         "[CODEX_FAST] KR sell requested_model=%s requested_effort=%s "
-                        "requested_tier=fast timeout_s=%s ticker=%s",
-                        settings.model, settings.reasoning_effort, settings.timeout, ticker or "?",
+                        "requested_tier=%s timeout_s=%s ticker=%s",
+                        settings.model, settings.reasoning_effort, codex_service_tier(),
+                        settings.timeout, ticker or "?",
                     )
                     codex_result = await generate_codex_fast_async(
                         system_prompt=instruction,

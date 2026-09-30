@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 from mcp_agent.app import MCPApp
 from mcp_agent.workflows.llm.augmented_llm import RequestParams
 from cores.llm.openai_responses_llm import OpenAIResponsesLLM as OpenAIAugmentedLLM
-from cores.llm.codex_oauth_fast_backend import generate_codex_fast_async
+from cores.llm.codex_oauth_fast_backend import codex_service_tier, generate_codex_fast_async
 from prism_core.codex_config import resolve_buy_codex_settings
 from prism_core.isolated_agent_runtime import (
     prepare_isolated_runtime, configured_mcp_app, attach_isolated_llm,
@@ -1303,11 +1303,12 @@ class StockTrackingAgent:
                     )
                     logger.info(
                         "[CODEX_FAST] KR scenario ticker=%s model=%s effort=%s "
-                        "service_tier=fast timeout=%s latency_s=%.2f "
+                        "service_tier=%s timeout=%s latency_s=%.2f "
                         "parse_ok=%s mcp_calls=%s",
                         ticker or "?",
                         settings.model,
                         settings.reasoning_effort or "model_default",
+                        codex_service_tier(),
                         settings.timeout,
                         codex_result.latency_s,
                         scenario_json is not None,
